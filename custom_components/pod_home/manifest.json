@@ -1,0 +1,13 @@
+{
+  "domain": "pod_home",
+  "name": "Pod Home",
+  "codeowners": ["@jeverley"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/jeverley/ha-pod-home",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/jeverley/ha-pod-home/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

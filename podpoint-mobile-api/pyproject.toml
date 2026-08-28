@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "podpoint-mobile-api"
+version = "0.1.0"
+description = "Async client for Pod Point's mobile-api.pod-point.com backend (the API behind the Pod Home app) - Firebase email/password auth plus read-only endpoints."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "aiohttp>=3.9",
+]
+
+[project.urls]
+Homepage = "https://github.com/jeverley/ha-pod-home"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+podpoint_mobile_api = ["py.typed"]

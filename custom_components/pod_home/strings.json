@@ -1,0 +1,42 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Pod Home",
+        "description": "Enter the email and password you use to sign in to the Pod Home app.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect to Pod Home",
+        "description": "Your Pod Home sign-in needs to be renewed. Enter your current password.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Sign-in failed. Check your email and password."
+    },
+    "abort": {
+      "already_configured": "This Pod Home account is already configured.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "status": { "name": "Status" },
+      "last_charge_duration": { "name": "Last Charge Duration" },
+      "last_charge_energy": { "name": "Last Charge Energy" },
+      "last_charge_cost": { "name": "Last Charge Cost" },
+      "energy_month": { "name": "Energy This Month" },
+      "cost_month": { "name": "Cost This Month" }
+    },
+    "binary_sensor": {
+      "connectivity": { "name": "Connectivity" },
+      "cable_connected": { "name": "Cable Status" }
+    }
+  }
+}
