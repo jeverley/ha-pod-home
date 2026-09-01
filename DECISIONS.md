@@ -2027,3 +2027,27 @@ lag on Pod Point's backend (the schedule plan not being regenerated instantly on
 not a bug in `calendar.py`'s rendering of whatever `smart_schedule_windows` the API currently
 returns - no code change made. Not confirmed how long the lag lasts or whether a manual refresh
 speeds it up; noted here as an observed real-account quirk rather than investigated further.
+
+## HACS packaging + README rewrite
+
+`hacs.json` added (minimal shape: `name` + `render_readme`) - no `homeassistant` minimum-version
+key set, since no real floor has ever been tested against; no `country`/`zip_release` fields,
+neither applies. `.github/workflows/validate.yml` added running `hacs/action` and
+`home-assistant/actions/hassfest`, matching what HACS's own default-repository validation runs -
+this repo isn't on that list yet, but the workflow catches the same class of manifest/hacs.json
+mistakes early regardless. LICENSE already existed from before this session.
+
+README.md rewritten from dev-notes into end-user documentation (installation via HACS custom
+repository or manual copy, setup steps, the full current entity list, Energy Dashboard and
+Charging Mode guidance, a "Known limitations" section). Confirmed while writing the installation
+section that manual/HACS install genuinely needs no separate `pip install` step: all three
+`podpoint_mobile_api` imports in the shipped integration (`__init__.py`, `config_flow.py`,
+`coordinator.py`) are relative (`from .podpoint_mobile_api import ...`), resolving to the vendored
+copy under `custom_components/pod_home/podpoint_mobile_api/`, not the standalone package -
+`manifest.json`'s empty `requirements` was previously documented (old README) as meaning HA
+"won't auto-install the package... unless it's manually pip-installed first," which was already
+wrong by the time that sentence was read again now - the vendoring makes the integration
+self-contained. Old dev-notes README also claimed charge-overrides had "produced no reaction
+until the charger's own next check-in" as an unqualified statement; kept that pull-based/~5-minute
+latency behaviour in the new README's "Known limitations" section, since it's still accurate and
+relevant to the now-implemented boost buttons.

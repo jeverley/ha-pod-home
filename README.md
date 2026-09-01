@@ -1,88 +1,106 @@
-# Pod Home (Home Assistant integration)
+# Pod Home
 
-A clean-slate Home Assistant integration for Pod Point EV chargers, built against the new
-`mobile-api.pod-point.com` backend (the one the "Pod Home" app, 2.6.4+, uses) rather than the
-legacy `api.pod-point.com/v4` API that the older
+A Home Assistant custom integration for Pod Point EV chargers, built against the same
+`mobile-api.pod-point.com` backend (Firebase auth) the official **Pod Home** app uses - not the
+older `api.pod-point.com/v4` API the community
 [pod-point-home-assistant-component](https://github.com/mattrayner/pod-point-home-assistant-component)
-targets.
+targets. A clean rewrite for that newer backend, not a patch to the older integration.
 
-## Status: quality-scale fixes + Energy Dashboard sensors done, first real-HA pass underway
+## Requirements
 
-The API/auth layer has been exercised successfully against a real account multiple times,
-including a zero-activity same-day `charge-statistics` range and `GET /users` for the account
-currency. The integration has now also run inside a real Home Assistant instance for the first
-time - see [`PLAN.md`](PLAN.md) for what that pass has and hasn't covered so far.
+- A Pod Point account with the email/password you use to sign in to the Pod Home app.
+- At least one Pod Point charger on that account.
 
-What's implemented, all built from **live-confirmed** endpoint shapes:
+## Installation
 
-- Firebase email/password auth with automatic token refresh, and a read-only API client for
-  chargers list, connectivity status, charges (session history), tariffs, manual schedules,
-  security logs, and the account's user/balance profile (for currency) - both live in their own
-  standalone package, [`podpoint-mobile-api/`](podpoint-mobile-api/), with zero Home Assistant
-  dependency (`pip install -e podpoint-mobile-api` to use it locally). `custom_components/pod_home/`
-  depends on it like any other library, the same pattern platinum-tier integrations with a real
-  API surface use (e.g. `ohme` on PyPI).
-- A `DataUpdateCoordinator` (`coordinator.py`) that polls chargers + connectivity status +
-  recent charges + month-to-date charge stats, with an **adaptive interval** (60s right after
-  any observed activity, backing off to 300s - the same default the legacy integration uses -
-  once quiet, so idle-time request volume doesn't increase over the established baseline; see
-  coordinator.py's FAST/SLOW_POLL_INTERVAL comments for the live measurements behind this),
-  deduped non-fatal logging, and reactive entity creation for a charger added to the account
-  mid-runtime.
-- Sensors: Status, Last Charge Duration/Energy/Cost, **Energy This Month / Cost This Month**,
-  Electricity Rate (current £/kWh from the account's tariff schedule).
-- Binary sensors: Connectivity (confirmed signal, with `last_seen` as an attribute), Cable
-  Status (derived from `chargingState`, confirmed live).
-- A Firmware **Update** entity - see "Known gaps" for a caveat on what "update available"
-  actually means here.
-- **A linked vehicle** (via Enode, when one's connected to your Pod Point account) gets its own
-  device: Battery Level, Range, Odometer, Ready By sensors and a Charging binary sensor.
-- A config flow (email/password, reauth support) and `diagnostics.py`.
+### HACS
 
-**Energy Dashboard**: add **Energy This Month** / **Cost This Month** to Settings → Dashboards →
-Energy. **Don't** add Last Charge Energy/Cost there - those are per-session snapshots that jump
-between arbitrary totals, not a monotonic series. Energy This Month uses
-`state_class: total_increasing` (energy can only accumulate); Cost This Month uses
-`state_class: total` with an explicit `last_reset` (HA core doesn't permit `total_increasing` on
-`device_class: monetary`, since a monetary value could legitimately fall). Both reset
-predictably each calendar month, in the charger's own local timezone.
+1. HACS → Integrations → ⋮ → **Custom repositories** → add this repository URL, category
+   **Integration**.
+2. Install **Pod Home**, then restart Home Assistant.
 
-## Known gaps / deliberately deferred
+### Manual
 
-- **Charge now / stop charge now** and **remote cable lock** are not implemented. Both are
-  *write* endpoints (`/chargers/{ppid}/charge-overrides`, `/remote-lock/{ppid}`) with real
-  physical side effects on the charger, and haven't been tested live yet. Add them once you're
-  ready to test against a real charger and know what each call will actually do. **Confirmed
-  live: the cloud can't push to the charger at all** - a charge-override issued via the app
-  produced no reaction until the charger's own next check-in. Commands are pull-based (the
-  charger fetches pending actions when it calls home), so expect these to inherit an
-  up-to-~5-minute latency between issuing them and them actually taking effect, regardless of
-  how the integration polls - set that expectation up front when building these.
-- **Charge Mode / Smart Charging switch** - the old integration's manual/smart toggle doesn't
-  have a wired-up new-API equivalent yet, though the read side is now confirmed live:
-  `delegatedControl.status` (`/chargers`), `/smart-charging/delegated-controls/{ppid}/preferences`
-  (`chargingStrategy`/`maxPrice`), and `/chargers/{ppid}/smart-schedules/active` (a real
-  plugged-in/paused/charging schedule, with tariff-rate-tagged windows) are all real, readable
-  shapes. Write shape for changing the mode is still unconfirmed.
-- **Dynamic devices is code-reviewed only** - a charger added to the account should get
-  entities without an HA restart, but there's no second charger on the test account to actually
-  prove that live.
-- **Firmware Update entity's `latest_version` is a placeholder, not a real version, when an
-  update is pending** - `isUpdateAvailable` is a plain boolean; only the "no update" response
-  shape has been seen live, and no field carrying an actual target version string has been
-  identified. See `DECISIONS.md` for the compromise this entity makes.
-- **`manifest.json`'s `requirements` is deliberately empty** - `podpoint-mobile-api` isn't
-  published anywhere pip-installable yet (no PyPI release, no tagged git release), so there's
-  nothing valid to put there (a broken entry would make HA's requirements installer fail
-  outright at setup). With it empty, HA won't auto-install the package at all, so
-  `custom_components/pod_home/__init__.py`'s `from podpoint_mobile_api import ...` will raise
-  `ImportError` unless it's manually `pip install`-ed into HA's own Python environment first.
-  Needs a real release before this integration can load in a real HA instance unassisted.
-- No tests, no strict typing, no HACS packaging (`hacs.json`, `.github/`) yet - see
-  [`QUALITY_SCALE.md`](QUALITY_SCALE.md) for the full itemized status against HA's Integration
-  Quality Scale.
+Copy `custom_components/pod_home/` into your Home Assistant `config/custom_components/` folder,
+then restart Home Assistant. The integration bundles its own API client - no separate package
+install needed.
 
-## Trying it
+## Setting up
 
-Copy `custom_components/pod_home/` into a real Home Assistant `custom_components/` folder and
-add the integration via the UI.
+Settings → Devices & services → Add integration → **Pod Home**, then enter your Pod Home email
+and password. Each charger on the account becomes its own device; a linked vehicle (connected via
+Enode, if your account has one) becomes a second device.
+
+## What you get
+
+Every entity below is created per charger unless noted otherwise. Entity availability and which
+ones are enabled by default depend on your account's Charging Mode (Smart Charging vs. Basic
+Charging, set from the app) and tariff - see "Charging Mode" below.
+
+**Sensors**: Status, Charging state (raw wire value), Charging mode, Last charge duration/energy/
+cost, Month energy, Month cost, Total energy, Rewards balance, Electricity rate, Boost end time.
+
+**Binary sensors**: Connectivity, Cable status.
+
+**Update**: Firmware (shows when an update is available; see "Known limitations" for what the
+version number does and doesn't tell you).
+
+**Calendar**: Schedule - the charger's manual schedule (Basic Charging) or its live smart-charging
+plan for the current session (Smart Charging), whichever mode is currently active.
+
+**Controls** (Smart Charging accounts only, disabled by default outside Smart Charging - see
+below): Ready by (time), Target charge (number), Charge priority (select).
+
+**Boost** ("Charge Now", matching the app's own two options): Full charge, Boost for duration
+(paired with a Boost duration time input), and Cancel boost.
+
+**Vehicle device** (only if a vehicle is linked via Enode): Battery, Estimated range, Odometer,
+Expected charge, Power delivery state, Charge rate, Max current, Charge time remaining, and a
+Charging binary sensor.
+
+### Energy Dashboard
+
+Add **Month energy** / **Month cost** to Settings → Dashboards → Energy. Both reset at the start
+of each calendar month in the charger's own local timezone. **Don't** add Last charge energy/cost
+there - those are per-session snapshots, not a monotonic running total, and will break the
+dashboard's math.
+
+### Charging Mode
+
+Pod Point chargers run in one of two modes, switched from the Pod Home app (this integration
+doesn't add a mode-switch control):
+
+- **Smart Charging** - schedule-optimized charging to a target %, by a target time, aware of your
+  tariff. Ready by/Target charge/Charge priority/Electricity rate only apply here, and are
+  automatically disabled outside this mode.
+- **Basic Charging** - the charger follows its own fixed manual schedule instead. Note: selecting
+  a tariff with more than two rate windows, or one where the supplier controls charging directly,
+  reverts the account to Basic Charging automatically - that's Pod Point's own behaviour, not
+  something this integration decides.
+
+## Known limitations
+
+- **Charge now / remote cable lock aren't identical to the app's real-time feel.** Commands are
+  pull-based - the charger only picks up a pending action on its own next check-in with the
+  cloud, observed to be up to ~5 minutes. This applies to the boost buttons and would apply to a
+  future cable-lock control the same way.
+- **Remote cable lock isn't implemented yet.** Boost ("Charge Now") is; cable lock is the one
+  remaining write endpoint from the original scope.
+- **Firmware update version numbers are a placeholder when an update is pending.** The API
+  exposes "update available" as a plain yes/no; no field carrying the actual target version
+  string has been identified yet, so the Update entity's `latest_version` is best-effort, not a
+  real version string, whenever an update is flagged.
+- **Dynamic device creation (a charger added to the account appearing without a restart) is
+  built but not verified against a second physical charger** - only ever tested against a
+  single-charger account.
+- Not yet packaged for HACS's default repository (no releases/tags yet) - install as a custom
+  repository (see above) for now.
+
+## More detail
+
+- [`PLAN.md`](PLAN.md) - status, what's live-confirmed vs. still unverified, phased roadmap.
+- [`QUALITY_SCALE.md`](QUALITY_SCALE.md) - status against Home Assistant's Integration Quality
+  Scale, target tier platinum.
+- [`DECISIONS.md`](DECISIONS.md) - the full reasoning behind every non-obvious design and API
+  choice in this repo.
+- [`CLAUDE.md`](CLAUDE.md) - working conventions for this repo.

@@ -137,4 +137,8 @@ reliably installable) release. Until then, the two copies can silently drift —
   the app's real behavior, not yet re-confirmed live after that fix. Cancel boost not yet tested
   live either.
 - **`remote-lock`**: still completely untouched - no read or write entities built yet.
-- **Packaging**: `hacs.json`, LICENSE, `.github/`, git repo — sized for HACS distribution.
+- **Packaging - done for now**: `hacs.json`, LICENSE, `.github/workflows/validate.yml`
+  (`hacs/action` + `hassfest`), README.md rewritten as end-user documentation. Installable today
+  via HACS as a custom repository (Integrations → ⋮ → Custom repositories). Not yet on HACS's
+  default repository list and no tagged release yet - both premature while the integration is
+  still actively changing shape.
