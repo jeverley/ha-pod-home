@@ -124,6 +124,14 @@ class PodHomeCancelBoostButton(PodHomeEntity, ButtonEntity):
         return f"{DOMAIN}_{self.ppid}_boost_cancel"
 
     @property
+    def available(self) -> bool:
+        # Unlike the entity-availability convention for sensors (unavailable = can't fetch data),
+        # a button's availability controls whether it's pressable at all - greying this out when
+        # there's nothing to cancel prevents a no-op DELETE, matching HA's own convention for
+        # action entities that don't currently apply (e.g. a media player's "next track").
+        return super().available and self.charger.boost_end_at is not None
+
+    @property
     def icon(self) -> str:
         # ButtonEntity has no on/off or device_class-driven state, so HA's frontend doesn't
         # apply any automatic colour here regardless of icon choice - only *which* icon shows

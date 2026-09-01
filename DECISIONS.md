@@ -2018,3 +2018,12 @@ None of the three buttons, nor the duration input, carry an `entity_category` - 
 directly, these belong in the device page's "Controls" group (interactive, act-on-now entities),
 not "Configuration" (a background preference like Charge Priority) - matching HA's own frontend
 grouping convention, not just a style preference.
+
+**Cancelling a boost doesn't immediately clear the schedule server-side.** After a live Cancel
+boost, the user observed the smart-charging schedule still showing some of the boost's future
+intervals for a while, in both the Pod Point app itself and this integration's `Schedule`
+calendar. Because the app shows the identical stale intervals, this is a server-side recompute
+lag on Pod Point's backend (the schedule plan not being regenerated instantly on cancellation),
+not a bug in `calendar.py`'s rendering of whatever `smart_schedule_windows` the API currently
+returns - no code change made. Not confirmed how long the lag lasts or whether a manual refresh
+speeds it up; noted here as an observed real-account quirk rather than investigated further.
