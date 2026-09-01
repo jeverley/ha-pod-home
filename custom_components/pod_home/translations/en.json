@@ -27,16 +27,65 @@
   },
   "entity": {
     "sensor": {
-      "status": { "name": "Status" },
-      "last_charge_duration": { "name": "Last Charge Duration" },
-      "last_charge_energy": { "name": "Last Charge Energy" },
-      "last_charge_cost": { "name": "Last Charge Cost" },
-      "energy_month": { "name": "Energy This Month" },
-      "cost_month": { "name": "Cost This Month" }
+      "charging_state": { "name": "Charging state" },
+      "charging_mode": {
+        "name": "Charging mode",
+        "state": { "smart": "Smart", "basic": "Basic" }
+      },
+      "status": {
+        "name": "Status",
+        "state": {
+          "charging": "Charging",
+          "paused": "Paused",
+          "available": "Available",
+          "preparing": "Preparing",
+          "finishing": "Finishing",
+          "reserved": "Reserved",
+          "unavailable": "Unavailable",
+          "finished": "Finished",
+          "fault": "Fault"
+        }
+      },
+      "last_charge_duration": { "name": "Last charge duration" },
+      "last_charge_energy": { "name": "Last charge energy" },
+      "last_charge_cost": { "name": "Last charge cost" },
+      "month_energy": { "name": "Month energy" },
+      "month_cost": { "name": "Month cost" },
+      "total_energy": { "name": "Total energy" },
+      "rewards_balance": { "name": "Rewards balance" },
+      "electricity_rate": { "name": "Electricity rate" },
+      "boost_end_time": { "name": "Boost end time" },
+      "vehicle_battery_level": { "name": "Battery" },
+      "vehicle_estimated_range": { "name": "Estimated range" },
+      "vehicle_odometer": { "name": "Odometer" },
+      "vehicle_expected_charge": { "name": "Expected charge" },
+      "vehicle_power_delivery_state": { "name": "Power delivery state" },
+      "vehicle_charge_rate": { "name": "Charge rate" },
+      "vehicle_max_current": { "name": "Max current" },
+      "vehicle_charge_time_remaining": { "name": "Charge time remaining" }
     },
     "binary_sensor": {
       "connectivity": { "name": "Connectivity" },
-      "cable_connected": { "name": "Cable Status" }
+      "cable_connected": { "name": "Cable status" },
+      "vehicle_charging": { "name": "Charging" }
+    },
+    "update": {
+      "firmware": { "name": "Firmware" }
+    },
+    "number": {
+      "vehicle_target_charge": { "name": "Target charge" }
+    },
+    "time": {
+      "vehicle_ready_by": { "name": "Ready by" }
+    },
+    "select": {
+      "charging_strategy": {
+        "name": "Charge priority",
+        "state": { "lowest_cost": "Lowest cost", "complete_charge": "Complete charge" }
+      }
+    },
+    "calendar": {
+      "schedule": { "name": "Schedule" }
     }
   }
 }
