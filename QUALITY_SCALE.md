@@ -53,9 +53,9 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
   LICENSE already existed. **Still open**: no tagged GitHub release yet - HACS can install
   straight from the default branch via a custom repository, but versioned upgrades need at least
   one release/tag; not done yet since the integration is still actively changing shape.
-- **config-flow-test-coverage** — ✅ `tests/homeassistant/test_config_flow.py`, using a real
-  `pytest-homeassistant-custom-component` harness (installed as a dev dependency this phase -
-  see CLAUDE.md's Verification section for the Windows-specific setup it needed). Covers the
+- **config-flow-test-coverage** — ✅ `tests/test_config_flow.py`, using a real
+  `pytest-homeassistant-custom-component` harness (installed as a dev dependency this phase, run
+  as part of the unified `tests/` suite - see CLAUDE.md's Verification section). Covers the
   user flow (success, invalid auth), duplicate-email abort (including case-insensitivity, since
   `async_set_unique_id` lowercases), and the reauth flow (success updates the stored password,
   invalid auth shows an error and leaves it unchanged). **Still open**: this is config_flow.py

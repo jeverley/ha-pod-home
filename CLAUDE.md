@@ -133,11 +133,9 @@ alone.
 
 ## Verification
 
-`.github/workflows/test.yml` runs everything below on every push/PR (Linux runners - side-steps
-the Windows-specific plumbing the HA-dependent suite needed locally, see DECISIONS.md). Locally,
-`pytest-homeassistant-custom-component` (which pulls in a real `homeassistant` install) is now
-installed in this dev environment - see the "HA-dependent test suite" bullet below. Most of what
-follows still doesn't need it. What's actually checkable:
+`.github/workflows/test.yml` runs everything below on every push/PR (Linux runners) - **that's
+the authoritative place `pytest tests/` is verified**, not this dev machine (Windows) - see the
+`pytest tests/` bullet below for why. What's actually checkable:
 
 - `python -m py_compile` + `python -m pyflakes` across `custom_components/pod_home/` — syntax
   and unused-import/undefined-name checks only, does not import `homeassistant`.
@@ -154,33 +152,22 @@ follows still doesn't need it. What's actually checkable:
   Assistant installed - reuse it rather than re-solving the relative-import problem). This is the
   main way to check coordinator/entity-level logic beyond compiling, when adding new pure
   functions or extending existing ones.
-- `pytest tests/` (or bare `pytest`) — the offline suite: `tests/test_translation_keys.py`
-  (cross-checks `strings.json`/`translations/en.json`'s `state` blocks against the const.py
-  `OPTIONS` lists they translate, see "Entity states and translations" above) and
-  `tests/test_helpers.py` (every `helpers.py` function). No Home Assistant needed. Run after
-  touching `helpers.py` or any `CHARGER_STATUS_*`/`SCHEDULE_MODE_*`/`CHARGE_PRIORITY_*` constant
-  or its translation entries.
-- **HA-dependent test suite** (`tests/homeassistant/`) — `pip install -r requirements-test.txt`
-  first (dev/test-only, never referenced by `manifest.json`). Real `pytest-homeassistant-custom-
-  component` coverage, starting with `test_config_flow.py` (user flow, invalid auth, duplicate-
-  email abort including case-insensitivity, reauth success/failure). **Must be run as its own
-  separate invocation, never together with `tests/`**, and via `python -m pytest` (not bare
-  `pytest` - only `-m` puts the repo root on `sys.path`, needed for `custom_components` to
-  import):
-  ```
-  python -m pytest tests/homeassistant/ --force-enable-socket -o asyncio_mode=auto
-  ```
-  (see `tests/homeassistant/conftest.py` for why the plugin needs re-enabling per-subtree, and
-  why those two flags live on the command line rather than in an ini file). `.github/workflows/
-  test.yml` runs this exact command in CI. Environment quirks specific to this dev machine, all
-  Windows-only and already resolved here - re-check if the toolchain ever moves host: `aiodns`
-  must stay pinned to `homeassistant`'s exact declared version (`==3.2.0` as of
-  `homeassistant==2025.1.4`, the version this test harness release pins); `--force-enable-socket`
-  is needed since Windows' ProactorEventLoop needs a loopback `socket.socketpair()` just to
-  construct itself; `async_get_clientsession` gets mocked in config-flow tests rather than left
-  real, since building a real aiohttp connector otherwise requires either a `SelectorEventLoop`
-  or the exact `winloop.Loop` instance, neither of which this harness's event loop is on Windows.
-  **Still not covered**: the coordinator and the rest of the
+- `pytest tests/` — the whole suite runs as one unified pytest session (`tests/conftest.py`
+  registers `pytest-homeassistant-custom-component` for everything, no offline/HA-dependent
+  split): `tests/test_translation_keys.py`, `tests/test_helpers.py`, and `tests/test_config_flow.py`
+  (config flow: user flow success/invalid auth, duplicate-email abort including
+  case-insensitivity, reauth success/failure) all run together. `pip install -r
+  requirements-test.txt` first (dev/test-only, never referenced by `manifest.json`). Always use
+  `python -m pytest tests/`, not bare `pytest` - only `-m` puts the repo root on `sys.path`,
+  needed for `custom_components` to import. **On this dev machine (Windows), the full suite is
+  currently broken** - Windows' `asyncio.ProactorEventLoop` needs a real loopback socket just to
+  construct itself, which the plugin's socket-blocking intercepts, breaking every test in the
+  session including the plain synchronous ones (confirmed local repro: 96 errors). This doesn't
+  happen on Linux (CI). Known, diagnosed, not being chased further locally - `.github/workflows/
+  test.yml` is what actually gates whether the suite passes; treat a local Windows failure here as
+  expected, not a regression, and check the GitHub Actions run instead. `async_get_clientsession`
+  is mocked in the config-flow tests regardless of platform - architecturally correct either way,
+  not a Windows workaround. **Still not covered**: the coordinator and the rest of the
   entities - the deliberate full test-coverage pass QUALITY_SCALE.md still defers, config flow is
   only the first slice of it.
 

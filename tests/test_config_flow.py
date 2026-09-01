@@ -1,5 +1,5 @@
 """Config flow tests, using pytest-homeassistant-custom-component's real `hass` fixture (see
-tests/homeassistant/conftest.py for why this lives in its own subtree).
+tests/conftest.py for how the plugin is registered for the whole tests/ tree).
 
 `custom_components.pod_home.async_setup_entry` is patched to a no-op success in every test here -
 these tests are about the config flow's own behaviour (unique_id/abort/error/reauth handling),

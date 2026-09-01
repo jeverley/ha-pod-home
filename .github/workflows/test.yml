@@ -32,20 +32,7 @@ jobs:
       - run: pip install -e podpoint-mobile-api
       - run: python -c "import podpoint_mobile_api"
 
-  offline-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install pytest
-      # No Home Assistant needed - see CLAUDE.md's Verification section.
-      # python -m pytest, not bare `pytest` - only the former puts the repo root (and so
-      # custom_components/) on sys.path, matching local dev invocations (see CLAUDE.md).
-      - run: python -m pytest tests/ -v
-
-  homeassistant-tests:
+  tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +40,6 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements-test.txt
-      # Must run as its own invocation, separate from `pytest tests/` - see pytest.ini,
-      # tests/homeassistant/conftest.py, and DECISIONS.md for why, including why
-      # --force-enable-socket/asyncio_mode are passed here rather than living in an ini file.
-      - run: python -m pytest tests/homeassistant/ --force-enable-socket -o asyncio_mode=auto -v
+      # python -m pytest, not bare `pytest` - only the former puts the repo root (and so
+      # custom_components/) on sys.path. One unified session - see tests/conftest.py.
+      - run: python -m pytest tests/ -v

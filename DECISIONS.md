@@ -2177,11 +2177,11 @@ documented anywhere obvious upstream):
    `tests/test_helpers.py`/`tests/test_translation_keys.py` immediately on install, even though
    neither file touches Home Assistant. Fixed with a root `pytest.ini` (`-p no:homeassistant`,
    entry-point name confirmed via `importlib.metadata.entry_points(group="pytest11")` - it's
-   `homeassistant`, not the package's own dotted name) plus `--ignore=tests/homeassistant`, so a
+   `homeassistant`, not the package's own dotted name) plus `--ignore=tests/integration`, so a
    bare `pytest`/`pytest tests/` only ever collects the offline suite.
 2. **Windows' `ProactorEventLoop` needs a real loopback socket just to exist.** Its internal
    self-pipe uses `socket.socketpair()`, which pytest-socket's blocking (still active once the
-   plugin is deliberately re-enabled for `tests/homeassistant/`, see below) intercepts before any
+   plugin is deliberately re-enabled for `tests/integration/`, see below) intercepts before any
    test code runs, raising `SocketBlockedError` during `event_loop` fixture setup. Fixed with
    `--force-enable-socket` in `pytest.ini` - not a real loss of coverage, since every actual
    network call in these tests is mocked at the auth-client boundary anyway (see point 4).
@@ -2204,7 +2204,7 @@ documented anywhere obvious upstream):
    already independently mocks `PodHomeAuth.async_get_id_token`, which never touches the session
    object it's given, so the session's realness was never relevant to what's under test.
 
-**Subtree isolation, and why it's a *separate* pytest invocation, not a flag**: `tests/homeassistant/
+**Subtree isolation, and why it's a *separate* pytest invocation, not a flag**: `tests/integration/
 conftest.py` re-declares `pytest_plugins = ["pytest_homeassistant_custom_component.plugins"]`
 (the dotted submodule, not the bare package name - the bare name has no fixtures, confirmed by
 trying it first and getting `fixture 'enable_custom_integrations' not found` even though it's
@@ -2213,16 +2213,16 @@ nested `pytest_plugins` declaration first (avoids pytest's "nested conftest decl
 pytest_plugins" deprecation error when the parent `tests/` dir is *also* being collected in the
 same session) - didn't work: `--force-enable-socket` stopped being honoured with that toggle
 order for reasons not fully root-caused, socket blocking came back. Reverted to the
-`pytest_plugins` declaration, which does work correctly - but only when `tests/homeassistant/` is
+`pytest_plugins` declaration, which does work correctly - but only when `tests/integration/` is
 targeted directly as its own pytest invocation, never together with `tests/` in one run (confirmed
-both ways: `pytest tests/homeassistant/` - 6 passed; `pytest tests/` with the nested
+both ways: `pytest tests/integration/` - 6 passed; `pytest tests/` with the nested
 `pytest_plugins` restored - fails at collection with pytest's non-top-level-conftest error).
-`--ignore=tests/homeassistant` in the root `pytest.ini` keeps the two suites from ever colliding
+`--ignore=tests/integration` in the root `pytest.ini` keeps the two suites from ever colliding
 by accident. This is a real operational split, not a temporary workaround: **`pytest tests/
 homeassistant/` must always be run separately from `pytest tests/`**, documented in CLAUDE.md's
 Verification section.
 
-**Coverage landed**: `tests/homeassistant/test_config_flow.py` - user flow (success, invalid
+**Coverage landed**: `tests/integration/test_config_flow.py` - user flow (success, invalid
 auth), duplicate-email abort (including case-insensitivity, since `async_set_unique_id`
 lowercases the email before comparing), reauth flow (success updates the stored password and
 leaves the email unchanged; invalid auth shows an error and leaves the password unchanged). Every
@@ -2236,8 +2236,8 @@ Per the user directly: run the tests on GitHub instead of only locally. Four job
 `ubuntu-latest`: `lint` (py_compile/pyflakes across both `custom_components/pod_home/` and
 `podpoint-mobile-api/`), `podpoint-mobile-api` (installs it with `pip install -e` and imports it -
 the one existing check beyond compiling for that package), `offline-tests` (`pytest tests/`, just
-`pytest` itself as a dependency), `homeassistant-tests` (`pip install -r requirements-test.txt`
-then `pytest tests/homeassistant/`, kept as its own separate invocation on CI too - the
+`pytest` itself as a dependency), `integration-tests` (`pip install -r requirements-test.txt`
+then `pytest tests/integration/`, kept as its own separate invocation on CI too - the
 `pytest.ini`/`conftest.py` split documented in the previous entry applies here unchanged).
 
 Deliberately not folded into the existing `.github/workflows/validate.yml` (hacs/action +
@@ -2255,7 +2255,7 @@ workaround. Not yet confirmed green on an actual GitHub Actions run - first push
 ## First real CI run failed both test jobs - two genuine bugs in the workflow itself, fixed
 
 Checked the actual run (`gh run view`) rather than assuming green from "not yet confirmed" above.
-Both `offline-tests` and `homeassistant-tests` failed, neither for a Linux-vs-Windows reason -
+Both `offline-tests` and `integration-tests` failed, neither for a Linux-vs-Windows reason -
 both were bugs in `test.yml` itself:
 
 1. **`offline-tests` failed with `pytest: error: unrecognized arguments: --force-enable-socket`.**
@@ -2265,24 +2265,93 @@ both were bugs in `test.yml` itself:
    isn't present either). An unrecognized CLI option is a hard error, unlike an unknown ini key
    (only warns) - so this broke immediately. Fixed by moving `--force-enable-socket` (and
    `asyncio_mode`, same reasoning, passed as `-o asyncio_mode=auto`) out of the shared
-   `pytest.ini` entirely, onto the `homeassistant-tests` job's own command line only. Root
-   `pytest.ini` now only has `-p no:homeassistant --ignore=tests/homeassistant` - both safe
+   `pytest.ini` entirely, onto the `integration-tests` job's own command line only. Root
+   `pytest.ini` now only has `-p no:homeassistant --ignore=tests/integration` - both safe
    unconditionally, neither depends on a plugin being installed.
-2. **`homeassistant-tests` failed with `ModuleNotFoundError: No module named 'custom_components'`.**
-   Root cause: `test.yml` ran bare `pytest tests/homeassistant/ -v`. Only `python -m pytest` (not
+2. **`integration-tests` failed with `ModuleNotFoundError: No module named 'custom_components'`.**
+   Root cause: `test.yml` ran bare `pytest tests/integration/ -v`. Only `python -m pytest` (not
    the standalone `pytest` script) inserts the current working directory onto `sys.path` - bare
    `pytest` relies purely on its own rootdir-insertion logic, which for a test file with no
-   `__init__.py` anywhere above it only adds that file's *own* directory (`tests/homeassistant/`),
+   `__init__.py` anywhere above it only adds that file's *own* directory (`tests/integration/`),
    never the repo root three levels up. Every local verification in the previous entry used
    `python -m pytest ...` throughout (habit, not a deliberate choice at the time) and so never hit
    this - the workflow file was the one place still using bare `pytest`. Fixed by switching both
    `test.yml` jobs to `python -m pytest`, and documented as a hard requirement in
-   `tests/homeassistant/conftest.py`'s docstring and CLAUDE.md so it isn't silently reintroduced.
+   `tests/integration/conftest.py`'s docstring and CLAUDE.md so it isn't silently reintroduced.
 
 Neither bug was actually Windows/Linux-specific - both would have broken a local run too if
 someone had copied `test.yml`'s exact command lines instead of the ones this file's own docstring
-documents. Retested locally after the fix (`python -m pytest tests/homeassistant/
+documents. Retested locally after the fix (`python -m pytest tests/integration/
 --force-enable-socket -o asyncio_mode=auto` matching the corrected `test.yml` exactly): 6 passed.
 
 Confirmed on the actual next GitHub Actions run (`33545679973`): all four jobs green -
-`lint`, `podpoint-mobile-api`, `offline-tests`, `homeassistant-tests`.
+`lint`, `podpoint-mobile-api`, `offline-tests`, `integration-tests`.
+
+## `tests/homeassistant/` renamed to `tests/integration/`
+
+Per the user directly: a subfolder named "homeassistant" read oddly for a repo where *everything*
+is Home Assistant code - it looks like it's claiming to be the one place that tests Home
+Assistant, when what it actually means is "the tests that need a running HA test harness."
+`tests/integration/` says that directly, using the standard, framework-agnostic unit-vs-
+integration split any Python developer already recognizes, rather than an HA-specific-sounding
+name. CI job renamed to match (`homeassistant-tests` -> `integration-tests`).
+
+**Tried first, confirmed not viable**: merging both suites into one unified pytest session (so
+there'd be no split at all) - the actual root cause of the "weird" structure. Set
+`--force-enable-socket`/`asyncio_mode = auto` globally and let the plugin auto-load for the whole
+`tests/` tree, no `-p no:homeassistant`/`--ignore` anywhere. Broke immediately: even with the
+right flags, `pytest-homeassistant-custom-component`'s other autouse fixtures still interfere
+with plain synchronous tests that never asked for a `hass` fixture at all - `tests/test_helpers.py`
+went from 90 passing to 96 errors (event_loop fixture failures on tests that don't use asyncio).
+Confirmed this isn't fixable by tuning ini options further - it's a structural conflict between
+"a session where HA's test harness is active" and "a session where it isn't," not a matter of
+getting the right flags. The two-invocation split stays; only the naming changed.
+
+Every path/job-name reference updated together (`pytest.ini`, `tests/integration/conftest.py`,
+`.github/workflows/test.yml`, `requirements-test.txt`, CLAUDE.md, QUALITY_SCALE.md) - retested
+both suites after the rename (`python -m pytest tests/` - 90 passed; `python -m pytest
+tests/integration/ --force-enable-socket -o asyncio_mode=auto` - 6 passed) before pushing.
+
+## Merged into one unified `tests/` suite - CI (Linux) is now the authoritative verification, not this dev machine
+
+Per the user directly, in immediate follow-up to the rename above: still felt wrong to have a
+split at all, and asked to remove the Windows-specific workarounds - now that CI actually runs on
+Linux, that's the real verification environment, not this local Windows dev machine. The earlier
+"tried first, confirmed not viable" merge attempt (previous entry) was re-examined with that
+framing: it failed with the exact same Windows-only `ProactorEventLoop`/`socket.socketpair()`
+mechanism documented in the very first HA-harness entry, not a fundamental cross-platform
+incompatibility between "sync tests" and "the plugin active for the session." Nothing in that
+failure mode is Linux-specific - Unix event loops build their self-pipe via `os.pipe()`, not a
+blocked `socket.socketpair()` call, so pytest-socket's blocking shouldn't intercept it there.
+Decided to trust that reasoning and restructure for real, verifying on the actual CI (Linux)
+rather than this local (Windows) machine, since local Windows repro is now a known-broken,
+diagnosed-and-accepted gap, not a signal to act on.
+
+**Restructure**: `tests/integration/` merged back into flat `tests/` - `test_config_flow.py`
+moved up, `tests/integration/conftest.py`'s content merged into a single `tests/conftest.py` that
+just registers the plugin unconditionally (`pytest_plugins` removed entirely - no `-p
+no:homeassistant` anywhere left to fight against, so the entry-point auto-load is the only
+registration path now, avoiding the "Plugin already registered under a different name" error that
+a redundant explicit `pytest_plugins` alongside auto-load produces). Root `pytest.ini` reduced to
+just `asyncio_mode = auto` - no `-p no:homeassistant`, no `--ignore`, no `--force-enable-socket`
+(not needed at all once there's no Windows-specific ProactorEventLoop construction path forcing
+it - removed rather than kept "just in case", since keeping unnecessary Windows-only flags around
+is exactly the clutter being removed here). `requirements-test.txt` reduced to just
+`pytest-homeassistant-custom-component` - the explicit `aiodns==3.2.0` pin and the
+Windows-conditional `winloop` line both dropped: `aiodns==3.2.0` was only needed because this
+specific local machine had a stray newer `aiodns` from an earlier manual `pip install` polluting
+things, not something a fresh CI environment would ever hit (installing `homeassistant` alone
+already hard-pins `aiodns==3.2.0` via its own declared dependencies); `winloop` was purely a
+Windows/ProactorEventLoop fix with no Linux relevance at all now that the whole flow it was
+patching around isn't reachable. `test.yml`'s four jobs collapsed to three - `offline-tests` and
+`integration-tests` merged into one `tests` job (`pip install -r requirements-test.txt` then
+`python -m pytest tests/ -v`); `lint` and `podpoint-mobile-api` stay separate, different concerns.
+
+**Locally (Windows) this is now expected to fail** - confirmed: `python -m pytest tests/ -q`
+after this change produces 96 errors, the exact same `ProactorEventLoop`/`_ssock` construction
+failure as every earlier Windows repro in this file. Deliberately not chased further or worked
+around again - CLAUDE.md's Verification section now says plainly that `.github/workflows/
+test.yml` is the authoritative place this suite is checked, and a local Windows failure here is
+expected, not a regression. Not yet confirmed green on the actual next GitHub Actions run at the
+time of writing this entry - check the Actions tab (or `gh run list --workflow=test.yml`) for the
+real result rather than trusting this paragraph's expectation.
