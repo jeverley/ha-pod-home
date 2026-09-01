@@ -84,8 +84,7 @@ Charging, set from the app) and tariff - see "Charging Mode" below.
 
 Add **Total energy** to Settings → Dashboards → Energy - it's a live-inclusive running total
 (a session in progress counts immediately), unlike Month energy, which lags until each session
-finalizes. Add **Month cost** if you also want a cost view - there's no live-inclusive equivalent
-for cost yet. **Don't** add Last charge energy/cost there - those are per-session snapshots, not
+finalizes. **Don't** add Last charge energy/cost there - those are per-session snapshots, not
 a monotonic running total, and will break the dashboard's math.
 
 ### Charging Mode
