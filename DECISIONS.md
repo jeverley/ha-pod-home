@@ -2283,3 +2283,6 @@ Neither bug was actually Windows/Linux-specific - both would have broken a local
 someone had copied `test.yml`'s exact command lines instead of the ones this file's own docstring
 documents. Retested locally after the fix (`python -m pytest tests/homeassistant/
 --force-enable-socket -o asyncio_mode=auto` matching the corrected `test.yml` exactly): 6 passed.
+
+Confirmed on the actual next GitHub Actions run (`33545679973`): all four jobs green -
+`lint`, `podpoint-mobile-api`, `offline-tests`, `homeassistant-tests`.
