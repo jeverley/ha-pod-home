@@ -2111,3 +2111,44 @@ property of the charger's own check-in cadence, not something either client cont
 rather than reworded. The "remote cable lock isn't implemented yet" bullet was also removed for
 now, per the user's request - remote-lock remains untouched in the code/PLAN.md either way, this
 is a doc-only removal, not a decision to drop it from scope.
+
+## tests/test_helpers.py - offline coverage for helpers.py's pure functions
+
+First of two planned pieces (per the user, offline first, full HA suite second - see
+QUALITY_SCALE.md). 90 cases across every function in helpers.py.
+
+**Loading problem solved**: helpers.py has zero Home Assistant dependency, but its
+`from .const import ...` is a *relative* import, which fails if imported as a bare top-level
+module (`ImportError: attempted relative import with no known parent package` - confirmed by
+trying it). test_translation_keys.py's existing `sys.path` trick only works for const.py because
+const.py itself has no relative imports. Importing the real `custom_components.pod_home` package
+to get a proper parent isn't an option either - its `__init__.py` unconditionally imports
+`homeassistant`, not installed in this environment. Solved with a new `tests/_pod_home_loader.py`:
+registers a synthetic `pod_home` module in `sys.modules` (a bare `types.ModuleType` with
+`__path__` set to the real source directory, never executing the real `__init__.py`), then loads
+const.py/helpers.py as its submodules via `importlib.util.spec_from_file_location` - this lets
+helpers.py's relative import resolve normally. Reusable by any future offline test file that
+needs const.py/helpers.py.
+
+**Fixture approach**: PodHomeCharger/PodHomeCharge/PodHomeTariffWindow/etc. are real dataclasses,
+but they're defined in coordinator.py, which imports Home Assistant heavily at module level - not
+importable the same way. Since every helpers.py function under test only does plain attribute
+access on these objects (duck typing, and type hints are just strings under
+`from __future__ import annotations` so nothing enforces the real dataclass at runtime),
+test_helpers.py uses small `SimpleNamespace`-based factory functions (`_charger()`, `_charge()`,
+`_tariff_window()`, etc.) instead of importing coordinator.py at all - matches CLAUDE.md's
+"hand-built fixture data" description of how this was always meant to be tested.
+
+**Coverage**: every `CHARGING_STATE_*` → `CHARGER_STATUS_*` mapping in `charger_status()`
+including all four Finished-sticky scenarios (sticky while nothing newer, cleared by a newer
+charging_started_at, cleared by a newer cable_unplugged_at, never sticky without
+charge_finished_at); `select_last_charge()`'s same-session/different-session/tolerance branches;
+`is_single_rate_tariff()`/`charging_priority_label()`/`max_price_for_charging_priority()`
+including the single-rate "can't disambiguate" case and a round-trip check between the write and
+read sides; `expand_manual_schedule_events()`'s same-day/midnight-crossing/week-boundary-wrap/
+inactive-window/missing-fields cases (the midnight-crossing and week-wrap cases match the
+function's own docstring caveat that they're "not confirmed to occur live" - tested for
+correctness of the code as written, not as a claim these shapes have been seen from the real
+API); `smart_schedule_events()`'s CHARGING-only inclusion and range-clamping; and
+`cumulative_charging_seconds()`'s window-clipping and the "real 0 vs. None" distinction its own
+docstring calls out.

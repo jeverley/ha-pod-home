@@ -144,19 +144,20 @@ No Home Assistant install exists in this environment. What's actually checkable:
   the user (see "Credentials"). Only covers `podpoint_mobile_api`, not the coordinator,
   entities, or config flow.
 - `helpers.py` has no HA import, so its pure functions (`charger_status`, `select_last_charge`,
-  `cumulative_charging_seconds`, etc.) are exercisable offline in a throwaway scratchpad script
-  with hand-built fixture data - no real HA instance or live account needed. This is the main way
-  to check coordinator/entity-level logic beyond compiling. Check the actual exit code
-  (`echo "exit=$?"`), not just a line-count of expected output (e.g. `grep -c "^\[OK\]"`) - a
-  script that crashes partway through produces no failure line, so a pure count can silently
-  under-report for however long the crash goes unnoticed.
-- `pytest tests/` — the start of a real test suite (`tests/test_translation_keys.py`
-  cross-checks `strings.json`/`translations/en.json`'s `state` blocks against the const.py
-  `OPTIONS` lists they translate, see "Entity states and translations" above). Not the
-  deliberate full test-coverage pass QUALITY_SCALE.md still defers (fixtures, mocked API
-  responses, `pytest-homeassistant-custom-component`) - just the first real test, added because
-  it directly closes a verified gap. Run after touching any `CHARGER_STATUS_*`/
-  `SCHEDULE_MODE_*`/`CHARGE_PRIORITY_*` constant or its translation entries.
+  `cumulative_charging_seconds`, etc.) are exercisable offline with hand-built fixture data - no
+  real HA instance or live account needed. `tests/test_helpers.py` now covers every function this
+  way (see `tests/_pod_home_loader.py` for how it imports helpers.py/const.py without Home
+  Assistant installed - reuse it rather than re-solving the relative-import problem). This is the
+  main way to check coordinator/entity-level logic beyond compiling, when adding new pure
+  functions or extending existing ones.
+- `pytest tests/` — real test coverage of two kinds so far: `tests/test_translation_keys.py`
+  (cross-checks `strings.json`/`translations/en.json`'s `state` blocks against the const.py
+  `OPTIONS` lists they translate, see "Entity states and translations" above) and
+  `tests/test_helpers.py` (every `helpers.py` function, offline). **Still not covered**: the
+  deliberate full test-coverage pass QUALITY_SCALE.md still defers - the coordinator, entities,
+  and config flow, which need `pytest-homeassistant-custom-component` (mocked API responses, a
+  real HA test harness), not started yet. Run `pytest tests/` after touching `helpers.py` or any
+  `CHARGER_STATUS_*`/`SCHEDULE_MODE_*`/`CHARGE_PRIORITY_*` constant or its translation entries.
 
 Everything above the API layer (`coordinator.py`, `entity.py`, `sensor.py`, `binary_sensor.py`,
 `config_flow.py`, `diagnostics.py`) is unverified beyond compiling and the offline `helpers.py`

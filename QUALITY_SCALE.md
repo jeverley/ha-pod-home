@@ -64,12 +64,13 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
 ## Deferred - real work, not needed for a HACS-quality v1
 
 - **test-coverage / config-flow-test-coverage** — 95%/100% coverage requirements. `tests/` now
-  exists (`tests/test_translation_keys.py`, added to close a specific verified gap - see
-  DECISIONS.md), but that's not the deliberate full pass this rule actually needs (fixtures,
-  mocked API responses, `pytest-homeassistant-custom-component`, real coverage of the
-  coordinator/entities/config flow). Still the single biggest gap for a core submission and
-  genuinely substantial work. Worth doing before ever proposing this for core; not blocking for
-  personal/HACS use.
+  has real coverage of `helpers.py`'s pure functions (`tests/test_helpers.py`, 90 cases - every
+  function, every `CHARGING_STATE_*`/mode/tariff branch, the Finished-sticky edge cases, the
+  manual/smart schedule expansion helpers) plus `tests/test_translation_keys.py`. **Still open**:
+  this doesn't touch the coordinator, entities, or config flow at all - those need
+  `pytest-homeassistant-custom-component` (mocked API responses, a real HA test harness), which
+  is a separate, substantially larger piece of work not started yet. Still the single biggest gap
+  for a core submission; not blocking for personal/HACS use.
 - **strict-typing** — full PEP-561 typing + a `py.typed` marker + entry in core's
   `.strict-typing` file. The code is already reasonably typed (`from __future__ import
   annotations`, most signatures annotated) but hasn't been audited against `mypy --strict`.
