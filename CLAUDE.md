@@ -164,18 +164,23 @@ follows still doesn't need it. What's actually checkable:
   first (dev/test-only, never referenced by `manifest.json`). Real `pytest-homeassistant-custom-
   component` coverage, starting with `test_config_flow.py` (user flow, invalid auth, duplicate-
   email abort including case-insensitivity, reauth success/failure). **Must be run as its own
-  separate invocation, never together with `tests/`** - `pytest tests/homeassistant/` (see
-  `tests/homeassistant/conftest.py` for why: the plugin is disruptive to the plain offline tests
-  when active for the whole session, and pytest won't allow a nested conftest.py to
-  re-enable it mid-collection anyway). Environment quirks specific to this dev machine, all
+  separate invocation, never together with `tests/`**, and via `python -m pytest` (not bare
+  `pytest` - only `-m` puts the repo root on `sys.path`, needed for `custom_components` to
+  import):
+  ```
+  python -m pytest tests/homeassistant/ --force-enable-socket -o asyncio_mode=auto
+  ```
+  (see `tests/homeassistant/conftest.py` for why the plugin needs re-enabling per-subtree, and
+  why those two flags live on the command line rather than in an ini file). `.github/workflows/
+  test.yml` runs this exact command in CI. Environment quirks specific to this dev machine, all
   Windows-only and already resolved here - re-check if the toolchain ever moves host: `aiodns`
   must stay pinned to `homeassistant`'s exact declared version (`==3.2.0` as of
-  `homeassistant==2025.1.4`, the version this test harness release pins); real network sockets
-  need `--force-enable-socket` (pytest.ini) since ProactorEventLoop needs a loopback
-  `socket.socketpair()` just to construct itself; `async_get_clientsession` gets mocked in
-  config-flow tests rather than left real, since building a real aiohttp connector otherwise
-  requires either a `SelectorEventLoop` or the exact `winloop.Loop` instance, neither of which
-  this harness's event loop is. **Still not covered**: the coordinator and the rest of the
+  `homeassistant==2025.1.4`, the version this test harness release pins); `--force-enable-socket`
+  is needed since Windows' ProactorEventLoop needs a loopback `socket.socketpair()` just to
+  construct itself; `async_get_clientsession` gets mocked in config-flow tests rather than left
+  real, since building a real aiohttp connector otherwise requires either a `SelectorEventLoop`
+  or the exact `winloop.Loop` instance, neither of which this harness's event loop is on Windows.
+  **Still not covered**: the coordinator and the rest of the
   entities - the deliberate full test-coverage pass QUALITY_SCALE.md still defers, config flow is
   only the first slice of it.
 

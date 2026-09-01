@@ -2251,3 +2251,35 @@ aiodns/winloop's event-loop-type requirement) should apply there. The `async_get
 mock in `test_config_flow.py` stays regardless - it's the architecturally correct choice on any
 platform (isolates the config-flow test from real network entirely), not merely a Windows
 workaround. Not yet confirmed green on an actual GitHub Actions run - first push will tell.
+
+## First real CI run failed both test jobs - two genuine bugs in the workflow itself, fixed
+
+Checked the actual run (`gh run view`) rather than assuming green from "not yet confirmed" above.
+Both `offline-tests` and `homeassistant-tests` failed, neither for a Linux-vs-Windows reason -
+both were bugs in `test.yml` itself:
+
+1. **`offline-tests` failed with `pytest: error: unrecognized arguments: --force-enable-socket`.**
+   Root cause: `--force-enable-socket` was living in the *shared* root `pytest.ini`'s `addopts`,
+   which every pytest invocation reads - including `offline-tests`, whose job never installs
+   `pytest-homeassistant-custom-component` (so `pytest-socket`, the plugin that owns that flag,
+   isn't present either). An unrecognized CLI option is a hard error, unlike an unknown ini key
+   (only warns) - so this broke immediately. Fixed by moving `--force-enable-socket` (and
+   `asyncio_mode`, same reasoning, passed as `-o asyncio_mode=auto`) out of the shared
+   `pytest.ini` entirely, onto the `homeassistant-tests` job's own command line only. Root
+   `pytest.ini` now only has `-p no:homeassistant --ignore=tests/homeassistant` - both safe
+   unconditionally, neither depends on a plugin being installed.
+2. **`homeassistant-tests` failed with `ModuleNotFoundError: No module named 'custom_components'`.**
+   Root cause: `test.yml` ran bare `pytest tests/homeassistant/ -v`. Only `python -m pytest` (not
+   the standalone `pytest` script) inserts the current working directory onto `sys.path` - bare
+   `pytest` relies purely on its own rootdir-insertion logic, which for a test file with no
+   `__init__.py` anywhere above it only adds that file's *own* directory (`tests/homeassistant/`),
+   never the repo root three levels up. Every local verification in the previous entry used
+   `python -m pytest ...` throughout (habit, not a deliberate choice at the time) and so never hit
+   this - the workflow file was the one place still using bare `pytest`. Fixed by switching both
+   `test.yml` jobs to `python -m pytest`, and documented as a hard requirement in
+   `tests/homeassistant/conftest.py`'s docstring and CLAUDE.md so it isn't silently reintroduced.
+
+Neither bug was actually Windows/Linux-specific - both would have broken a local run too if
+someone had copied `test.yml`'s exact command lines instead of the ones this file's own docstring
+documents. Retested locally after the fix (`python -m pytest tests/homeassistant/
+--force-enable-socket -o asyncio_mode=auto` matching the corrected `test.yml` exactly): 6 passed.
