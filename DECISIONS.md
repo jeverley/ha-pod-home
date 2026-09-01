@@ -1963,3 +1963,58 @@ copy of the same idea. QUALITY_SCALE.md's test-coverage entry updated to note th
 first real test exists now, but it's not the deliberate full pass (fixtures, mocked API
 responses, `pytest-homeassistant-custom-component`, coordinator/entity/config-flow coverage)
 that rule actually needs - the old standalone script is deleted, not kept alongside the test.
+
+## Boost buttons (`charge-overrides`) built
+
+Per the user directly, matching the app's own two boost options plus a cancel action: `Boost
+full charge` (indefinite override), `Boost for duration` (reads a local duration input at press
+time), `Cancel boost` (deletes the active override) - three `ButtonEntity`s (`button.py`, new
+platform), all charger-scoped. **NOT YET TESTED against a real account** - same write-endpoint
+discipline as Ready By/Target Charge/Charge Priority before their live confirmation; built and
+compiled/offline-verified only.
+
+Request body confirmed via the account's public OpenAPI schema (`ChargeOverrideRequestDTO`), not
+guessed: `{requestedAt: <required>, endAt: <nullable>}`, with `endAt`'s own schema description
+stating "Omit or pass null for an indefinite (Always On) override". `DELETE
+/chargers/{ppid}/charge-overrides` (Cancel boost) is also schema-confirmed, no body.
+
+**Correction after live testing**: Boost for duration worked first try; `endAt: null` for Boost
+full charge was rejected by the server (403), and separately, the user triggered "Full charge"
+from the app itself and observed a real end time exactly 12 hours out - not indefinite at all.
+The schema documenting `endAt: null` as a valid, accepted value doesn't mean this account's
+server actually honours it, and more importantly the app's own "Full charge" was never indefinite
+in the first place - a wrong assumption corrected by real evidence, not just the 403. Fixed:
+`PodHomeBoostFullChargeButton` now sends `endAt = requestedAt + 12h` (new `_FULL_CHARGE_DURATION`
+constant, button.py) instead of `None`. `async_create_charge_override()`'s `end_at` parameter
+stays nullable in the client (the schema-documented option, kept in case it's ever useful
+elsewhere or the 403 turns out to be narrower than it looks), but the docstring no longer asserts
+it works - callers should pass a real end time, per what's now confirmed live.
+
+`_async_write()` (podpoint_mobile_api/client.py) already generalized over HTTP method via
+`session.request(method, ...)`, so adding POST/DELETE support was two thin wrappers
+(`_async_post`/`_async_delete`) rather than new request-handling logic - `_async_delete` passes
+`json_body=None` to `_async_write`, which aiohttp treats as "no JSON payload" (widened that
+parameter's type hint from `dict` to `dict | None` to make this explicit rather than implicit).
+
+**Boost duration (`time.py`) is a genuinely local entity, not backed by the coordinator/API at
+all** - per the user directly, reusing `TimeEntity`'s hh:mm picker widget to represent a
+*duration* (H hours M minutes) rather than a wall-clock time, since HA has no dedicated duration
+entity domain. There's no "configured boost duration" API field to read back (it's purely a
+button-press-time parameter), so this entity's `native_value` comes from `self._value`, a plain
+instance attribute, not `self.charger`. Persists across restarts via `RestoreEntity` mixed in
+alongside `PodHomeEntity`/`CoordinatorEntity` - the actual restore-plus-coordinator MRO
+interaction is unverified beyond compiling, like everything else above the API layer; worth
+confirming this combination behaves as expected the first time it's actually restarted inside
+real HA. Defaults to 15 minutes if never set - deliberately short, requiring an explicit increase
+for a longer boost rather than the reverse.
+
+`Boost for duration`'s button reads the duration entity's current value via the entity registry
++ `hass.states.get()` (`_read_boost_duration()` in button.py) rather than holding a direct Python
+object reference to the `time.py` entity instance - the two are constructed independently by
+separate platform `async_setup_entry` calls, so the entity registry + state machine is the
+standard HA cross-entity read pattern here, not a workaround.
+
+None of the three buttons, nor the duration input, carry an `entity_category` - per the user
+directly, these belong in the device page's "Controls" group (interactive, act-on-now entities),
+not "Configuration" (a background preference like Charge Priority) - matching HA's own frontend
+grouping convention, not just a style preference.

@@ -51,7 +51,7 @@ class PodHomeApiClient:
         except aiohttp.ClientError as exc:
             raise PodHomeApiError(0, str(exc)) from exc
 
-    async def _async_write(self, method: str, path: str, json_body: dict) -> None:
+    async def _async_write(self, method: str, path: str, json_body: dict | None) -> None:
         """Shared by _async_put/_async_patch - same request/error handling, verb differs."""
         token = await self._auth.async_get_id_token()
         url = self._base_url + path
@@ -79,6 +79,12 @@ class PodHomeApiClient:
 
     async def _async_patch(self, path: str, json_body: dict) -> None:
         await self._async_write("PATCH", path, json_body)
+
+    async def _async_post(self, path: str, json_body: dict | None) -> None:
+        await self._async_write("POST", path, json_body)
+
+    async def _async_delete(self, path: str) -> None:
+        await self._async_write("DELETE", path, None)
 
     async def _async_post_for_response(self, path: str, json_body: dict) -> dict:
         """Like _async_write, but returns the parsed response body (needed by the api3 session
@@ -226,9 +232,32 @@ class PodHomeApiClient:
         return await self._async_get(f"/chargers/{ppid}/subscriptions")
 
     async def async_get_charge_overrides(self, ppid: str) -> dict:
-        """GET /chargers/{ppid}/charge-overrides - reads the current override state. Read-only;
-        does not create or change one (that would be a POST, not implemented)."""
+        """GET /chargers/{ppid}/charge-overrides - reads the current override state."""
         return await self._async_get(f"/chargers/{ppid}/charge-overrides")
+
+    async def async_create_charge_override(
+        self, ppid: str, requested_at: datetime.datetime, end_at: datetime.datetime | None
+    ) -> None:
+        """POST /chargers/{ppid}/charge-overrides - triggers a boost ("Charge Now"). Body shape
+        confirmed via the account's public OpenAPI schema (ChargeOverrideRequestDTO):
+        `requestedAt` required, `endAt` nullable. The schema describes `endAt: null` as meaning
+        an indefinite ("Always On") override, but confirmed live this account's server rejects
+        that (403) - schema-documented doesn't mean server-accepted. Callers should pass a real
+        `end_at`; see PodHomeBoostFullChargeButton (pod_home's button.py) for what "full charge"
+        actually resolves to live. WRITE ENDPOINT with a real physical effect on the charger -
+        see CLAUDE.md."""
+        await self._async_post(
+            f"/chargers/{ppid}/charge-overrides",
+            {
+                "requestedAt": requested_at.isoformat(),
+                "endAt": end_at.isoformat() if end_at else None,
+            },
+        )
+
+    async def async_delete_charge_override(self, ppid: str) -> None:
+        """DELETE /chargers/{ppid}/charge-overrides - cancels the active boost. WRITE ENDPOINT
+        with a real physical effect on the charger - see CLAUDE.md."""
+        await self._async_delete(f"/chargers/{ppid}/charge-overrides")
 
     async def async_get_remote_lock_status(self, ppid: str) -> dict:
         """GET /remote-lock/{ppid} - reads the current lock state. Read-only; does not set the

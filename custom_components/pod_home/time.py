@@ -9,11 +9,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN
 from .entity import (
+    PodHomeEntity,
     PodHomeVehicleEntity,
     PodHomeVehicleIntentsWriteMixin,
+    async_setup_dynamic_chargers,
     async_setup_dynamic_vehicles,
 )
 from .helpers import parse_time_of_day
@@ -22,6 +25,10 @@ if TYPE_CHECKING:
     from . import PodHomeConfigEntry
 
 PARALLEL_UPDATES = 0
+
+# Default boost duration when none has ever been set - deliberately short (require explicitly
+# dialing up for a long boost, not the other way round).
+_DEFAULT_BOOST_DURATION = datetime.time(0, 15)
 
 
 async def async_setup_entry(
@@ -32,6 +39,12 @@ async def async_setup_entry(
         entry.runtime_data,
         async_add_entities,
         [PodHomeVehicleReadyByTime],
+    )
+    async_setup_dynamic_chargers(
+        entry,
+        entry.runtime_data,
+        async_add_entities,
+        [PodHomeBoostDurationTime],
     )
 
 
@@ -76,3 +89,40 @@ class PodHomeVehicleReadyByTime(PodHomeVehicleEntity, PodHomeVehicleIntentsWrite
         await self._async_write_intents(
             charge_by_time=value.strftime("%H:%M:%S"), charge_kwh=vehicle.intent_charge_kwh
         )
+
+
+class PodHomeBoostDurationTime(PodHomeEntity, RestoreEntity, TimeEntity):
+    """Local-only input for the "Boost for duration" button (button.py) - not derived from the
+    API, since there's no "configured boost duration" field to read back; this is purely a
+    parameter the button reads at press time. Reuses TimeEntity's hh:mm picker to represent a
+    *duration* (H hours M minutes), not a wall-clock time - per the user directly, HA has no
+    dedicated duration entity domain. Persists across restarts via RestoreEntity; defaults to
+    15 minutes if never set."""
+
+    _attr_translation_key = "boost_duration"
+    _attr_name = "Boost duration"
+    _attr_icon = "mdi:timer-cog-outline"
+
+    def __init__(self, coordinator, ppid: str) -> None:
+        super().__init__(coordinator, ppid)
+        self._value: datetime.time = _DEFAULT_BOOST_DURATION
+
+    @property
+    def unique_id(self) -> str:
+        return f"{DOMAIN}_{self.ppid}_boost_duration"
+
+    @property
+    def native_value(self) -> datetime.time:
+        return self._value
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            restored = parse_time_of_day(last_state.state)
+            if restored is not None:
+                self._value = restored
+
+    async def async_set_value(self, value: datetime.time) -> None:
+        self._value = value
+        self.async_write_ha_state()

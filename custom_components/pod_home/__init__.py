@@ -25,6 +25,7 @@ PLATFORMS: list[Platform] = [
     Platform.TIME,
     Platform.SELECT,
     Platform.CALENDAR,
+    Platform.BUTTON,
 ]
 
 # Firebase refresh token, persisted across restarts so reload can silently refresh instead of
