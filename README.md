@@ -58,8 +58,6 @@ Charging, set from the app) and tariff - see "Charging Mode" below.
 | Cable status | Binary sensor | |
 | Firmware | Update | See "Known limitations" for what the version number does and doesn't tell you |
 | Schedule | Calendar | Manual schedule (Basic) or live smart-charging plan (Smart), whichever mode is active |
-| Ready by | Time | Smart Charging only, disabled by default outside it |
-| Target charge | Number | Smart Charging only, disabled by default outside it |
 | Charge priority | Select | Smart Charging only, disabled by default outside it |
 | Boost duration | Time | Local input (hh:mm) for the Boost for duration button below |
 | Full charge | Button | Boost ("Charge Now") to 100%, matching the app |
@@ -68,17 +66,19 @@ Charging, set from the app) and tariff - see "Charging Mode" below.
 
 ### Car device (only if a vehicle is linked via Enode)
 
-| Entity | Type |
-| --- | --- |
-| Battery | Sensor |
-| Estimated range | Sensor |
-| Odometer | Sensor |
-| Expected charge | Sensor |
-| Power delivery state | Sensor |
-| Charge rate | Sensor |
-| Max current | Sensor |
-| Charge time remaining | Sensor |
-| Charging | Binary sensor |
+| Entity | Type | Notes |
+| --- | --- | --- |
+| Battery | Sensor | |
+| Estimated range | Sensor | |
+| Odometer | Sensor | |
+| Expected charge | Sensor | Smart Charging only |
+| Power delivery state | Sensor | |
+| Charge rate | Sensor | |
+| Max current | Sensor | |
+| Charge time remaining | Sensor | |
+| Charging | Binary sensor | |
+| Ready by | Time | Smart Charging only, disabled by default outside it |
+| Target charge | Number | Smart Charging only, disabled by default outside it |
 
 ### Energy Dashboard
 

@@ -2078,3 +2078,8 @@ Three corrections/restructures to the README.md written above, from the user's o
 - **Charging Mode**: see the correction entry directly above.
 - **"What you get"**: restructured into two tables (charger device, car device) rather than prose
   paragraphs, per the user's request to call out that these are genuinely two separate HA devices.
+  First pass of that table wrongly placed Ready by/Target charge under the charger device - both
+  are actually `PodHomeVehicleEntity` (time.py/number.py), i.e. car-device entities, confirmed
+  against `_MODE_GATED_ENTITIES` in entity.py (`("time", "_ready_by", "vehicle")`,
+  `("number", "_target_charge", "vehicle")`). Moved to the car device table alongside Expected
+  charge, which is also vehicle-scoped and Smart-Charging-gated the same way.
