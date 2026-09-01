@@ -1,4 +1,4 @@
 # Dev/test-only dependency - never referenced by manifest.json or shipped with the integration.
-# `pip install -r requirements-test.txt` before running pytest at all (tests/conftest.py
+# `pip install -r requirements_test.txt` before running pytest at all (tests/conftest.py
 # registers the plugin for the whole suite - see CLAUDE.md's Verification section).
 pytest-homeassistant-custom-component

@@ -2355,3 +2355,10 @@ test.yml` is the authoritative place this suite is checked, and a local Windows 
 expected, not a regression. Not yet confirmed green on the actual next GitHub Actions run at the
 time of writing this entry - check the Actions tab (or `gh run list --workflow=test.yml`) for the
 real result rather than trusting this paragraph's expectation.
+
+## requirements-test.txt renamed to requirements_test.txt
+
+Per the user directly: underscore, not hyphen, matching Python module-name convention rather than
+a package/CLI-name convention. Cosmetic - `.github/workflows/test.yml` and CLAUDE.md updated to
+match. Earlier entries above still say `requirements-test.txt` where they're describing what was
+true at the time - left as written, per this file's append-only rule.

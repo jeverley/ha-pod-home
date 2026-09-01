@@ -157,7 +157,7 @@ the authoritative place `pytest tests/` is verified**, not this dev machine (Win
   split): `tests/test_translation_keys.py`, `tests/test_helpers.py`, and `tests/test_config_flow.py`
   (config flow: user flow success/invalid auth, duplicate-email abort including
   case-insensitivity, reauth success/failure) all run together. `pip install -r
-  requirements-test.txt` first (dev/test-only, never referenced by `manifest.json`). Always use
+  requirements_test.txt` first (dev/test-only, never referenced by `manifest.json`). Always use
   `python -m pytest tests/`, not bare `pytest` - only `-m` puts the repo root on `sys.path`,
   needed for `custom_components` to import. **On this dev machine (Windows), the full suite is
   currently broken** - Windows' `asyncio.ProactorEventLoop` needs a real loopback socket just to
