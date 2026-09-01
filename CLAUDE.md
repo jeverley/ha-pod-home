@@ -133,6 +133,8 @@ alone.
 
 ## Verification
 
+`.github/workflows/test.yml` runs everything below on every push/PR (Linux runners - side-steps
+the Windows-specific plumbing the HA-dependent suite needed locally, see DECISIONS.md). Locally,
 `pytest-homeassistant-custom-component` (which pulls in a real `homeassistant` install) is now
 installed in this dev environment - see the "HA-dependent test suite" bullet below. Most of what
 follows still doesn't need it. What's actually checkable:

@@ -2229,3 +2229,25 @@ leaves the email unchanged; invalid auth shows an error and leaves the password 
 test patches `custom_components.pod_home.async_setup_entry` to a no-op success - these tests are
 about the flow's own behaviour, not about the coordinator's first refresh actually succeeding,
 which stays part of the still-open coordinator/entity test-coverage gap (see QUALITY_SCALE.md).
+
+## .github/workflows/test.yml - both test suites moved to CI
+
+Per the user directly: run the tests on GitHub instead of only locally. Four jobs, all
+`ubuntu-latest`: `lint` (py_compile/pyflakes across both `custom_components/pod_home/` and
+`podpoint-mobile-api/`), `podpoint-mobile-api` (installs it with `pip install -e` and imports it -
+the one existing check beyond compiling for that package), `offline-tests` (`pytest tests/`, just
+`pytest` itself as a dependency), `homeassistant-tests` (`pip install -r requirements-test.txt`
+then `pytest tests/homeassistant/`, kept as its own separate invocation on CI too - the
+`pytest.ini`/`conftest.py` split documented in the previous entry applies here unchanged).
+
+Deliberately not folded into the existing `.github/workflows/validate.yml` (hacs/action +
+hassfest) - different concern (test correctness vs. HACS/manifest schema validation), separate
+file keeps each focused and lets one fail without obscuring the other in the Actions UI.
+
+Expected to be markedly less fragile than the local Windows run that led to this suite existing:
+GitHub's runners are Linux, `pytest-homeassistant-custom-component`'s actual target platform - none
+of the four Windows-specific problems from the previous entry (ProactorEventLoop's socketpair,
+aiodns/winloop's event-loop-type requirement) should apply there. The `async_get_clientsession`
+mock in `test_config_flow.py` stays regardless - it's the architecturally correct choice on any
+platform (isolates the config-flow test from real network entirely), not merely a Windows
+workaround. Not yet confirmed green on an actual GitHub Actions run - first push will tell.

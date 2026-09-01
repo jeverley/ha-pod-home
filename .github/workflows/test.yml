@@ -1,0 +1,56 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyflakes
+      - run: |
+          python -m py_compile custom_components/pod_home/*.py \
+            podpoint-mobile-api/src/podpoint_mobile_api/*.py
+      - run: |
+          python -m pyflakes custom_components/pod_home/*.py \
+            podpoint-mobile-api/src/podpoint_mobile_api/*.py
+
+  podpoint-mobile-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e podpoint-mobile-api
+      - run: python -c "import podpoint_mobile_api"
+
+  offline-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest
+      # No Home Assistant needed - see CLAUDE.md's Verification section.
+      - run: pytest tests/ -v
+
+  homeassistant-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-test.txt
+      # Must run as its own invocation, separate from `pytest tests/` - see
+      # tests/homeassistant/conftest.py and DECISIONS.md for why.
+      - run: pytest tests/homeassistant/ -v
