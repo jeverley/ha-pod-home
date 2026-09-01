@@ -1,10 +1,12 @@
 # Quality scale checklist for pod_home
 
-Home Assistant's [Integration Quality Scale](https://developers.home-assistant.io/docs/core/integration-quality-scale/)
+**Target tier: platinum.** Home Assistant's [Integration Quality Scale](https://developers.home-assistant.io/docs/core/integration-quality-scale/)
 is 54 individual rules across four tiers (bronze → silver → gold → platinum). HACS doesn't
-require any tier, but since core isn't ruled out, this tracks the current scaffold against it
-so nothing has to be retrofitted later. Rule list confirmed against the live dev docs
-(2026.8) at [`developers.home-assistant.io/docs/core/integration-quality-scale/rules/`](https://developers.home-assistant.io/docs/core/integration-quality-scale/rules/).
+require any tier, but since core isn't ruled out, this is a real goal, not passive tracking - so
+nothing has to be retrofitted later. Rule list confirmed against the live dev docs (2026.8) at
+[`developers.home-assistant.io/docs/core/integration-quality-scale/rules/`](https://developers.home-assistant.io/docs/core/integration-quality-scale/rules/).
+This is the one place quality-scale status is tracked - keep it that way rather than letting a
+second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md merge history).
 
 ## Already compliant (mostly by accident of following normal HA conventions)
 
@@ -51,10 +53,13 @@ so nothing has to be retrofitted later. Rule list confirmed against the live dev
 
 ## Deferred - real work, not needed for a HACS-quality v1
 
-- **test-coverage / config-flow-test-coverage** — 95%/100% coverage requirements. No `tests/`
-  directory exists yet. This is the single biggest gap for a core submission and genuinely
-  substantial work (fixtures, mocked API responses, `pytest-homeassistant-custom-component`).
-  Worth doing before ever proposing this for core; not blocking for personal/HACS use.
+- **test-coverage / config-flow-test-coverage** — 95%/100% coverage requirements. `tests/` now
+  exists (`tests/test_translation_keys.py`, added to close a specific verified gap - see
+  DECISIONS.md), but that's not the deliberate full pass this rule actually needs (fixtures,
+  mocked API responses, `pytest-homeassistant-custom-component`, real coverage of the
+  coordinator/entities/config flow). Still the single biggest gap for a core submission and
+  genuinely substantial work. Worth doing before ever proposing this for core; not blocking for
+  personal/HACS use.
 - **strict-typing** — full PEP-561 typing + a `py.typed` marker + entry in core's
   `.strict-typing` file. The code is already reasonably typed (`from __future__ import
   annotations`, most signatures annotated) but hasn't been audited against `mypy --strict`.
@@ -84,8 +89,76 @@ from public CI, PyPI version matches a tagged release - just describe properties
 dependency must have), but both rules only have something to check when an external dependency
 exists. Not having one doesn't satisfy them, it just keeps the integration off platinum entirely
 - confirmed by checking Ohme's actual manifest.json (`"requirements": ["ohme==1.9.1"]`), a real
-standalone PyPI package maintained by the same person as the integration. See
-`PLATINUM_COMPARISON.md` for the extraction now underway to match that pattern.
+standalone PyPI package maintained by the same person as the integration. See the platinum
+comparison below for the extraction now underway to match that pattern.
+
+## Platinum comparison against Ohme and Peblar
+
+Ohme (`homeassistant/components/ohme`) is the closer analog - UK, cloud-polling, email/password
+Firebase-adjacent auth, smart EV charging. Peblar (`homeassistant/components/peblar`) is
+local-polling (LAN/direct-to-charger), so its coordinator/auth patterns don't transfer, but its
+entity design is still a useful reference. Compared against pod_home's current source, not just
+the abstract rule list above.
+
+### Real gaps found
+
+1. ✅ **Fixed.** ~~Password field isn't masked in the UI~~ - `config_flow.py` now uses
+   `TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD, autocomplete="current-password"))`
+   for the password field and `TextSelectorType.EMAIL` for the email field, matching Ohme.
+
+2. **No reconfigure flow.** Ohme has `async_step_reconfigure` (change email/password
+   proactively, from Settings, without deleting and re-adding the integration) as a distinct
+   flow from `async_step_reauth` (which only triggers automatically on an auth failure).
+   pod_home only has the reauth path.
+
+3. **Single coordinator, one cadence for everything it fetches.** ~~pod_home fetches
+   chargers, connectivity/charging status, month-to-date stats, and recent charges every 5
+   minutes, uniformly.~~ **Partially addressed**: the coordinator's polling *frequency* is now
+   adaptive (60s after observed activity, 300s once quiet - measured live, see
+   coordinator.py's FAST/SLOW_POLL_INTERVAL), and several per-resource fetches now have their
+   own staleness/activity-aware cadence too (vehicle data, month stats, firmware/tariffs).
+   Ohme still goes further with two separate coordinators sharing a common abstract base
+   (`OhmeChargeSessionCoordinator`, 30s; `OhmeDeviceInfoCoordinator`, 30min), bundled in a small
+   `OhmeRuntimeData` dataclass as `entry.runtime_data` - a real, separate architectural
+   improvement over per-resource staleness gating within one coordinator.
+
+4. ✅ **Fixed.** ~~Diagnostics could be simpler~~ - `diagnostics.py` now matches Ohme's pattern:
+   `entry.data` (email/password) is left out entirely rather than included-then-redacted.
+
+5. **Real `quality_scale.yaml` convention.** HA core's actual mechanism for declaring
+   per-rule status is a `quality_scale.yaml` file *inside* the integration's own directory
+   (`status: done` / `status: exempt` + a comment, per rule) - not a top-level markdown doc.
+   This file is a reasonable stand-in for now; low urgency since HACS doesn't require it, but
+   worth knowing the real target format for whenever core submission is a real plan.
+
+6. **Exception messages aren't translatable.** Ohme's coordinator raises
+   `UpdateFailed(translation_key="api_failed", translation_domain=DOMAIN)` instead of a raw
+   f-string. pod_home raises `UpdateFailed(str(exc))` - functional, but not translated
+   (the "exception-translations" gold rule). Lower priority - polish, not correctness.
+
+7. **Reauth's data update, style only.** Ohme calls
+   `self.async_update_reload_and_abort(reauth_entry, data_updates=user_input)` (merges just
+   the changed fields). pod_home manually spreads `data={**reauth_entry.data, CONF_PASSWORD: ...}`
+   - correct, just more verbose than necessary.
+
+8. ✅ **Fixed.** ~~No standalone API client library~~ - the async client is now
+   [`podpoint-mobile-api/`](podpoint-mobile-api/), a real installable package with zero HA
+   dependency, matching `ohme` on PyPI (maintained by the same person as the `ohme` HA
+   integration). This is also what `async-dependency`/`dependency-transparency` above were
+   actually pointing at. Not yet published anywhere pip-installable (no PyPI/tagged-git
+   release), so `manifest.json`'s `requirements` still can't reference it for real - that's the
+   next step in this specific item, not a full close-out.
+
+### Not a gap - a genuine API constraint, not a design mistake
+
+Peblar ships a native `energy_total` sensor (`TOTAL_INCREASING`, Wh) because its charger
+firmware tracks a true lifetime counter on-device. Ohme has *no* native energy sensor at all -
+docs explicitly say to build one yourself via HA's Integral helper over its Power sensor, because
+Ohme's API doesn't expose a cumulative counter either. Pod Point's API exposes neither a live
+power reading nor a lifetime total (confirmed - only date-range aggregation), so pod_home's Month
+Energy / Month Cost (monthly-reset, `TOTAL_INCREASING` for energy / `TOTAL`+`last_reset` for cost
+- HA core doesn't allow `TOTAL_INCREASING` on `monetary`) is a third reasonable answer to the
+same underlying constraint, not something to "fix" to match either of these.
 
 ## Recommendation
 
@@ -94,3 +167,8 @@ actually becomes a real plan rather than a maybe - trying to hit 95% coverage on
 still changing (write endpoints not even started yet) would mean rewriting a lot of those tests
 anyway. Next real milestone is the first real-HA validation pass (see PLAN.md) - nothing above
 the API layer has ever run inside actual Home Assistant yet.
+
+Platinum comparison items 1, 4, and 8 above are done. Items 2 and 3 are real architecture work (a
+second coordinator, a new config flow step) worth a deliberate decision on scope/timing rather
+than doing reflexively. Items 5-7 are gold-tier polish, fine to defer alongside the rest of this
+file's deferred list.

@@ -14,7 +14,8 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
-from podpoint_mobile_api import PodHomeAuth, PodHomeAuthError
+# TEMPORARY: vendored copy, see __init__.py's import comment.
+from .podpoint_mobile_api import PodHomeAuth, PodHomeAuthError
 from .const import CONF_EMAIL, CONF_PASSWORD, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)

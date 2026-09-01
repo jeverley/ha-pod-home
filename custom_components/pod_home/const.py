@@ -1,8 +1,7 @@
 """Constants for the Pod Home integration.
 
-Targets Pod Point's new "mobile-api" backend (used by the Pod Home app) rather than the legacy
-api.pod-point.com/v4 API the old pod_point integration used. Comments below note which values
-are confirmed against live API responses vs. still a best guess.
+Comments below note which values are confirmed against live API responses vs. still a best
+guess.
 """
 from __future__ import annotations
 
@@ -14,46 +13,143 @@ MANUFACTURER = "Pod Point"
 CONF_EMAIL = "email"
 CONF_PASSWORD = "password"
 
-# No single fixed scan interval - the coordinator adapts its own polling cadence based on how
-# recently the charger's own lastSeenAt has actually changed. See coordinator.py's
-# FAST_POLL_INTERVAL/SLOW_POLL_INTERVAL: measured directly against a real account, the charger
-# checks in with Pod Point's cloud roughly every 300s on a quiet baseline, PLUS extra
-# out-of-band check-ins on physical events (plug/unplug, state transitions) - noisy enough that
-# predicting an exact next-check-in time isn't reliable, so the coordinator backs off based on
-# time-since-last-change instead of a fixed interval or a predicted timestamp.
-
-# Firebase auth constants and the mobile-api base URL now live in the podpoint-mobile-api
-# package (../../podpoint-mobile-api/src/podpoint_mobile_api/const.py) - they're properties of
-# the API itself, not of this HA integration, so they moved with the client extraction.
-
-# --- chargingState / connectionState wire values (connectivity-status-v2) ---
-# CONFIRMED live against a real Solo 3: "Online"/"Available". Everything else here is
-# plausible (same PascalCase convention, names that fit the domain) but UNCONFIRMED - none of
-# these have been seen in a real response yet. Treat status/availability logic built on the
-# unconfirmed ones as provisional until seen live (e.g. during an actual charge, or a
-# deliberately-caused fault/offline state).
-CONNECTION_STATE_ONLINE = "Online"
+# connectivity-status-v2 wire values. No _OPTIONS list - unlike CHARGING_STATE_*, nothing
+# currently validates connectionState against a closed set.
+CONNECTION_STATE_ONLINE = "Online"  # confirmed live
 CONNECTION_STATE_OFFLINE = "Offline"  # unconfirmed
+CONNECTION_STATE_UNKNOWN = "Unknown"
+CONNECTION_STATE_RECONNECTING = "Reconnecting"
 
-CHARGING_STATE_AVAILABLE = "Available"  # confirmed
-CHARGING_STATE_CHARGING = "Charging"  # unconfirmed
+CHARGING_STATE_AVAILABLE = "Available"  # confirmed live
+CHARGING_STATE_PREPARING = "Preparing"
+CHARGING_STATE_CHARGING = "Charging"  # confirmed live
 CHARGING_STATE_SUSPENDED_EVSE = "SuspendedEVSE"  # confirmed live
 CHARGING_STATE_SUSPENDED_EV = "SuspendedEV"  # unconfirmed - guessed by analogy with the EVSE one
-CHARGING_STATE_OUT_OF_SERVICE = "OutOfOrder"  # unconfirmed, casing/spelling is a guess
-CHARGING_STATE_UNAVAILABLE = "Unavailable"  # unconfirmed
+CHARGING_STATE_FINISHING = "Finishing"
+CHARGING_STATE_RESERVED = "Reserved"
+CHARGING_STATE_UNAVAILABLE = "Unavailable"
+CHARGING_STATE_FAULTED = "Faulted"  # unconfirmed, casing/spelling is a guess
+CHARGING_STATE_UNKNOWN = "Unknown"
 
-# All recognized chargingState values, shared between the status sensor's _attr_options and the
-# coordinator's "have we seen an unrecognized value" logging - see helpers.py.
 CHARGING_STATE_OPTIONS = [
     CHARGING_STATE_AVAILABLE,
+    CHARGING_STATE_PREPARING,
     CHARGING_STATE_CHARGING,
     CHARGING_STATE_SUSPENDED_EVSE,
     CHARGING_STATE_SUSPENDED_EV,
-    CHARGING_STATE_OUT_OF_SERVICE,
+    CHARGING_STATE_FINISHING,
+    CHARGING_STATE_RESERVED,
     CHARGING_STATE_UNAVAILABLE,
+    CHARGING_STATE_FAULTED,
+    CHARGING_STATE_UNKNOWN,
 ]
 
-# Last-resort fallback if GET /users doesn't return a usable balance.currency (e.g. transient
-# failure on the very first poll). Pod Point operates in both the UK and Ireland, so this is a
-# real guess, not a safe universal default - it's only used until a real currency is fetched.
+# Whether each chargingState implies a cable is physically connected. None where ambiguous
+# (e.g. Faulted) or uncatalogued; use .get() so an unmapped value also returns None.
+CHARGING_STATE_CABLE_CONNECTED: dict[str, bool | None] = {
+    CHARGING_STATE_AVAILABLE: False,
+    CHARGING_STATE_PREPARING: True,
+    CHARGING_STATE_CHARGING: True,
+    CHARGING_STATE_SUSPENDED_EVSE: True,
+    CHARGING_STATE_SUSPENDED_EV: True,
+    CHARGING_STATE_FINISHING: True,
+    CHARGING_STATE_RESERVED: False,
+    CHARGING_STATE_UNAVAILABLE: False,
+    CHARGING_STATE_FAULTED: None,
+    CHARGING_STATE_UNKNOWN: None,
+}
+# Every CHARGING_STATE_OPTIONS value must be classified above.
+assert set(CHARGING_STATE_CABLE_CONNECTED) == set(CHARGING_STATE_OPTIONS)
+
+# /chargers' delegatedControl.status. Not shown to the user directly - see SCHEDULE_MODE_*
+# below for the app's own two-value framing.
+DELEGATED_CONTROL_UNKNOWN = "UNKNOWN"
+DELEGATED_CONTROL_ACTIVE = "ACTIVE"  # confirmed live
+DELEGATED_CONTROL_INACTIVE = "INACTIVE"  # confirmed live
+DELEGATED_CONTROL_PENDING = "PENDING"
+
+DELEGATED_CONTROL_OPTIONS = [
+    DELEGATED_CONTROL_UNKNOWN,
+    DELEGATED_CONTROL_ACTIVE,
+    DELEGATED_CONTROL_INACTIVE,
+    DELEGATED_CONTROL_PENDING,
+]
+
+# Binary mapping behind delegatedControl.status (ACTIVE vs. not), displayed as Smart/Basic.
+# snake_case translation keys, not display text - see CHARGER_STATUS_* below.
+SCHEDULE_MODE_SMART_CHARGING = "smart"
+SCHEDULE_MODE_BASIC_CHARGING = "basic"
+SCHEDULE_MODE_OPTIONS = [SCHEDULE_MODE_SMART_CHARGING, SCHEDULE_MODE_BASIC_CHARGING]
+
+# /chargers/{ppid}/smart-schedules/active's schedule[].type. PLUGGED_IN entries are a
+# point-in-time marker (a `timestamp`, not a `fromTimestamp`/`toTimestamp` range), not a
+# window that can be "current" alongside PAUSED/CHARGING.
+SMART_SCHEDULE_TYPE_PLUGGED_IN = "PLUGGED_IN"  # confirmed live
+SMART_SCHEDULE_TYPE_PAUSED = "PAUSED"  # confirmed live
+SMART_SCHEDULE_TYPE_CHARGING = "CHARGING"  # confirmed live
+
+# Charger Status - a derived, user-meaningful state combining chargingState and the sticky
+# charging/unplugged/finished timestamps (see charger_status() in helpers.py); not a wire value.
+# The raw chargingState passthrough lives on its own separate entity (see CHARGING_STATE_OPTIONS
+# above). Named CHARGER_STATUS_* rather than STATUS_* to avoid future collisions in this flat
+# const.py; the entity itself is just named "Status" in the UI.
+#
+# snake_case translation keys - display text lives in strings.json/translations/en.json's
+# per-entity `state` block instead.
+CHARGER_STATUS_CHARGING = "charging"
+CHARGER_STATUS_PAUSED = "paused"
+CHARGER_STATUS_AVAILABLE = "available"
+CHARGER_STATUS_PREPARING = "preparing"
+CHARGER_STATUS_FINISHING = "finishing"
+CHARGER_STATUS_RESERVED = "reserved"
+CHARGER_STATUS_UNAVAILABLE = "unavailable"
+CHARGER_STATUS_FINISHED = "finished"
+CHARGER_STATUS_FAULT = "fault"
+
+CHARGER_STATUS_OPTIONS = [
+    CHARGER_STATUS_CHARGING,
+    CHARGER_STATUS_PAUSED,
+    CHARGER_STATUS_AVAILABLE,
+    CHARGER_STATUS_PREPARING,
+    CHARGER_STATUS_FINISHING,
+    CHARGER_STATUS_RESERVED,
+    CHARGER_STATUS_UNAVAILABLE,
+    CHARGER_STATUS_FINISHED,
+    CHARGER_STATUS_FAULT,
+]
+
+# vehicle.chargeState.powerDeliveryState. Not used to derive Status (see charger_status() in
+# helpers.py); exposed as its own debug sensor instead.
+POWER_DELIVERY_STATE_OPTIONS = [
+    "UNPLUGGED",  # confirmed live
+    "UNKNOWN",
+    "PLUGGED_IN:CHARGING",
+    "PLUGGED_IN:COMPLETE",
+    "PLUGGED_IN:FAULT",
+    "PLUGGED_IN:INITIALIZING",
+    "PLUGGED_IN:NO_POWER",
+    "PLUGGED_IN:STOPPED",  # confirmed live
+]
+
+# VehicleIntentEntryDtoImpl.dayOfWeek's full set. Used to fan a single Target Charge/Ready By
+# value out across all 7 days when writing intents (the API's per-day granularity isn't exposed
+# in the UI).
+DAY_OF_WEEK_OPTIONS = [
+    "MONDAY",
+    "TUESDAY",
+    "WEDNESDAY",
+    "THURSDAY",
+    "FRIDAY",
+    "SATURDAY",
+    "SUNDAY",
+]
+
+# Charge Priority select's display labels. Both read and write go through maxPrice, not
+# SmartChargingPreferencesDTO.chargingStrategy - see charging_priority_label()/
+# max_price_for_charging_priority() in helpers.py. snake_case translation keys, not display text.
+CHARGE_PRIORITY_LOWEST_COST = "lowest_cost"
+CHARGE_PRIORITY_COMPLETE_CHARGE = "complete_charge"
+CHARGE_PRIORITY_OPTIONS = [CHARGE_PRIORITY_LOWEST_COST, CHARGE_PRIORITY_COMPLETE_CHARGE]
+
+# Display-only fallback until the real per-account currency is fetched.
 DEFAULT_CURRENCY = "GBP"

@@ -11,13 +11,17 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONNECTION_STATE_ONLINE, DOMAIN
-from .entity import PodHomeEntity, async_setup_dynamic_chargers
+from .const import CHARGING_STATE_CABLE_CONNECTED, CONNECTION_STATE_ONLINE, DOMAIN
+from .entity import (
+    PodHomeEntity,
+    PodHomeVehicleEntity,
+    async_setup_dynamic_chargers,
+    async_setup_dynamic_vehicles,
+)
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
 
-# Coordinator-backed, read-only platform - see sensor.py's comment on this same line.
 PARALLEL_UPDATES = 0
 
 
@@ -30,14 +34,16 @@ async def async_setup_entry(
         async_add_entities,
         [PodHomeConnectivitySensor, PodHomeCableConnectedSensor],
     )
+    async_setup_dynamic_vehicles(
+        entry,
+        entry.runtime_data,
+        async_add_entities,
+        [PodHomeVehicleChargingSensor],
+    )
 
 
 class PodHomeConnectivitySensor(PodHomeEntity, BinarySensorEntity):
-    """Confirmed live: connectivity-status-v2.connectionState == "Online". lastSeenAt is
-    surfaced as an attribute here rather than a standalone sensor - it's diagnostic detail
-    about connectivity specifically, not something independently dashboard-worthy. (No prior
-    entities have ever run in real HA, so there's no migration cost to this shape.)
-    """
+    """Whether the charger is currently reachable via Pod Point's cloud."""
 
     _attr_translation_key = "connectivity"
     _attr_name = "Connectivity"
@@ -68,15 +74,10 @@ class PodHomeConnectivitySensor(PodHomeEntity, BinarySensorEntity):
 
 
 class PodHomeCableConnectedSensor(PodHomeEntity, BinarySensorEntity):
-    """HEURISTIC, not confirmed: on when the most recent /charges entry has a pluggedInAt but
-    no unpluggedAt yet. connectivity-status-v2 has no direct cable-present field (this is the
-    same problem the old integration's cable-state-when-status-pending branch was working
-    around, just with a different, hopefully more reliable, signal). Verify this the next time
-    a cable is actually plugged in before trusting it for automations.
-    """
+    """Whether a cable is plugged in, derived from chargingState."""
 
     _attr_translation_key = "cable_connected"
-    _attr_name = "Cable Status"
+    _attr_name = "Cable status"
     _attr_device_class = BinarySensorDeviceClass.PLUG
 
     @property
@@ -86,6 +87,24 @@ class PodHomeCableConnectedSensor(PodHomeEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         charger = self.charger
-        if not charger or not charger.latest_charge:
+        if not charger or charger.charging_state is None:
             return None
-        return charger.latest_charge.cable_connected
+        return CHARGING_STATE_CABLE_CONNECTED.get(charger.charging_state)
+
+
+class PodHomeVehicleChargingSensor(PodHomeVehicleEntity, BinarySensorEntity):
+    """Whether the vehicle itself reports as charging (via Enode), independent of this
+    charger's own chargingState."""
+
+    _attr_translation_key = "vehicle_charging"
+    _attr_name = "Charging"
+    _attr_device_class = BinarySensorDeviceClass.BATTERY_CHARGING
+
+    @property
+    def unique_id(self) -> str:
+        return f"{DOMAIN}_{self.vehicle_id}_charging"
+
+    @property
+    def is_on(self) -> bool | None:
+        vehicle = self.vehicle
+        return vehicle.is_charging if vehicle else None

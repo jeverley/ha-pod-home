@@ -35,7 +35,7 @@ they have real physical side effects on the charger and haven't been tested live
 pip install -e .
 ```
 
-Then `poc_client`/`smoke_test_api.py` in the parent project can import `podpoint_mobile_api`
+Then the dev/test scripts under the parent project's `scratch/` can import `podpoint_mobile_api`
 directly instead of the old sys.modules-stubbing workaround.
 
 Not yet published anywhere pip-installable (no PyPI release, no tagged git release) - the
