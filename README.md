@@ -33,37 +33,60 @@ Enode, if your account has one) becomes a second device.
 
 ## What you get
 
-Every entity below is created per charger unless noted otherwise. Entity availability and which
+Two device types are created: one **charger** device per Pod Point charger on the account, and,
+only if a vehicle is linked via Enode, a separate **car** device. Entity availability and which
 ones are enabled by default depend on your account's Charging Mode (Smart Charging vs. Basic
 Charging, set from the app) and tariff - see "Charging Mode" below.
 
-**Sensors**: Status, Charging state (raw wire value), Charging mode, Last charge duration/energy/
-cost, Month energy, Month cost, Total energy, Rewards balance, Electricity rate, Boost end time.
+### Charger device
 
-**Binary sensors**: Connectivity, Cable status.
+| Entity | Type | Notes |
+| --- | --- | --- |
+| Status | Sensor | |
+| Charging state | Sensor | Raw wire value, disabled by default |
+| Charging mode | Sensor | Smart / Basic |
+| Last charge duration | Sensor | |
+| Last charge energy | Sensor | Per-session snapshot - don't add to the Energy Dashboard |
+| Last charge cost | Sensor | Per-session snapshot - don't add to the Energy Dashboard |
+| Month energy | Sensor | Finalized charges only, resets each calendar month |
+| Month cost | Sensor | Finalized charges only, resets each calendar month |
+| Total energy | Sensor | Live-inclusive running total since this install started tracking - see "Energy Dashboard" below |
+| Rewards balance | Sensor | |
+| Electricity rate | Sensor | Smart Charging only |
+| Boost end time | Sensor | When the active boost ends, if any |
+| Connectivity | Binary sensor | |
+| Cable status | Binary sensor | |
+| Firmware | Update | See "Known limitations" for what the version number does and doesn't tell you |
+| Schedule | Calendar | Manual schedule (Basic) or live smart-charging plan (Smart), whichever mode is active |
+| Ready by | Time | Smart Charging only, disabled by default outside it |
+| Target charge | Number | Smart Charging only, disabled by default outside it |
+| Charge priority | Select | Smart Charging only, disabled by default outside it |
+| Boost duration | Time | Local input (hh:mm) for the Boost for duration button below |
+| Full charge | Button | Boost ("Charge Now") to 100%, matching the app |
+| Boost for duration | Button | Boost for the duration set above, matching the app |
+| Cancel boost | Button | Only available while a boost is active |
 
-**Update**: Firmware (shows when an update is available; see "Known limitations" for what the
-version number does and doesn't tell you).
+### Car device (only if a vehicle is linked via Enode)
 
-**Calendar**: Schedule - the charger's manual schedule (Basic Charging) or its live smart-charging
-plan for the current session (Smart Charging), whichever mode is currently active.
-
-**Controls** (Smart Charging accounts only, disabled by default outside Smart Charging - see
-below): Ready by (time), Target charge (number), Charge priority (select).
-
-**Boost** ("Charge Now", matching the app's own two options): Full charge, Boost for duration
-(paired with a Boost duration time input), and Cancel boost.
-
-**Vehicle device** (only if a vehicle is linked via Enode): Battery, Estimated range, Odometer,
-Expected charge, Power delivery state, Charge rate, Max current, Charge time remaining, and a
-Charging binary sensor.
+| Entity | Type |
+| --- | --- |
+| Battery | Sensor |
+| Estimated range | Sensor |
+| Odometer | Sensor |
+| Expected charge | Sensor |
+| Power delivery state | Sensor |
+| Charge rate | Sensor |
+| Max current | Sensor |
+| Charge time remaining | Sensor |
+| Charging | Binary sensor |
 
 ### Energy Dashboard
 
-Add **Month energy** / **Month cost** to Settings → Dashboards → Energy. Both reset at the start
-of each calendar month in the charger's own local timezone. **Don't** add Last charge energy/cost
-there - those are per-session snapshots, not a monotonic running total, and will break the
-dashboard's math.
+Add **Total energy** to Settings → Dashboards → Energy - it's a live-inclusive running total
+(a session in progress counts immediately), unlike Month energy, which lags until each session
+finalizes. Add **Month cost** if you also want a cost view - there's no live-inclusive equivalent
+for cost yet. **Don't** add Last charge energy/cost there - those are per-session snapshots, not
+a monotonic running total, and will break the dashboard's math.
 
 ### Charging Mode
 
@@ -72,11 +95,12 @@ doesn't add a mode-switch control):
 
 - **Smart Charging** - schedule-optimized charging to a target %, by a target time, aware of your
   tariff. Ready by/Target charge/Charge priority/Electricity rate only apply here, and are
-  automatically disabled outside this mode.
-- **Basic Charging** - the charger follows its own fixed manual schedule instead. Note: selecting
-  a tariff with more than two rate windows, or one where the supplier controls charging directly,
-  reverts the account to Basic Charging automatically - that's Pod Point's own behaviour, not
-  something this integration decides.
+  automatically disabled outside this mode. Works on a single-rate or two-rate tariff - Pod Point
+  coordinates directly with your supplier to charge during low-demand periods even on a
+  single-rate tariff, this does not force a switch to Basic Charging.
+- **Basic Charging** - the charger follows its own fixed manual schedule instead. Selecting a
+  tariff with more than two rate windows reverts the account to Basic Charging automatically -
+  that's Pod Point's own behaviour, not something this integration decides.
 
 ## Known limitations
 

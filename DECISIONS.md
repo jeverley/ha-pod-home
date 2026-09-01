@@ -2051,3 +2051,30 @@ self-contained. Old dev-notes README also claimed charge-overrides had "produced
 until the charger's own next check-in" as an unqualified statement; kept that pull-based/~5-minute
 latency behaviour in the new README's "Known limitations" section, since it's still accurate and
 relevant to the now-implemented boost buttons.
+
+## Correction: single-rate tariff does NOT revert to Basic Charging
+
+The earlier `smart_charging_supported` entry above ("selecting a tariff with more rates, or one
+where the supplier controls charging directly, reverts the account to Basic Charging
+automatically") conflated two different things under "supplier controls charging directly."
+Corrected, per the user directly: a single-rate tariff does **not** cause a revert to Basic
+Charging - Smart Charging keeps working on one, with Pod Point coordinating directly with the
+supplier to charge during low-demand periods. That supplier coordination on a single-rate tariff
+is normal Smart Charging behaviour, not a trigger for reverting to Basic. The only confirmed
+revert trigger is a tariff with more than two rate windows. `smart_charging_supported` itself
+(coordinator.py/sensor.py) still reflects live API data either way and needed no code change -
+this was a documentation-only error in how that flag's cause was described in README.md/
+DECISIONS.md, not in the code that reads it.
+
+## HACS packaging README follow-ups from live feedback
+
+Three corrections/restructures to the README.md written above, from the user's own review of it:
+
+- **Energy Dashboard**: the user's actual dashboard uses **Total energy** for the energy panel,
+  not Month energy - corrected the recommendation. Total energy is the live-inclusive running
+  total (a session in progress counts immediately, see its docstring in sensor.py), Month energy
+  lags until each session finalizes; Month cost is still the one used for the cost panel, since
+  no live-inclusive Total cost sensor exists.
+- **Charging Mode**: see the correction entry directly above.
+- **"What you get"**: restructured into two tables (charger device, car device) rather than prose
+  paragraphs, per the user's request to call out that these are genuinely two separate HA devices.
