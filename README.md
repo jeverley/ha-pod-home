@@ -33,38 +33,62 @@ Enode, if your account has one) becomes a second device.
 
 ## What you get
 
-Two device types are created: one **charger** device per Pod Point charger on the account, and,
-only if a vehicle is linked via Enode, a separate **car** device. Entity availability and which
-ones are enabled by default depend on your account's Charging Mode (Smart Charging vs. Basic
-Charging, set from the app) and tariff - see "Charging Mode" below.
+Three device types are created: one **charger** device per Pod Point charger on the account, one
+**car** device only if a vehicle is linked via Enode, and a single account-level **Pod Point**
+device (one per config entry) for entities that aren't tied to a specific charger. Entity
+availability and which ones are enabled by default depend on your account's Charging Mode (Smart
+Charging vs. Basic Charging, set from the app) and tariff - see "Charging Mode" below.
+
+Tables below are grouped the same way Home Assistant's own device page groups them: **Sensors**
+and **Controls** are the two default (uncategorized) groups Home Assistant splits by entity
+domain; **Configuration** and **Diagnostic** are this integration's explicit `entity_category`
+choices.
 
 ### Charger device
+
+**Sensors**
 
 | Entity | Type | Notes |
 | --- | --- | --- |
 | Status | Sensor | |
-| Charging state | Sensor | Raw wire value, disabled by default |
-| Charging mode | Sensor | Smart / Basic |
 | Last charge duration | Sensor | |
 | Last charge energy | Sensor | Per-session snapshot - don't add to the Energy Dashboard |
 | Last charge cost | Sensor | Per-session snapshot - don't add to the Energy Dashboard |
 | Month energy | Sensor | Finalized charges only, resets each calendar month |
 | Month cost | Sensor | Finalized charges only, resets each calendar month |
 | Total energy | Sensor | Live-inclusive running total since this install started tracking - see "Energy Dashboard" below |
-| Rewards balance | Sensor | |
 | Electricity rate | Sensor | Smart Charging only |
 | Boost end time | Sensor | When the active boost ends, if any |
-| Connectivity | Binary sensor | |
 | Cable status | Binary sensor | |
+
+**Controls**
+
+| Entity | Type | Notes |
+| --- | --- | --- |
 | Firmware | Update | See "Known limitations" for what the version number does and doesn't tell you |
 | Schedule | Calendar | Manual schedule (Basic) or live smart-charging plan (Smart), whichever mode is active |
-| Charge priority | Select | Smart Charging only, disabled by default outside it |
 | Boost duration | Time | Local input (hh:mm) for the Boost for duration button below |
 | Full charge | Button | Boost ("Charge Now") to 100%, matching the app |
 | Boost for duration | Button | Boost for the duration set above, matching the app |
 | Cancel boost | Button | Only available while a boost is active |
 
+**Configuration**
+
+| Entity | Type | Notes |
+| --- | --- | --- |
+| Charge priority | Select | Smart Charging only, disabled by default outside it |
+
+**Diagnostic**
+
+| Entity | Type | Notes |
+| --- | --- | --- |
+| Charging state | Sensor | Raw wire value, disabled by default |
+| Charging mode | Sensor | Smart / Basic |
+| Connectivity | Binary sensor | |
+
 ### Car device (only if a vehicle is linked via Enode)
+
+**Sensors**
 
 | Entity | Type | Notes |
 | --- | --- | --- |
@@ -72,13 +96,31 @@ Charging, set from the app) and tariff - see "Charging Mode" below.
 | Estimated range | Sensor | |
 | Odometer | Sensor | |
 | Expected charge | Sensor | Smart Charging only |
-| Power delivery state | Sensor | |
 | Charge rate | Sensor | |
-| Max current | Sensor | |
 | Charge time remaining | Sensor | |
 | Charging | Binary sensor | |
+
+**Configuration**
+
+| Entity | Type | Notes |
+| --- | --- | --- |
 | Ready by | Time | Smart Charging only, disabled by default outside it |
 | Target charge | Number | Smart Charging only, disabled by default outside it |
+
+**Diagnostic**
+
+| Entity | Type | Notes |
+| --- | --- | --- |
+| Power delivery state | Sensor | |
+| Max current | Sensor | |
+
+### Pod Point device (account-level, one per config entry)
+
+**Sensors**
+
+| Entity | Type | Notes |
+| --- | --- | --- |
+| Rewards balance | Sensor | |
 
 ### Energy Dashboard
 

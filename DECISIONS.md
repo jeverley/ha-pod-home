@@ -2083,3 +2083,22 @@ Three corrections/restructures to the README.md written above, from the user's o
   against `_MODE_GATED_ENTITIES` in entity.py (`("time", "_ready_by", "vehicle")`,
   `("number", "_target_charge", "vehicle")`). Moved to the car device table alongside Expected
   charge, which is also vehicle-scoped and Smart-Charging-gated the same way.
+
+## README "What you get" split into three devices, grouped by category
+
+Per the user's request to add category/split the tables further. Two corrections made along the
+way:
+
+- **A third device exists and was missing entirely**: Rewards balance is `PodHomeAccountEntity`
+  (entity.py), grouped under its own account-level "Pod Point" device (one per config entry,
+  `DeviceInfo(identifiers={(DOMAIN, config_entry.entry_id)})`) - not the charger device where the
+  first table pass had it. Added as its own third device section.
+- **Category column reframed as a per-device split into Sensors/Controls/Configuration/
+  Diagnostic tables**, matching how Home Assistant's own device page actually groups entities:
+  `entity_category` (`CONFIG`/`DIAGNOSTIC`) drives Configuration/Diagnostic directly; everything
+  uncategorized then splits by domain into Sensors (`sensor`/`binary_sensor`) or Controls
+  (everything else this integration ships - `button`, `number`, `select`, `time`, `update`,
+  `calendar`). The Controls-domain-set part of this (which non-sensor domains land in Controls)
+  is stated with the same confidence as the earlier live conversation on this topic - a
+  well-established HA frontend convention, not something re-verified against frontend source for
+  this doc pass.
