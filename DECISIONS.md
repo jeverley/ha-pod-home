@@ -2152,3 +2152,80 @@ correctness of the code as written, not as a claim these shapes have been seen f
 API); `smart_schedule_events()`'s CHARGING-only inclusion and range-clamping; and
 `cumulative_charging_seconds()`'s window-clipping and the "real 0 vs. None" distinction its own
 docstring calls out.
+
+## pytest-homeassistant-custom-component installed - real HA test harness, first slice: config flow
+
+Second half of the two-part plan (offline helpers.py tests first, full HA suite second - per the
+user). Installed globally into this dev machine's system Python (no venv exists for this repo,
+matching how `podpoint-mobile-api` was already installed - `pip install -e podpoint-mobile-api`,
+confirmed via `pip show`). **Worth knowing**: this pulled in `homeassistant==2025.1.4` and ~100
+packages, and `pip` reported real version conflicts against other unrelated projects on this
+machine sharing the same global Python (esphome, androguard, aioesphomeapi - downgraded
+`cryptography`/`aiohttp`/`pillow`/`jinja2`/`pyyaml`/`requests`/`voluptuous`/`bleak` versions those
+projects had pinned higher). Not fixed or investigated further - out of this repo's scope - but
+flagged here since it's a real side effect of work done in this session, not contained to
+`podpoint`.
+
+**Four genuine environment problems hit and solved, in order** (all Windows-specific; irrelevant
+on the Linux CI Home Assistant's own test suite runs on, which is presumably why none of this is
+documented anywhere obvious upstream):
+
+1. **The plugin is disruptive session-wide once installed.** Just having
+   `pytest-homeassistant-custom-component` importable makes pytest auto-load its plugin for
+   *every* test in the session (entry-point-based), which swaps pytest-asyncio's `event_loop`
+   fixture for HA's own and blocks real sockets via `pytest-socket` - broke the already-passing
+   `tests/test_helpers.py`/`tests/test_translation_keys.py` immediately on install, even though
+   neither file touches Home Assistant. Fixed with a root `pytest.ini` (`-p no:homeassistant`,
+   entry-point name confirmed via `importlib.metadata.entry_points(group="pytest11")` - it's
+   `homeassistant`, not the package's own dotted name) plus `--ignore=tests/homeassistant`, so a
+   bare `pytest`/`pytest tests/` only ever collects the offline suite.
+2. **Windows' `ProactorEventLoop` needs a real loopback socket just to exist.** Its internal
+   self-pipe uses `socket.socketpair()`, which pytest-socket's blocking (still active once the
+   plugin is deliberately re-enabled for `tests/homeassistant/`, see below) intercepts before any
+   test code runs, raising `SocketBlockedError` during `event_loop` fixture setup. Fixed with
+   `--force-enable-socket` in `pytest.ini` - not a real loss of coverage, since every actual
+   network call in these tests is mocked at the auth-client boundary anyway (see point 4).
+3. **The async `hass` fixture wasn't being awaited by fixtures that depend on it**
+   (`enable_custom_integrations(hass)` received the raw `async_generator`, not a real
+   `HomeAssistant`, and crashed with `AttributeError: 'async_generator' object has no attribute
+   'data'`). Fixed with `asyncio_mode = auto` in `pytest.ini`.
+4. **`homeassistant`'s `async_get_clientsession` hardcodes `aiohttp`'s `AsyncResolver`**, which
+   requires `aiodns` to be installed at all (so `aiodns` must stay pinned to the exact version
+   `homeassistant==2025.1.4` declares, `==3.2.0` - a newer `aiodns` resolved by default breaks the
+   pin) *and* requires the running event loop to be either a plain `SelectorEventLoop` or (on
+   Windows, off the default Proactor policy) the exact `winloop.Loop` instance - neither of which
+   `homeassistant.runner.HassEventLoopPolicy` (a thin subclass of `asyncio.DefaultEventLoopPolicy`,
+   which is `WindowsProactorEventLoopPolicy` on Windows) will ever hand back, installing `winloop`
+   or not. Rather than fight the event loop policy itself (would mean monkeypatching
+   `asyncio.DefaultEventLoopPolicy` before `homeassistant.runner` is first imported - fragile,
+   invasive, and pointless for what these tests actually need), `test_config_flow.py` patches
+   `custom_components.pod_home.config_flow.async_get_clientsession` directly in its autouse
+   `no_real_setup` fixture. Architecturally clean, not just a workaround: every test in this file
+   already independently mocks `PodHomeAuth.async_get_id_token`, which never touches the session
+   object it's given, so the session's realness was never relevant to what's under test.
+
+**Subtree isolation, and why it's a *separate* pytest invocation, not a flag**: `tests/homeassistant/
+conftest.py` re-declares `pytest_plugins = ["pytest_homeassistant_custom_component.plugins"]`
+(the dotted submodule, not the bare package name - the bare name has no fixtures, confirmed by
+trying it first and getting `fixture 'enable_custom_integrations' not found` even though it's
+right there in `plugins.py`). Tried re-enabling via a `-p homeassistant` CLI flag instead of the
+nested `pytest_plugins` declaration first (avoids pytest's "nested conftest declaring
+pytest_plugins" deprecation error when the parent `tests/` dir is *also* being collected in the
+same session) - didn't work: `--force-enable-socket` stopped being honoured with that toggle
+order for reasons not fully root-caused, socket blocking came back. Reverted to the
+`pytest_plugins` declaration, which does work correctly - but only when `tests/homeassistant/` is
+targeted directly as its own pytest invocation, never together with `tests/` in one run (confirmed
+both ways: `pytest tests/homeassistant/` - 6 passed; `pytest tests/` with the nested
+`pytest_plugins` restored - fails at collection with pytest's non-top-level-conftest error).
+`--ignore=tests/homeassistant` in the root `pytest.ini` keeps the two suites from ever colliding
+by accident. This is a real operational split, not a temporary workaround: **`pytest tests/
+homeassistant/` must always be run separately from `pytest tests/`**, documented in CLAUDE.md's
+Verification section.
+
+**Coverage landed**: `tests/homeassistant/test_config_flow.py` - user flow (success, invalid
+auth), duplicate-email abort (including case-insensitivity, since `async_set_unique_id`
+lowercases the email before comparing), reauth flow (success updates the stored password and
+leaves the email unchanged; invalid auth shows an error and leaves the password unchanged). Every
+test patches `custom_components.pod_home.async_setup_entry` to a no-op success - these tests are
+about the flow's own behaviour, not about the coordinator's first refresh actually succeeding,
+which stays part of the still-open coordinator/entity test-coverage gap (see QUALITY_SCALE.md).

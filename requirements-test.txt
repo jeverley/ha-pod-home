@@ -1,0 +1,15 @@
+# Dev/test-only dependencies - never referenced by manifest.json or shipped with the integration.
+# `pip install -r requirements-test.txt` before running tests/homeassistant/ (tests/ itself, the
+# offline suite, needs none of this - see CLAUDE.md's Verification section).
+pytest-homeassistant-custom-component
+
+# Pinned to exactly what the installed pytest-homeassistant-custom-component's homeassistant
+# pin declares (homeassistant==2025.1.4 -> aiodns==3.2.0) - a newer aiodns resolved by pip's
+# default "latest" breaks that pin. Re-check this pin if pytest-homeassistant-custom-component
+# is ever upgraded (see DECISIONS.md).
+aiodns==3.2.0
+
+# Windows only: without this, aiohttp's AsyncResolver (which homeassistant's own
+# async_get_clientsession hardcodes) raises at construction time outside a SelectorEventLoop -
+# see DECISIONS.md for the full explanation. Harmless to install on other platforms too.
+winloop; sys_platform == "win32"

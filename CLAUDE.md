@@ -133,7 +133,9 @@ alone.
 
 ## Verification
 
-No Home Assistant install exists in this environment. What's actually checkable:
+`pytest-homeassistant-custom-component` (which pulls in a real `homeassistant` install) is now
+installed in this dev environment - see the "HA-dependent test suite" bullet below. Most of what
+follows still doesn't need it. What's actually checkable:
 
 - `python -m py_compile` + `python -m pyflakes` across `custom_components/pod_home/` — syntax
   and unused-import/undefined-name checks only, does not import `homeassistant`.
@@ -150,14 +152,30 @@ No Home Assistant install exists in this environment. What's actually checkable:
   Assistant installed - reuse it rather than re-solving the relative-import problem). This is the
   main way to check coordinator/entity-level logic beyond compiling, when adding new pure
   functions or extending existing ones.
-- `pytest tests/` — real test coverage of two kinds so far: `tests/test_translation_keys.py`
+- `pytest tests/` (or bare `pytest`) — the offline suite: `tests/test_translation_keys.py`
   (cross-checks `strings.json`/`translations/en.json`'s `state` blocks against the const.py
   `OPTIONS` lists they translate, see "Entity states and translations" above) and
-  `tests/test_helpers.py` (every `helpers.py` function, offline). **Still not covered**: the
-  deliberate full test-coverage pass QUALITY_SCALE.md still defers - the coordinator, entities,
-  and config flow, which need `pytest-homeassistant-custom-component` (mocked API responses, a
-  real HA test harness), not started yet. Run `pytest tests/` after touching `helpers.py` or any
-  `CHARGER_STATUS_*`/`SCHEDULE_MODE_*`/`CHARGE_PRIORITY_*` constant or its translation entries.
+  `tests/test_helpers.py` (every `helpers.py` function). No Home Assistant needed. Run after
+  touching `helpers.py` or any `CHARGER_STATUS_*`/`SCHEDULE_MODE_*`/`CHARGE_PRIORITY_*` constant
+  or its translation entries.
+- **HA-dependent test suite** (`tests/homeassistant/`) — `pip install -r requirements-test.txt`
+  first (dev/test-only, never referenced by `manifest.json`). Real `pytest-homeassistant-custom-
+  component` coverage, starting with `test_config_flow.py` (user flow, invalid auth, duplicate-
+  email abort including case-insensitivity, reauth success/failure). **Must be run as its own
+  separate invocation, never together with `tests/`** - `pytest tests/homeassistant/` (see
+  `tests/homeassistant/conftest.py` for why: the plugin is disruptive to the plain offline tests
+  when active for the whole session, and pytest won't allow a nested conftest.py to
+  re-enable it mid-collection anyway). Environment quirks specific to this dev machine, all
+  Windows-only and already resolved here - re-check if the toolchain ever moves host: `aiodns`
+  must stay pinned to `homeassistant`'s exact declared version (`==3.2.0` as of
+  `homeassistant==2025.1.4`, the version this test harness release pins); real network sockets
+  need `--force-enable-socket` (pytest.ini) since ProactorEventLoop needs a loopback
+  `socket.socketpair()` just to construct itself; `async_get_clientsession` gets mocked in
+  config-flow tests rather than left real, since building a real aiohttp connector otherwise
+  requires either a `SelectorEventLoop` or the exact `winloop.Loop` instance, neither of which
+  this harness's event loop is. **Still not covered**: the coordinator and the rest of the
+  entities - the deliberate full test-coverage pass QUALITY_SCALE.md still defers, config flow is
+  only the first slice of it.
 
 Everything above the API layer (`coordinator.py`, `entity.py`, `sensor.py`, `binary_sensor.py`,
 `config_flow.py`, `diagnostics.py`) is unverified beyond compiling and the offline `helpers.py`
