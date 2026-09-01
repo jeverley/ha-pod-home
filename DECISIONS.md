@@ -2102,3 +2102,12 @@ way:
   is stated with the same confidence as the earlier live conversation on this topic - a
   well-established HA frontend convention, not something re-verified against frontend source for
   this doc pass.
+
+## README "Known limitations" - two bullets removed
+
+Per the user directly: the boost-latency bullet (~5 min pull-based command latency) isn't
+actually a limitation of this integration - the app has the exact same latency, since it's a
+property of the charger's own check-in cadence, not something either client controls. Removed
+rather than reworded. The "remote cable lock isn't implemented yet" bullet was also removed for
+now, per the user's request - remote-lock remains untouched in the code/PLAN.md either way, this
+is a doc-only removal, not a decision to drop it from scope.

@@ -145,12 +145,6 @@ doesn't add a mode-switch control):
 
 ## Known limitations
 
-- **Charge now / remote cable lock aren't identical to the app's real-time feel.** Commands are
-  pull-based - the charger only picks up a pending action on its own next check-in with the
-  cloud, observed to be up to ~5 minutes. This applies to the boost buttons and would apply to a
-  future cable-lock control the same way.
-- **Remote cable lock isn't implemented yet.** Boost ("Charge Now") is; cable lock is the one
-  remaining write endpoint from the original scope.
 - **Firmware update version numbers are a placeholder when an update is pending.** The API
   exposes "update available" as a plain yes/no; no field carrying the actual target version
   string has been identified yet, so the Update entity's `latest_version` is best-effort, not a
