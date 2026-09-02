@@ -2505,3 +2505,57 @@ Read closely rather than taken as blanket confirmation of "log behavior under a 
 Also noted, unrelated: a `WARNING ... blocking call to import_module ...
 custom_components.pod_point.config_flow` in the same log is about the old community `pod_point`
 integration (mattrayner's), not `pod_home` - not something to act on here.
+
+## Code review of the reauth fix - 8 findings, applied
+
+`/code-review` against `git diff b1763b0~1..HEAD` (the reauth fix plus the test infrastructure
+added alongside it this session). 8 findings, all applied:
+
+- **Stale-timer race (the most severe finding)**: creating a *new* `Store` instance in
+  `config_flow.py` just to call `.async_remove()` can't cancel the *old*, still-live
+  `auth_store` instance's pending delayed-save timer (`Store._delay_handle` is per-instance
+  state) - if a token refresh landed within `AUTH_SAVE_DELAY` (5s) of the user submitting the
+  reauth form, that old timer can still fire afterwards and rewrite the stale
+  pre-password-change token back to disk, right after the fix just cleared it, reintroducing
+  the bug on the *next* restart. Rather than plumb a reference to the live instance across the
+  config-flow/entry-setup boundary (real complexity for a narrow case), fixed at the write path
+  instead: `__init__.py` now captures the password `auth` was constructed with
+  (`signed_in_password`) and `_save_auth_tokens()` compares it against `entry.data`'s *current*
+  password (read live, not from a stale closure) before saving - `entry.data` is mutated in
+  place by a reauth, not replaced, so this catches a delayed write landing after reauth
+  regardless of timing, and generalizes to *any* future path that changes the password, not just
+  this one. This also meaningfully (if not completely) addresses the separate "fix only lives at
+  one call site" altitude finding below - protection now lives in the write path itself, keyed
+  off `entry.data`, rather than solely in `config_flow.py`'s reauth branch.
+- **Unguarded `Store.async_remove()`**: wrapped in `try/except Exception` (matching
+  `__init__.py`'s own `async_load()` guard) - a failed clear must not crash reauth after a
+  correct password was already accepted; the write-path guard above is the real backstop if a
+  clear is ever skipped.
+- **Regression test didn't actually assert the Store gets cleared**:
+  `test_reauth_flow_success_updates_password` now pre-populates a stale token via `Store` before
+  running the flow, and asserts `auth_store.async_load() is None` afterward, not just that
+  `entry.data[CONF_PASSWORD]` changed - this is the test that would have caught the original bug.
+- **Altitude (fix only at one call site, `PodHomeAuth.import_tokens()` trusts any token)**:
+  meaningfully mitigated by the write-path guard above (keyed to `entry.data`, not to
+  `config_flow.py` specifically), but not fully addressed - `import_tokens()`/
+  `async_get_id_token()` in `podpoint_mobile_api/auth.py` still have no intrinsic way to refuse a
+  token that doesn't match current credentials. Left as-is rather than a larger
+  `podpoint_mobile_api` API change (binding tokens to a credential hash) - out of scope for a
+  minimal fix; the write-path guard closes the practical risk described in the original finding.
+- **`CHARGING_STATE_UNKNOWN` missing from `test_charger_status_plain_mapping`'s parametrize
+  list**: added explicitly (mapped to `None`) rather than only being incidentally covered by the
+  generic `"totally-unrecognized"` case.
+- **`tests/conftest.py`'s docstring too narrative**: trimmed to state the fact and point to
+  DECISIONS.md, per CLAUDE.md's "Comments and docstrings" convention.
+- **Duplicate-email tests near-identical**: `test_user_flow_duplicate_email_aborts` and
+  `test_user_flow_duplicate_email_is_case_insensitive` merged into one
+  `@pytest.mark.parametrize("email", [...])` test.
+- **Redundant Store delete-then-load round trip on every reauth**: left as-is. The two
+  sequential executor round-trips are on a rare, user-initiated, one-time-per-reauth path, not a
+  hot path - avoiding them would mean threading state across the reload boundary for negligible
+  real benefit, not a good trade for a "minimal edit."
+
+Retested locally where possible (offline suite unaffected; the full merged suite still hits this
+dev machine's known Windows `ProactorEventLoop` gap, same as before this fix - see the "Merged
+into one unified `tests/` suite" entry above) and via the actual GitHub Actions run before
+considering this closed.

@@ -47,9 +47,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> b
         _LOGGER.warning("Couldn't load saved auth tokens, signing in fresh", exc_info=True)
         auth_data = None
 
+    # Captured now, compared against entry.data live at write time (below) - entry.data is
+    # mutated in place by a reauth, not replaced, so this detects "this session's password is
+    # now stale" even for a write that was already delayed/in-flight when reauth completed.
+    signed_in_password = entry.data[CONF_PASSWORD]
+
     def _save_auth_tokens() -> None:
         # Only called from within auth.async_get_id_token(), never during construction, so
-        # `auth` (defined below) is always bound by the time this runs.
+        # `auth` (defined below) is always bound by the time this runs. Guards against a
+        # delayed write landing after a reauth has since changed the password - without this,
+        # a save scheduled just before reauth completes can still fire afterwards and persist
+        # the old, now-invalid session, reintroducing the bug this guard exists to prevent (see
+        # DECISIONS.md).
+        if entry.data.get(CONF_PASSWORD) != signed_in_password:
+            return
         auth_store.async_delay_save(auth.export_tokens, AUTH_SAVE_DELAY)
 
     auth = PodHomeAuth(
