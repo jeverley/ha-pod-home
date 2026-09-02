@@ -32,8 +32,11 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
 - **parallel-updates** — ✅ `PARALLEL_UPDATES = 0` added to `sensor.py`/`binary_sensor.py`.
 - **diagnostics** — ✅ `diagnostics.py` added. Deliberately never touches
   `entry.runtime_data.api`/`.api._auth` at all (rather than redacting after the fact) - the
-  coordinator's `PodHomeCharger`/`PodHomeCharge` dataclasses contain no token fields, so only
-  those plus `entry.data` (redacted) are exposed.
+  coordinator's `PodHomeCharger`/`PodHomeCharge` dataclasses contain no token fields. `entry.data`
+  (email/password) is left out of the output entirely, not included-then-redacted - see the
+  later, more precise entry below (item 4 of the platinum comparison) for why; this entry
+  originally said "plus `entry.data` (redacted)", which was wrong even at the time this was
+  written - corrected here rather than left to contradict the later entry.
 - **log-when-unavailable** — ✅ coordinator now has `_warn_once`/`_clear_warning` dedup (warn
   once, drop to debug on repeats, info on recovery), applied to every non-fatal call site
   (`async_charges`, per-charger `async_connectivity_status`/`async_charge_statistics`) and to
