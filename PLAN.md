@@ -127,6 +127,14 @@ reliably installable) release. Until then, the two copies can silently drift —
   disabled via the entity registry outside Smart Charging mode) and a unified `Schedule` calendar
   (`calendar.py`, mirrors the `Schedule` sensor - one entity adapting to whichever mode is
   active, not two mode-specific ones). See DECISIONS.md for all three.
-- **Write endpoints**: `charge-overrides` and `remote-lock`, live-tested at the charger, then
-  wired to services/switches.
+- **`charge-overrides` (boost) - built and confirmed working live** (`button.py`: Boost full
+  charge/Boost for duration/Cancel boost; `time.py`: Boost duration, a local-only hh:mm input,
+  see DECISIONS.md). Matches the app's own two boost options plus a cancel action, per the user
+  directly. **Boost for duration confirmed working live first try.** Boost full charge initially
+  sent `endAt: null` (the schema's documented "indefinite" value) - rejected live (403), and
+  separately the user confirmed triggering "Full charge" from the app itself shows a real end
+  time exactly 12 hours out, not indefinite. Fixed to send a flat 12h `endAt` instead - matches
+  the app's real behavior, not yet re-confirmed live after that fix. Cancel boost not yet tested
+  live either.
+- **`remote-lock`**: still completely untouched - no read or write entities built yet.
 - **Packaging**: `hacs.json`, LICENSE, `.github/`, git repo — sized for HACS distribution.

@@ -32,8 +32,8 @@ async def async_setup_entry(
 
 class PodHomeVehicleTargetChargeNumber(PodHomeVehicleEntity, NumberEntity):
     """Settable Target Charge - the percentage Smart Charging aims to reach by Ready By.
-    Same unique_id/translation_key as the earlier read-only sensor it replaces. NOT YET TESTED
-    against a real account - see DECISIONS.md.
+    Same unique_id/translation_key as the earlier read-only sensor it replaces. Confirmed working
+    live - see DECISIONS.md.
 
     Writes chargeLimitPercent via async_set_vehicle_charge_limit() - a plain percentage, no
     unit conversion, independent of Ready By's own write."""
@@ -42,7 +42,8 @@ class PodHomeVehicleTargetChargeNumber(PodHomeVehicleEntity, NumberEntity):
     _attr_name = "Target charge"
     _attr_device_class = NumberDeviceClass.BATTERY
     _attr_native_unit_of_measurement = PERCENTAGE
-    _attr_native_min_value = 0
+    # A 0% target charge is meaningless (nothing for Smart Charging to charge toward).
+    _attr_native_min_value = 1
     _attr_native_max_value = 100
     _attr_native_step = 1
     _attr_entity_category = EntityCategory.CONFIG
