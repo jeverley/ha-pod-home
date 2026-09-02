@@ -2468,3 +2468,11 @@ now exercise a real (no-op, ephemeral test storage dir) removal.
 **Not yet re-tested live** - this is a real fix for a confirmed live bug, but per this project's
 write-endpoint/live-confirmation discipline, needs the user to actually force another auth
 failure and confirm reauth now sticks before this is considered closed.
+
+## Reauth fix confirmed working live
+
+Per the user directly: "confirmed resolved with new code." Reauth now sticks after a real forced
+auth failure and password change - the stale-refresh-token bug above is fixed for real, not just
+in reasoning. [jeverley/ha-pod-home#1](https://github.com/jeverley/ha-pod-home/issues/1) closed
+with that confirmation. Forced-failure log-dedup behavior (`_warn_once`/`_clear_warning`) wasn't
+explicitly called out as confirmed alongside this - still open in PLAN.md.

@@ -99,15 +99,15 @@ reliably installable) release. Until then, the two copies can silently drift —
   gaps this section used to list: **diagnostics download contents - confirmed live** (a real download
   inspected: `vehicle`/`firmware.serial_number` correctly `**REDACTED**`, no `entry.data`/
   credentials anywhere); **Energy This Month/Cost This Month across a midnight/month rollover -
-  confirmed live** (observed resetting correctly). **Still open**: reauth flow and log behavior
-  under a forced failure, to be tested together (one forced auth failure exercises both). The
-  Repair issue itself fires correctly (confirmed live, no code needed there - HA core creates it
-  automatically). **A real bug was found live**, though: submitting the new password in the
-  reauth form was accepted, but a new Repair issue immediately reappeared with the same 401 -
-  root cause was `__init__.py` restoring the *old* (pre-password-change) Firebase refresh token
-  from its persisted Store on the post-reauth reload, silently trying to reuse the invalidated
-  session instead of signing in fresh. Fixed: `config_flow.py` now clears that Store on a
-  successful reauth. See DECISIONS.md. **Not yet re-tested live after the fix.**
+  confirmed live** (observed resetting correctly); **reauth flow - confirmed live**, after a real
+  bug: the Repair issue fired correctly (HA core creates it automatically, no code needed there),
+  but a new password was accepted then immediately re-failed - root cause was `__init__.py`
+  restoring the *old* (pre-password-change) Firebase refresh token from its persisted Store on
+  the post-reauth reload, silently trying to reuse the invalidated session instead of signing in
+  fresh. Fixed (`config_flow.py` now clears that Store on a successful reauth) and **the fix is
+  confirmed working live** - reauth now sticks. See DECISIONS.md and closed
+  [jeverley/ha-pod-home#1](https://github.com/jeverley/ha-pod-home/issues/1). **Still open**: log
+  behavior under a forced failure - wasn't explicitly confirmed as part of the reauth retest.
 - **Cable Status: done** - verified live, fixed, `chargingState`-derived now.
 - **Charge Mode select (Basic ⇄ Smart Charging switch) - deliberately still not built.**
   `delegatedControl.status` is read and surfaced (Charging Mode sensor); the write endpoint is
