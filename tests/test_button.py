@@ -1,5 +1,8 @@
 """Button entity tests, using pytest-homeassistant-custom-component's real `hass` fixture and the
-shared factories in tests/_fixtures.py.
+shared factories in tests/_fixtures.py. PodHomeBoostDurationButton.async_press() is the only
+entity here that touches `self.hass` (via _read_boost_duration's entity-registry lookup) - since
+these entities are constructed directly rather than added through a real platform, `entity.hass`
+is never set that way and needs assigning manually before pressing.
 """
 from __future__ import annotations
 
@@ -73,6 +76,7 @@ async def test_boost_duration_press_uses_registered_time_value_and_resets(
     coordinator.boost_duration_entities[PPID] = reset_entity
 
     entity = button.PodHomeBoostDurationButton(coordinator, PPID)
+    entity.hass = hass
     await entity.async_press()
 
     call_kwargs = coordinator.api.async_create_charge_override.call_args
@@ -92,6 +96,7 @@ async def test_boost_duration_press_without_reset_entity_registered_does_not_cra
     # No entry in coordinator.boost_duration_entities - press must still succeed.
 
     entity = button.PodHomeBoostDurationButton(coordinator, PPID)
+    entity.hass = hass
     await entity.async_press()
     coordinator.api.async_create_charge_override.assert_called_once()
 
@@ -100,6 +105,7 @@ async def test_boost_duration_press_unset_raises_clean_error(hass: HomeAssistant
     coordinator = make_coordinator(hass, {PPID: make_charger()})
     _register_boost_duration(hass, PPID, "unknown")
     entity = button.PodHomeBoostDurationButton(coordinator, PPID)
+    entity.hass = hass
     with pytest.raises(HomeAssistantError, match="Enter a Boost duration"):
         await entity.async_press()
     coordinator.api.async_create_charge_override.assert_not_called()
@@ -109,6 +115,7 @@ async def test_boost_duration_press_zero_raises_clean_error(hass: HomeAssistant)
     coordinator = make_coordinator(hass, {PPID: make_charger()})
     _register_boost_duration(hass, PPID, "00:00:00")
     entity = button.PodHomeBoostDurationButton(coordinator, PPID)
+    entity.hass = hass
     with pytest.raises(HomeAssistantError, match="greater than zero"):
         await entity.async_press()
     coordinator.api.async_create_charge_override.assert_not_called()
@@ -117,6 +124,7 @@ async def test_boost_duration_press_zero_raises_clean_error(hass: HomeAssistant)
 async def test_boost_duration_available_only_with_cable_connected(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(hass, {PPID: make_charger(charging_state="Charging")})
     entity = button.PodHomeBoostDurationButton(coordinator, PPID)
+    entity.hass = hass
     assert entity.available is True
 
     coordinator.data = {PPID: make_charger(charging_state="Available")}
