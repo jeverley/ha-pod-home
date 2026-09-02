@@ -29,7 +29,7 @@ found and fixed this way - `Cost This Month` used `state_class: total_increasing
 core rejects on `device_class: monetary` (only ENERGY-like classes allow it); switched to
 `total` with an explicit `last_reset`. Device naming was also corrected from the bare serial to
 a humanized model name ("Solo 3"), with the serial moved to `DeviceInfo.serial_number`. Not yet
-covered by that pass: reauth flow, diagnostics ZIP contents, log behavior under a forced
+covered by that pass: reauth flow, diagnostics download contents, log behavior under a forced
 failure, dynamic-device creation (still only one charger on the account), or a full
 month/midnight rollover of the Energy Dashboard sensors - those remain open, see below.
 
@@ -96,7 +96,7 @@ reliably installable) release. Until then, the two copies can silently drift —
   entities, and multiple real write endpoints have all been exercised live (see below), plus
   several real bugs found and fixed only because of that (api3 pod-id mapping, diagnostics
   `AttributeError`, auth-token-persistence-on-restart, and others - see DECISIONS.md). Of the four
-  gaps this section used to list: **diagnostics ZIP contents - confirmed live** (a real download
+  gaps this section used to list: **diagnostics download contents - confirmed live** (a real download
   inspected: `vehicle`/`firmware.serial_number` correctly `**REDACTED**`, no `entry.data`/
   credentials anywhere); **Energy This Month/Cost This Month across a midnight/month rollover -
   confirmed live** (observed resetting correctly). **Still open**: reauth flow and log behavior

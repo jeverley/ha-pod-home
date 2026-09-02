@@ -2420,3 +2420,14 @@ Three things from the user directly, in response to the "what's next" options pr
   rule is about an integration raising its own issues for *other* fixable problems it detects,
   unrelated to reauth's own dedicated (and automatic) mechanism; still correctly listed as
   deferred/nice-to-have in QUALITY_SCALE.md, this finding doesn't change that.
+
+## Correction: "diagnostics ZIP" was wrong - it's a plain JSON file download
+
+Per the user directly. Every prior mention in this file and PLAN.md called HA's diagnostics
+download a "ZIP" - it isn't, at least not for this integration/HA version: Settings → Devices &
+services → Pod Home → ⋮ → Download diagnostics produces a single `.json` file (matches the
+`config_entry-pod_home-*.json` filename on the real file the user attached earlier). PLAN.md's
+wording fixed to "diagnostics download contents" rather than "ZIP contents" - this file's own
+earlier "Diagnostics ZIP - confirmed live" entry left as written per the append-only rule, but
+the underlying fact it confirmed (redaction working correctly, no credentials in the output) is
+unaffected by the file-format wording being wrong.
