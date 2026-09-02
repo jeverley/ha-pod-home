@@ -100,11 +100,14 @@ reliably installable) release. Until then, the two copies can silently drift —
   inspected: `vehicle`/`firmware.serial_number` correctly `**REDACTED**`, no `entry.data`/
   credentials anywhere); **Energy This Month/Cost This Month across a midnight/month rollover -
   confirmed live** (observed resetting correctly). **Still open**: reauth flow and log behavior
-  under a forced failure, to be tested together (one forced auth failure exercises both). No code
-  change is needed for reauth to surface as a Repair issue - confirmed by reading HA core source
-  (`config_entries.py`'s `_async_init_reauth`) that this is automatic whenever
-  `ConfigEntryAuthFailed` is raised and the reauth flow shows a form, which `pod_home` already
-  does; still just needs live confirmation, same as the log-dedup behavior.
+  under a forced failure, to be tested together (one forced auth failure exercises both). The
+  Repair issue itself fires correctly (confirmed live, no code needed there - HA core creates it
+  automatically). **A real bug was found live**, though: submitting the new password in the
+  reauth form was accepted, but a new Repair issue immediately reappeared with the same 401 -
+  root cause was `__init__.py` restoring the *old* (pre-password-change) Firebase refresh token
+  from its persisted Store on the post-reauth reload, silently trying to reuse the invalidated
+  session instead of signing in fresh. Fixed: `config_flow.py` now clears that Store on a
+  successful reauth. See DECISIONS.md. **Not yet re-tested live after the fix.**
 - **Cable Status: done** - verified live, fixed, `chargingState`-derived now.
 - **Charge Mode select (Basic ⇄ Smart Charging switch) - deliberately still not built.**
   `delegatedControl.status` is read and surfaced (Charging Mode sensor); the write endpoint is

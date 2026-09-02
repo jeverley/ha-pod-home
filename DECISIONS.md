@@ -2431,3 +2431,40 @@ wording fixed to "diagnostics download contents" rather than "ZIP contents" - th
 earlier "Diagnostics ZIP - confirmed live" entry left as written per the append-only rule, but
 the underlying fact it confirmed (redaction working correctly, no credentials in the output) is
 unaffected by the file-format wording being wrong.
+
+## Real bug found live: reauth immediately re-failed after a correct password change
+
+The user tested reauth live: the Repair issue fired correctly (confirming the earlier finding
+that HA core creates it automatically), and submitting the new password in the reauth form was
+accepted and the issue disappeared - but a new one **immediately reappeared** with the same 401,
+even though the password was genuinely correct.
+
+**Root cause**: `__init__.py`'s `async_setup_entry` always calls `auth.import_tokens(auth_data)`
+with the Firebase refresh token persisted in a `Store` keyed by `entry.entry_id` - which does
+*not* change across a reauth (reauth updates the existing config entry and reloads it, it doesn't
+create a new one). `config_flow.py`'s `async_step_reauth_confirm` validated the *new* password
+correctly (via its own throwaway `PodHomeAuth` instance, which never touches the Store), then
+called `async_update_reload_and_abort`, which reloads the entry - and that reload's
+`async_setup_entry` unconditionally restored the *old*, pre-password-change refresh token from
+Store. `PodHomeAuth.async_get_id_token()` (auth.py) prefers refreshing an existing refresh token
+over signing in fresh whenever one is present, regardless of what `self._password` currently is -
+so every subsequent request kept trying to use the stale session tied to the old password,
+getting rejected by mobile-api (401) even though Firebase itself may have accepted the refresh
+briefly (explains the "repair disappears, then immediately reappears" pattern - a genuine sign-in
+with the new password never actually happened at the production `PodHomeAuth` instance).
+
+**Fix**: `config_flow.py`'s `async_step_reauth_confirm` now clears that Store
+(`Store(hass, AUTH_STORAGE_VERSION, auth_store_key(entry_id)).async_remove()`) immediately after
+validating the new password, before reloading - forcing the reloaded `PodHomeAuth` to sign in
+fresh with the new password instead of trying to reuse the old session.
+`AUTH_STORAGE_VERSION`/`auth_store_key()` moved to const.py so both `__init__.py` and
+`config_flow.py` share the exact key-construction logic rather than duplicating the f-string
+(a second inconsistent copy would have silently reintroduced this same class of bug).
+`Store.async_remove()` is confirmed safe to call even when no file exists yet (HA core wraps the
+delete in `suppress(FileNotFoundError)`) - matters for the fresh-install/first-ever-setup case,
+and for the existing `tests/test_config_flow.py` reauth tests, which don't mock `Store` and so
+now exercise a real (no-op, ephemeral test storage dir) removal.
+
+**Not yet re-tested live** - this is a real fix for a confirmed live bug, but per this project's
+write-endpoint/live-confirmation discipline, needs the user to actually force another auth
+failure and confirm reauth now sticks before this is considered closed.
