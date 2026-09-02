@@ -2362,3 +2362,24 @@ Per the user directly: underscore, not hyphen, matching Python module-name conve
 a package/CLI-name convention. Cosmetic - `.github/workflows/test.yml` and CLAUDE.md updated to
 match. Earlier entries above still say `requirements-test.txt` where they're describing what was
 true at the time - left as written, per this file's append-only rule.
+
+## Boost live-confirmed in full; remote-lock deliberately deprioritized; HACS validate.yml root cause confirmed
+
+Three things from the user directly, in response to the "what's next" options presented:
+
+- **Boost full charge and Cancel boost both confirmed working live** - the last two boost pieces
+  that were built-but-untested. All three boost buttons (Full charge, Boost for duration, Cancel
+  boost) are now live-confirmed. `button.py`'s module docstring updated (no longer says "NOT YET
+  TESTED"); PLAN.md updated to match.
+- **`remote-lock` deliberately deprioritized, not just deferred**: the user's own charger doesn't
+  support it, so there's no way to test it live even if built - matches this project's standing
+  rule (CLAUDE.md's write-endpoint discipline: don't mark a write as working without live
+  confirmation, and by extension don't build toward something that can never get that
+  confirmation on this account). Revisit only if that changes.
+- **`validate.yml`'s `hacs` job root cause confirmed, not just suspected**: GitHub topics were
+  added (`gh repo view` confirms `ev-charging`/`home-assistant`/`pod-point`/`pod-home` are
+  genuinely set), but the `hacs` job's `topics` check still fails identically to before, alongside
+  `hacsjson`/`integration_manifest`. This confirms the earlier hypothesis - HACS's validator
+  can't read repository metadata (topics, file contents) on a **private** repo at all, regardless
+  of what's actually there. Repo stays private for now (user's call); this check will keep
+  failing until that changes - not a content bug to keep chasing.

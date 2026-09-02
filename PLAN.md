@@ -130,15 +130,17 @@ reliably installable) release. Until then, the two copies can silently drift —
 - **`charge-overrides` (boost) - built and confirmed working live** (`button.py`: Boost full
   charge/Boost for duration/Cancel boost; `time.py`: Boost duration, a local-only hh:mm input,
   see DECISIONS.md). Matches the app's own two boost options plus a cancel action, per the user
-  directly. **Boost for duration confirmed working live first try.** Boost full charge initially
-  sent `endAt: null` (the schema's documented "indefinite" value) - rejected live (403), and
-  separately the user confirmed triggering "Full charge" from the app itself shows a real end
-  time exactly 12 hours out, not indefinite. Fixed to send a flat 12h `endAt` instead - matches
-  the app's real behavior, not yet re-confirmed live after that fix. Cancel boost not yet tested
-  live either.
-- **`remote-lock`**: still completely untouched - no read or write entities built yet.
+  directly. **All three confirmed working live**: Boost for duration worked first try; Boost
+  full charge's flat-12h-`endAt` fix and Cancel boost have both since been confirmed live too.
+- **`remote-lock`**: still completely untouched - no read or write entities built. **Deliberately
+  deprioritized, not just deferred** - per the user directly, their own charger doesn't support
+  it, so there's no way to test it live even if built. Revisit only if that changes.
 - **Packaging - done for now**: `hacs.json`, LICENSE, `.github/workflows/validate.yml`
   (`hacs/action` + `hassfest`), README.md rewritten as end-user documentation. Installable today
-  via HACS as a custom repository (Integrations → ⋮ → Custom repositories). Not yet on HACS's
-  default repository list and no tagged release yet - both premature while the integration is
-  still actively changing shape.
+  via HACS as a custom repository (Integrations → ⋮ → Custom repositories). `validate.yml`'s
+  `hacs` job still fails - confirmed via `gh run view` that GitHub topics are genuinely set
+  correctly, but HACS's validator can't read topics/manifest content on a **private** repo at
+  all, so `hacsjson`/`integration_manifest`/`topics` all fail regardless of content. Going public
+  is the only fix, and that's the user's call - repo is staying private for now. Not yet on
+  HACS's default repository list and no tagged release yet either - both still premature while
+  the integration is actively changing shape.
