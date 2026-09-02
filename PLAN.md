@@ -29,7 +29,7 @@ found and fixed this way - `Cost This Month` used `state_class: total_increasing
 core rejects on `device_class: monetary` (only ENERGY-like classes allow it); switched to
 `total` with an explicit `last_reset`. Device naming was also corrected from the bare serial to
 a humanized model name ("Solo 3"), with the serial moved to `DeviceInfo.serial_number`. Not yet
-covered by that pass: reauth flow, diagnostics ZIP contents, log behavior under a forced
+covered by that pass: reauth flow, diagnostics download contents, log behavior under a forced
 failure, dynamic-device creation (still only one charger on the account), or a full
 month/midnight rollover of the Energy Dashboard sensors - those remain open, see below.
 
@@ -95,9 +95,27 @@ reliably installable) release. Until then, the two copies can silently drift —
   running against a real HA instance across many live sessions since: config flow, coordinator,
   entities, and multiple real write endpoints have all been exercised live (see below), plus
   several real bugs found and fixed only because of that (api3 pod-id mapping, diagnostics
-  `AttributeError`, auth-token-persistence-on-restart, and others - see DECISIONS.md). Still
-  specifically unconfirmed: reauth flow, diagnostics ZIP contents, log behavior under a forced
-  failure, and Energy This Month/Cost This Month across a midnight/month rollover.
+  `AttributeError`, auth-token-persistence-on-restart, and others - see DECISIONS.md). Of the four
+  gaps this section used to list: **diagnostics download contents - confirmed live** (a real download
+  inspected: `vehicle`/`firmware.serial_number` correctly `**REDACTED**`, no `entry.data`/
+  credentials anywhere); **Energy This Month/Cost This Month across a midnight/month rollover -
+  confirmed live** (observed resetting correctly); **reauth flow - confirmed live**, after a real
+  bug: the Repair issue fired correctly (HA core creates it automatically, no code needed there),
+  but a new password was accepted then immediately re-failed - root cause was `__init__.py`
+  restoring the *old* (pre-password-change) Firebase refresh token from its persisted Store on
+  the post-reauth reload, silently trying to reuse the invalidated session instead of signing in
+  fresh. Fixed (`config_flow.py` now clears that Store on a successful reauth) and **the fix is
+  confirmed working live** - reauth now sticks. See DECISIONS.md and closed
+  [jeverley/ha-pod-home#1](https://github.com/jeverley/ha-pod-home/issues/1). **Log behavior -
+  partially confirmed, real gap remains.** A real HA log from the reauth test showed the
+  top-level auth-failure path working correctly: one `ERROR "Authentication failed..."` +
+  `DEBUG` traceback, no repeated spam across several subsequent successful polls - but that
+  logging is HA core's own `DataUpdateCoordinator` behavior (`_async_update_data` just re-raises
+  `ConfigEntryAuthFailed`), not pod_home's own `_warn_once`/`_clear_warning` dedup. That dedup
+  mechanism governs a different, narrower class of failures - individual non-fatal endpoint
+  calls (tariffs, firmware, rewards, api3) wrapped in `_safe_call` - none of which appeared in
+  that log. **Still genuinely unconfirmed**: `_warn_once`'s warn-once/debug-on-repeat/
+  info-on-recovery behavior for one of those non-fatal endpoints specifically.
 - **Cable Status: done** - verified live, fixed, `chargingState`-derived now.
 - **Charge Mode select (Basic ⇄ Smart Charging switch) - deliberately still not built.**
   `delegatedControl.status` is read and surfaced (Charging Mode sensor); the write endpoint is
@@ -130,15 +148,17 @@ reliably installable) release. Until then, the two copies can silently drift —
 - **`charge-overrides` (boost) - built and confirmed working live** (`button.py`: Boost full
   charge/Boost for duration/Cancel boost; `time.py`: Boost duration, a local-only hh:mm input,
   see DECISIONS.md). Matches the app's own two boost options plus a cancel action, per the user
-  directly. **Boost for duration confirmed working live first try.** Boost full charge initially
-  sent `endAt: null` (the schema's documented "indefinite" value) - rejected live (403), and
-  separately the user confirmed triggering "Full charge" from the app itself shows a real end
-  time exactly 12 hours out, not indefinite. Fixed to send a flat 12h `endAt` instead - matches
-  the app's real behavior, not yet re-confirmed live after that fix. Cancel boost not yet tested
-  live either.
-- **`remote-lock`**: still completely untouched - no read or write entities built yet.
+  directly. **All three confirmed working live**: Boost for duration worked first try; Boost
+  full charge's flat-12h-`endAt` fix and Cancel boost have both since been confirmed live too.
+- **`remote-lock`**: still completely untouched - no read or write entities built. **Deliberately
+  deprioritized, not just deferred** - per the user directly, their own charger doesn't support
+  it, so there's no way to test it live even if built. Revisit only if that changes.
 - **Packaging - done for now**: `hacs.json`, LICENSE, `.github/workflows/validate.yml`
   (`hacs/action` + `hassfest`), README.md rewritten as end-user documentation. Installable today
-  via HACS as a custom repository (Integrations → ⋮ → Custom repositories). Not yet on HACS's
-  default repository list and no tagged release yet - both premature while the integration is
-  still actively changing shape.
+  via HACS as a custom repository (Integrations → ⋮ → Custom repositories). `validate.yml`'s
+  `hacs` job still fails - confirmed via `gh run view` that GitHub topics are genuinely set
+  correctly, but HACS's validator can't read topics/manifest content on a **private** repo at
+  all, so `hacsjson`/`integration_manifest`/`topics` all fail regardless of content. Going public
+  is the only fix, and that's the user's call - repo is staying private for now. Not yet on
+  HACS's default repository list and no tagged release yet either - both still premature while
+  the integration is actively changing shape.

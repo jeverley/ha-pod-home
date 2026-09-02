@@ -11,7 +11,7 @@ from homeassistant.helpers.storage import Store
 
 # TEMPORARY: vendored, not an installed dependency - see PLAN.md.
 from .podpoint_mobile_api import PodHomeApiClient, PodHomeAuth
-from .const import CONF_EMAIL, CONF_PASSWORD, DOMAIN
+from .const import AUTH_STORAGE_VERSION, CONF_EMAIL, CONF_PASSWORD, auth_store_key
 from .coordinator import PodHomeDataUpdateCoordinator
 from .entity import async_sync_mode_gated_entities, async_sync_tariff_gated_entities
 
@@ -29,8 +29,8 @@ PLATFORMS: list[Platform] = [
 ]
 
 # Firebase refresh token, persisted across restarts so reload can silently refresh instead of
-# doing a full sign-in each time.
-AUTH_STORAGE_VERSION = 1
+# doing a full sign-in each time (AUTH_STORAGE_VERSION/auth_store_key in const.py, shared with
+# config_flow.py which must clear this Store on a successful reauth).
 AUTH_SAVE_DELAY = 5  # seconds, coalesced
 
 type PodHomeConfigEntry = ConfigEntry[PodHomeDataUpdateCoordinator]
@@ -40,16 +40,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> b
     """Set up Pod Home from a config entry."""
     session = async_get_clientsession(hass)
 
-    auth_store: Store = Store(hass, AUTH_STORAGE_VERSION, f"{DOMAIN}_{entry.entry_id}_auth")
+    auth_store: Store = Store(hass, AUTH_STORAGE_VERSION, auth_store_key(entry.entry_id))
     try:
         auth_data = await auth_store.async_load()
     except Exception:  # noqa: BLE001 - a corrupt/unreadable store file must not block setup
         _LOGGER.warning("Couldn't load saved auth tokens, signing in fresh", exc_info=True)
         auth_data = None
 
+    # Captured now, compared against entry.data live at write time (below) - entry.data is
+    # mutated in place by a reauth, not replaced, so this detects "this session's password is
+    # now stale" even for a write that was already delayed/in-flight when reauth completed.
+    signed_in_password = entry.data[CONF_PASSWORD]
+
     def _save_auth_tokens() -> None:
         # Only called from within auth.async_get_id_token(), never during construction, so
-        # `auth` (defined below) is always bound by the time this runs.
+        # `auth` (defined below) is always bound by the time this runs. Guards against a
+        # delayed write landing after a reauth has since changed the password - without this,
+        # a save scheduled just before reauth completes can still fire afterwards and persist
+        # the old, now-invalid session, reintroducing the bug this guard exists to prevent (see
+        # DECISIONS.md).
+        if entry.data.get(CONF_PASSWORD) != signed_in_password:
+            return
         auth_store.async_delay_save(auth.export_tokens, AUTH_SAVE_DELAY)
 
     auth = PodHomeAuth(

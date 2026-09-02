@@ -13,9 +13,16 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from homeassistant import config_entries, data_entry_flow
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.pod_home.const import CONF_EMAIL, CONF_PASSWORD, DOMAIN
+from custom_components.pod_home.const import (
+    AUTH_STORAGE_VERSION,
+    CONF_EMAIL,
+    CONF_PASSWORD,
+    DOMAIN,
+    auth_store_key,
+)
 from custom_components.pod_home.podpoint_mobile_api import PodHomeAuthError
 
 pytestmark = pytest.mark.asyncio
@@ -75,35 +82,18 @@ async def test_user_flow_invalid_auth_shows_error(hass: HomeAssistant) -> None:
     assert result["errors"] == {"base": "invalid_auth"}
 
 
-async def test_user_flow_duplicate_email_aborts(hass: HomeAssistant) -> None:
-    existing = MockConfigEntry(
-        domain=DOMAIN, unique_id=USER_INPUT[CONF_EMAIL].lower(), data=USER_INPUT
-    )
-    existing.add_to_hass(hass)
-
-    with patch(
-        "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
-        AsyncMock(return_value="id-token"),
-    ):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": config_entries.SOURCE_USER}
-        )
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], USER_INPUT
-        )
-
-    assert result["type"] == data_entry_flow.FlowResultType.ABORT
-    assert result["reason"] == "already_configured"
-
-
-async def test_user_flow_duplicate_email_is_case_insensitive(hass: HomeAssistant) -> None:
+@pytest.mark.parametrize(
+    "email",
+    [USER_INPUT[CONF_EMAIL], USER_INPUT[CONF_EMAIL].upper()],
+    ids=["same-case", "different-case"],
+)
+async def test_user_flow_duplicate_email_aborts(hass: HomeAssistant, email: str) -> None:
     """async_set_unique_id lowercases the email - a re-add with different casing should still
     match the existing entry rather than creating a second one."""
     existing = MockConfigEntry(
         domain=DOMAIN, unique_id=USER_INPUT[CONF_EMAIL].lower(), data=USER_INPUT
     )
     existing.add_to_hass(hass)
-    shouty_input = {**USER_INPUT, CONF_EMAIL: USER_INPUT[CONF_EMAIL].upper()}
 
     with patch(
         "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
@@ -113,7 +103,7 @@ async def test_user_flow_duplicate_email_is_case_insensitive(hass: HomeAssistant
             DOMAIN, context={"source": config_entries.SOURCE_USER}
         )
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], shouty_input
+            result["flow_id"], {**USER_INPUT, CONF_EMAIL: email}
         )
 
     assert result["type"] == data_entry_flow.FlowResultType.ABORT
@@ -125,6 +115,14 @@ async def test_reauth_flow_success_updates_password(hass: HomeAssistant) -> None
         domain=DOMAIN, unique_id=USER_INPUT[CONF_EMAIL].lower(), data=USER_INPUT
     )
     entry.add_to_hass(hass)
+
+    # A token persisted under the *old* password must not survive reauth (see DECISIONS.md -
+    # this is the regression test for that exact bug: reauth appearing to succeed, then
+    # immediately re-failing because a stale refresh token was restored on reload).
+    auth_store = Store(hass, AUTH_STORAGE_VERSION, auth_store_key(entry.entry_id))
+    await auth_store.async_save(
+        {"id_token": "stale", "refresh_token": "stale-refresh", "expires_at": None}
+    )
 
     with patch(
         "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
@@ -142,6 +140,7 @@ async def test_reauth_flow_success_updates_password(hass: HomeAssistant) -> None
     assert result["type"] == data_entry_flow.FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
     assert entry.data[CONF_PASSWORD] == "new-password"
+    assert await auth_store.async_load() is None  # stale token cleared, not just entry.data
     assert entry.data[CONF_EMAIL] == USER_INPUT[CONF_EMAIL]  # unchanged
 
 
