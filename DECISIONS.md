@@ -2027,3 +2027,87 @@ lag on Pod Point's backend (the schedule plan not being regenerated instantly on
 not a bug in `calendar.py`'s rendering of whatever `smart_schedule_windows` the API currently
 returns - no code change made. Not confirmed how long the lag lasts or whether a manual refresh
 speeds it up; noted here as an observed real-account quirk rather than investigated further.
+
+## HACS packaging + README rewrite
+
+`hacs.json` added (minimal shape: `name` + `render_readme`) - no `homeassistant` minimum-version
+key set, since no real floor has ever been tested against; no `country`/`zip_release` fields,
+neither applies. `.github/workflows/validate.yml` added running `hacs/action` and
+`home-assistant/actions/hassfest`, matching what HACS's own default-repository validation runs -
+this repo isn't on that list yet, but the workflow catches the same class of manifest/hacs.json
+mistakes early regardless. LICENSE already existed from before this session.
+
+README.md rewritten from dev-notes into end-user documentation (installation via HACS custom
+repository or manual copy, setup steps, the full current entity list, Energy Dashboard and
+Charging Mode guidance, a "Known limitations" section). Confirmed while writing the installation
+section that manual/HACS install genuinely needs no separate `pip install` step: all three
+`podpoint_mobile_api` imports in the shipped integration (`__init__.py`, `config_flow.py`,
+`coordinator.py`) are relative (`from .podpoint_mobile_api import ...`), resolving to the vendored
+copy under `custom_components/pod_home/podpoint_mobile_api/`, not the standalone package -
+`manifest.json`'s empty `requirements` was previously documented (old README) as meaning HA
+"won't auto-install the package... unless it's manually pip-installed first," which was already
+wrong by the time that sentence was read again now - the vendoring makes the integration
+self-contained. Old dev-notes README also claimed charge-overrides had "produced no reaction
+until the charger's own next check-in" as an unqualified statement; kept that pull-based/~5-minute
+latency behaviour in the new README's "Known limitations" section, since it's still accurate and
+relevant to the now-implemented boost buttons.
+
+## Correction: single-rate tariff does NOT revert to Basic Charging
+
+The earlier `smart_charging_supported` entry above ("selecting a tariff with more rates, or one
+where the supplier controls charging directly, reverts the account to Basic Charging
+automatically") conflated two different things under "supplier controls charging directly."
+Corrected, per the user directly: a single-rate tariff does **not** cause a revert to Basic
+Charging - Smart Charging keeps working on one, with Pod Point coordinating directly with the
+supplier to charge during low-demand periods. That supplier coordination on a single-rate tariff
+is normal Smart Charging behaviour, not a trigger for reverting to Basic. The only confirmed
+revert trigger is a tariff with more than two rate windows. `smart_charging_supported` itself
+(coordinator.py/sensor.py) still reflects live API data either way and needed no code change -
+this was a documentation-only error in how that flag's cause was described in README.md/
+DECISIONS.md, not in the code that reads it.
+
+## HACS packaging README follow-ups from live feedback
+
+Three corrections/restructures to the README.md written above, from the user's own review of it:
+
+- **Energy Dashboard**: the user's actual dashboard uses **Total energy** for the energy panel,
+  not Month energy - corrected the recommendation. Total energy is the live-inclusive running
+  total (a session in progress counts immediately, see its docstring in sensor.py), Month energy
+  lags until each session finalizes; Month cost is still the one used for the cost panel, since
+  no live-inclusive Total cost sensor exists.
+- **Charging Mode**: see the correction entry directly above.
+- **"What you get"**: restructured into two tables (charger device, car device) rather than prose
+  paragraphs, per the user's request to call out that these are genuinely two separate HA devices.
+  First pass of that table wrongly placed Ready by/Target charge under the charger device - both
+  are actually `PodHomeVehicleEntity` (time.py/number.py), i.e. car-device entities, confirmed
+  against `_MODE_GATED_ENTITIES` in entity.py (`("time", "_ready_by", "vehicle")`,
+  `("number", "_target_charge", "vehicle")`). Moved to the car device table alongside Expected
+  charge, which is also vehicle-scoped and Smart-Charging-gated the same way.
+
+## README "What you get" split into three devices, grouped by category
+
+Per the user's request to add category/split the tables further. Two corrections made along the
+way:
+
+- **A third device exists and was missing entirely**: Rewards balance is `PodHomeAccountEntity`
+  (entity.py), grouped under its own account-level "Pod Point" device (one per config entry,
+  `DeviceInfo(identifiers={(DOMAIN, config_entry.entry_id)})`) - not the charger device where the
+  first table pass had it. Added as its own third device section.
+- **Category column reframed as a per-device split into Sensors/Controls/Configuration/
+  Diagnostic tables**, matching how Home Assistant's own device page actually groups entities:
+  `entity_category` (`CONFIG`/`DIAGNOSTIC`) drives Configuration/Diagnostic directly; everything
+  uncategorized then splits by domain into Sensors (`sensor`/`binary_sensor`) or Controls
+  (everything else this integration ships - `button`, `number`, `select`, `time`, `update`,
+  `calendar`). The Controls-domain-set part of this (which non-sensor domains land in Controls)
+  is stated with the same confidence as the earlier live conversation on this topic - a
+  well-established HA frontend convention, not something re-verified against frontend source for
+  this doc pass.
+
+## README "Known limitations" - two bullets removed
+
+Per the user directly: the boost-latency bullet (~5 min pull-based command latency) isn't
+actually a limitation of this integration - the app has the exact same latency, since it's a
+property of the charger's own check-in cadence, not something either client controls. Removed
+rather than reworded. The "remote cable lock isn't implemented yet" bullet was also removed for
+now, per the user's request - remote-lock remains untouched in the code/PLAN.md either way, this
+is a doc-only removal, not a decision to drop it from scope.
