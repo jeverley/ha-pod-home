@@ -2559,3 +2559,22 @@ Retested locally where possible (offline suite unaffected; the full merged suite
 dev machine's known Windows `ProactorEventLoop` gap, same as before this fix - see the "Merged
 into one unified `tests/` suite" entry above) and via the actual GitHub Actions run before
 considering this closed.
+
+## Cancel boost icon reverted to static; boost-start buttons gated on cable connected
+
+Two follow-ups from the user, both direct:
+
+- **Cancel boost's dynamic icon reverted to a static `mdi:timer-off-outline`.** Per the user:
+  `available` already carries the "is a boost active" signal (greyed out when nothing to
+  cancel) - a second, separate dynamic-icon mechanism duplicated that same signal rather than
+  adding new information. Simplified back to the icon this entity started with, before the
+  earlier "should the cancel-boost icon indicate an active boost" exploration added the dynamic
+  swap.
+- **Full charge and Boost for duration are now unavailable while the cable is unplugged**, per
+  the user: the app itself won't let you start a boost with nothing plugged in, so this matches
+  that rather than letting the button be pressed and fail live against the API. Uses the same
+  `is_momentarily_unplugged()` helper (helpers.py) the Cable status binary sensor already relies
+  on, keyed off `charger.charging_state` - no new logic, just applied to two more entities.
+  Cancel boost deliberately NOT gated the same way - cancelling an active boost should stay
+  possible even if the cable happens to read as unplugged at that instant (e.g. a momentary
+  blip), matching its own existing `boost_end_at is not None` gate instead.
