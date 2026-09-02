@@ -39,88 +39,56 @@ device (one per config entry) for entities that aren't tied to a specific charge
 availability and which ones are enabled by default depend on your account's Charging Mode (Smart
 Charging vs. Basic Charging, set from the app) and tariff - see "Charging Mode" below.
 
-Tables below are grouped the same way Home Assistant's own device page groups them: **Sensors**
-and **Controls** are the two default (uncategorized) groups Home Assistant splits by entity
-domain; **Configuration** and **Diagnostic** are this integration's explicit `entity_category`
-choices.
+Each table's **Category** column is the same grouping Home Assistant's own device page uses:
+**Sensors** and **Controls** are its two default (uncategorized) groups, split by entity domain;
+**Configuration** and **Diagnostic** are this integration's explicit `entity_category` choices.
 
 ### Charger device
 
-**Sensors**
-
-| Entity | Type | Notes |
-| --- | --- | --- |
-| Status | Sensor | |
-| Last charge duration | Sensor | |
-| Last charge energy | Sensor | Per-session snapshot - don't add to the Energy Dashboard |
-| Last charge cost | Sensor | Per-session snapshot - don't add to the Energy Dashboard |
-| Month energy | Sensor | Finalized charges only, resets each calendar month |
-| Month cost | Sensor | Finalized charges only, resets each calendar month |
-| Total energy | Sensor | Live-inclusive running total since this install started tracking - see "Energy Dashboard" below |
-| Electricity rate | Sensor | Smart Charging only |
-| Boost end time | Sensor | When the active boost ends, if any |
-| Cable status | Binary sensor | |
-
-**Controls**
-
-| Entity | Type | Notes |
-| --- | --- | --- |
-| Firmware | Update | See "Known limitations" for what the version number does and doesn't tell you |
-| Schedule | Calendar | Manual schedule (Basic) or live smart-charging plan (Smart), whichever mode is active |
-| Boost duration | Time | Local input (hh:mm) for the Boost for duration button below |
-| Full charge | Button | Boost ("Charge Now") to 100%, matching the app |
-| Boost for duration | Button | Boost for the duration set above, matching the app |
-| Cancel boost | Button | Only available while a boost is active |
-
-**Configuration**
-
-| Entity | Type | Notes |
-| --- | --- | --- |
-| Charge priority | Select | Smart Charging only, disabled by default outside it |
-
-**Diagnostic**
-
-| Entity | Type | Notes |
-| --- | --- | --- |
-| Charging state | Sensor | Raw wire value, disabled by default |
-| Charging mode | Sensor | Smart / Basic |
-| Connectivity | Binary sensor | |
+| Entity              | Category      | Type           | Notes |
+| -------------------- | ------------- | -------------- | ----- |
+| Status                | Sensors       | Sensor         | High-level status derived from the charger's wire state (Charging, Paused, Available, Finished, etc.) |
+| Last charge duration   | Sensors       | Sensor         | Duration of the most recent charge - live if one is in progress, else the last finished one |
+| Last charge energy     | Sensors       | Sensor         | Per-session snapshot - don't add to the Energy Dashboard |
+| Last charge cost       | Sensors       | Sensor         | Per-session snapshot - don't add to the Energy Dashboard |
+| Month energy           | Sensors       | Sensor         | Finalized charges only, resets each calendar month |
+| Month cost             | Sensors       | Sensor         | Finalized charges only, resets each calendar month |
+| Total energy           | Sensors       | Sensor         | Live-inclusive running total since this install started tracking - see "Energy Dashboard" below |
+| Electricity rate       | Sensors       | Sensor         | Current tariff rate, computed from your configured tariff windows - Smart Charging only |
+| Boost end time         | Sensors       | Sensor         | When the active boost ends, if any |
+| Cable status           | Sensors       | Binary sensor  | On when a cable is physically connected |
+| Firmware               | Controls      | Update         | See "Known limitations" for what the version number does and doesn't tell you |
+| Schedule               | Controls      | Calendar       | Manual schedule (Basic) or live smart-charging plan (Smart), whichever mode is active |
+| Boost duration         | Controls      | Time           | Local input (hh:mm) for Boost for duration below - no default, resets after each use |
+| Full charge            | Controls      | Button         | Boost ("Charge Now") to 100%, matching the app |
+| Boost for duration     | Controls      | Button         | Boost for the duration set above, matching the app |
+| Cancel boost           | Controls      | Button         | Only available while a boost is active |
+| Charge priority        | Configuration | Select         | Smart Charging only, disabled by default outside it |
+| Charging state         | Diagnostic    | Sensor         | Raw wire value, disabled by default |
+| Charging mode          | Diagnostic    | Sensor         | Smart / Basic |
+| Connectivity           | Diagnostic    | Binary sensor  | On when the charger is reachable via Pod Point's cloud |
 
 ### Car device (only if a vehicle is linked via Enode)
 
-**Sensors**
-
-| Entity | Type | Notes |
-| --- | --- | --- |
-| Battery | Sensor | |
-| Estimated range | Sensor | |
-| Odometer | Sensor | |
-| Expected charge | Sensor | Smart Charging only |
-| Charge rate | Sensor | |
-| Charge time remaining | Sensor | |
-| Charging | Binary sensor | |
-
-**Configuration**
-
-| Entity | Type | Notes |
-| --- | --- | --- |
-| Ready by | Time | Smart Charging only, disabled by default outside it |
-| Target charge | Number | Smart Charging only, disabled by default outside it |
-
-**Diagnostic**
-
-| Entity | Type | Notes |
-| --- | --- | --- |
-| Power delivery state | Sensor | |
-| Max current | Sensor | |
+| Entity                | Category      | Type          | Notes |
+| ---------------------- | ------------- | ------------- | ----- |
+| Battery                 | Sensors       | Sensor        | Vehicle's reported battery level, via Enode |
+| Estimated range         | Sensors       | Sensor        | Vehicle's estimated range, derived from battery level (not live telemetry) |
+| Odometer                | Sensors       | Sensor        | Vehicle's odometer reading, via Enode |
+| Expected charge         | Sensors       | Sensor        | Smart Charging's live prediction for the % it'll actually reach by Ready by - can diverge from Target charge if a constraint (e.g. Charge priority) prevents hitting it. Smart Charging only |
+| Charge rate             | Sensors       | Sensor        | Vehicle's charge rate - null once charging stops |
+| Charge time remaining   | Sensors       | Sensor        | Estimated time remaining, if reported by the vehicle |
+| Charging                | Sensors       | Binary sensor | On while the vehicle itself reports charging, independent of the charger's own state |
+| Ready by                | Configuration | Time          | Smart Charging only, disabled by default outside it |
+| Target charge           | Configuration | Number        | Smart Charging only, disabled by default outside it |
+| Power delivery state    | Diagnostic    | Sensor        | Raw wire value from the vehicle's own charge state, disabled by default |
+| Max current             | Diagnostic    | Sensor        | Raw wire value, disabled by default - always null on this account so far |
 
 ### Pod Point device (account-level, one per config entry)
 
-**Sensors**
-
-| Entity | Type | Notes |
-| --- | --- | --- |
-| Rewards balance | Sensor | |
+| Entity          | Category | Type   | Notes |
+| ---------------- | -------- | ------ | ----- |
+| Rewards balance   | Sensors  | Sensor | Account-wide Pod Point rewards balance, always in GBP regardless of your billing currency |
 
 ### Energy Dashboard
 

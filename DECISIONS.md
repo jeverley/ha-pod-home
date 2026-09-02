@@ -2620,3 +2620,16 @@ typed rather than importing `PodHomeBoostDurationTime` into coordinator.py, keep
 platform-imports-coordinator direction one-way) and exposes `async_reset()`; button.py looks
 itself up via the coordinator and calls it directly. Not a new HA service, no `services.yaml` -
 this is internal-only, plain Python composition between two entities the same integration owns.
+
+## README "What you get" tables: merged sub-tables into one per device with a Category column
+
+Per the user: the earlier four-mini-tables-per-device layout (Sensors/Controls/Configuration/
+Diagnostic as separate tables) rendered as visibly different widths next to each other (some
+just 1-3 rows), several rows had a blank Notes cell, and the category grouping wasn't visible as
+data - only as which of the four tables a row happened to sit under. Merged into one table per
+device with an explicit **Category** column carrying the same information, plus filled in every
+previously-blank Notes cell - sourced from the actual entity class docstrings (sensor.py/
+binary_sensor.py), not guessed, e.g. Charge rate's "null once charging stops", Max current's
+"always null on this account so far", Cable status's "on when a cable is physically connected".
+Verified the full 32-entity list against `strings.json` again after the rewrite - exact match,
+no entities dropped or duplicated by the restructure.
