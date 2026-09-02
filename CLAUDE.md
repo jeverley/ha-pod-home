@@ -154,24 +154,31 @@ the authoritative place `pytest tests/` is verified**, not this dev machine (Win
   functions or extending existing ones.
 - `pytest tests/` — the whole suite runs as one unified pytest session (`tests/conftest.py`
   registers `pytest-homeassistant-custom-component` for everything, no offline/HA-dependent
-  split): `tests/test_translation_keys.py`, `tests/test_helpers.py`, and `tests/test_config_flow.py`
-  (config flow: user flow success/invalid auth, duplicate-email abort including
-  case-insensitivity, reauth success/failure) all run together. `pip install -r
+  split). 159 tests: `tests/test_translation_keys.py`, `tests/test_helpers.py`,
+  `tests/test_config_flow.py` (user flow, duplicate-email abort, reauth), `tests/
+  test_coordinator.py` (fetch/parse/staleness/error-handling logic against a mocked
+  `PodHomeApiClient`), and one file per entity platform (`test_sensor.py`/`test_binary_sensor.py`/
+  `test_number.py`/`test_select.py`/`test_time.py`/`test_calendar.py`/`test_button.py`/
+  `test_update.py`), using the shared dataclass factories in `tests/_fixtures.py`. `pip install -r
   requirements_test.txt` first (dev/test-only, never referenced by `manifest.json`). Always use
   `python -m pytest tests/`, not bare `pytest` - only `-m` puts the repo root on `sys.path`,
-  needed for `custom_components` to import. **On this dev machine (Windows), the full suite is
-  currently broken** - Windows' `asyncio.ProactorEventLoop` needs a real loopback socket just to
-  construct itself, which the plugin's socket-blocking intercepts, breaking every test in the
-  session including the plain synchronous ones (confirmed local repro: 96 errors). This doesn't
-  happen on Linux (CI). Known, diagnosed, not being chased further locally - `.github/workflows/
-  test.yml` is what actually gates whether the suite passes; treat a local Windows failure here as
-  expected, not a regression, and check the GitHub Actions run instead. `async_get_clientsession`
-  is mocked in the config-flow tests regardless of platform - architecturally correct either way,
-  not a Windows workaround. **Still not covered**: the coordinator and the rest of the
-  entities - the deliberate full test-coverage pass QUALITY_SCALE.md still defers, config flow is
-  only the first slice of it.
+  needed for `custom_components` to import. An entity constructed directly for a test (not added
+  through a real platform) never gets `self.hass` set automatically - assign it manually
+  (`entity.hass = hass`) before calling anything that needs it (see test_button.py). **On this
+  dev machine (Windows), the full suite is currently broken** - Windows' `asyncio.ProactorEventLoop`
+  needs a real loopback socket just to construct itself, which the plugin's socket-blocking
+  intercepts, breaking every test in the session including the plain synchronous ones (confirmed
+  local repro: 96 errors). This doesn't happen on Linux (CI). Known, diagnosed, not being chased
+  further locally - `.github/workflows/test.yml` is what actually gates whether the suite passes;
+  treat a local Windows failure here as expected, not a regression, and check the GitHub Actions
+  run instead. `async_get_clientsession` is mocked in the config-flow tests regardless of
+  platform - architecturally correct either way, not a Windows workaround. **Still not covered**:
+  `async_setup_entry`'s real first refresh (config flow tests mock it; coordinator tests bypass
+  it), the mode/tariff-gating reconciliation functions in entity.py, and dynamic-device creation -
+  see QUALITY_SCALE.md for the honest remaining list.
 
-Everything above the API layer (`coordinator.py`, `entity.py`, `sensor.py`, `binary_sensor.py`,
-`config_flow.py`, `diagnostics.py`) is unverified beyond compiling and the offline `helpers.py`
-checks above until it's actually run inside a real Home Assistant instance — don't claim it
-works, say that plainly instead.
+Unit-tested (mocked API responses, real `hass` fixture) is not the same claim as **live-verified**
+against a real Home Assistant instance and a real account - the two are tracked separately in
+this file and DECISIONS.md/PLAN.md. Don't claim something works live just because it's covered by
+a test with mocked data; say plainly which kind of verification a given piece of code actually
+has.

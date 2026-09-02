@@ -65,6 +65,24 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
   only - `async_setup_entry` itself (the coordinator's first refresh, real or mocked) isn't
   exercised by these tests, and remains part of the broader `test-coverage` gap above.
 
+- **test-coverage** — 95% coverage requirement, coordinator + entities. **Substantially closed**,
+  not just a first slice anymore: `tests/test_helpers.py` (90 cases, offline) covers every pure
+  function; `tests/test_coordinator.py` (17 cases) covers `_async_fetch_data`/`_async_update_data`
+  happy-path parsing in both charging modes, empty-`/chargers` handling, auth/connection/HTTP
+  error paths, staleness-cadence caching, `_accumulate_total_energy`, sticky-state persistence via
+  `Store`, adaptive polling, and api3 charge matching; every entity platform now has its own test
+  file (`test_sensor.py`/`test_binary_sensor.py`/`test_number.py`/`test_select.py`/`test_time.py`/
+  `test_calendar.py`/`test_button.py`/`test_update.py`) covering entities with genuine logic
+  (derived values, conditional availability/attributes, unit/currency handling, write-endpoint
+  calls and their error paths) - a pure field-passthrough sensor gets one assertion, not
+  exhaustive coverage of every trivial property. 159 tests total. **Still open, honestly**: this
+  isn't formal 95%-line-coverage-tool-measured - no `pytest-cov` run has actually confirmed the
+  percentage; a handful of `PodHomeVehicleReadyByTime`/dynamic-device-creation/mode-and-tariff-
+  gating-reconciliation (`async_sync_mode_gated_entities`/`async_sync_tariff_gated_entities` in
+  entity.py) paths remain untested; and `config_flow.py`'s `async_setup_entry` integration (the
+  coordinator's real first refresh, not mocked) still isn't exercised end-to-end. Good enough to
+  call this deferred item substantially done, not literally 100%.
+
 ## Also addressed this phase, beyond the original four
 
 - **Unconfirmed enum values (real correctness issue, not in the original list)** — an
@@ -74,16 +92,6 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
 
 ## Deferred - real work, not needed for a HACS-quality v1
 
-- **test-coverage** — 95% coverage requirement, coordinator + entities. `tests/test_helpers.py`
-  (90 cases, offline) covers every pure function `coordinator.py`/`sensor.py` etc. lean on.
-  `tests/test_coordinator.py` (9 cases, real HA harness, mocked `PodHomeApiClient`) is a first
-  slice of direct coordinator coverage - happy-path parsing (Basic and Smart Charging modes),
-  empty-`/chargers` handling, auth/connection/HTTP error paths, boost end time parsing. **Still
-  open**: most of `coordinator.py`'s staleness-cadence branches, `_accumulate_total_energy`,
-  sticky-state persistence, api3 charge matching, and adaptive polling aren't covered yet: every
-  entity platform's own classes (sensor.py, binary_sensor.py, etc.) still have zero direct
-  coverage. Still the single biggest gap for a core submission; not blocking for personal/HACS
-  use.
 - **strict-typing** — full PEP-561 typing + a `py.typed` marker + entry in core's
   `.strict-typing` file. The code is already reasonably typed (`from __future__ import
   annotations`, most signatures annotated) but hasn't been audited against `mypy --strict`.
