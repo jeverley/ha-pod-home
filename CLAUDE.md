@@ -133,7 +133,9 @@ alone.
 
 ## Verification
 
-No Home Assistant install exists in this environment. What's actually checkable:
+`.github/workflows/test.yml` runs everything below on every push/PR (Linux runners) - **that's
+the authoritative place `pytest tests/` is verified**, not this dev machine (Windows) - see the
+`pytest tests/` bullet below for why. What's actually checkable:
 
 - `python -m py_compile` + `python -m pyflakes` across `custom_components/pod_home/` — syntax
   and unused-import/undefined-name checks only, does not import `homeassistant`.
@@ -144,19 +146,30 @@ No Home Assistant install exists in this environment. What's actually checkable:
   the user (see "Credentials"). Only covers `podpoint_mobile_api`, not the coordinator,
   entities, or config flow.
 - `helpers.py` has no HA import, so its pure functions (`charger_status`, `select_last_charge`,
-  `cumulative_charging_seconds`, etc.) are exercisable offline in a throwaway scratchpad script
-  with hand-built fixture data - no real HA instance or live account needed. This is the main way
-  to check coordinator/entity-level logic beyond compiling. Check the actual exit code
-  (`echo "exit=$?"`), not just a line-count of expected output (e.g. `grep -c "^\[OK\]"`) - a
-  script that crashes partway through produces no failure line, so a pure count can silently
-  under-report for however long the crash goes unnoticed.
-- `pytest tests/` — the start of a real test suite (`tests/test_translation_keys.py`
-  cross-checks `strings.json`/`translations/en.json`'s `state` blocks against the const.py
-  `OPTIONS` lists they translate, see "Entity states and translations" above). Not the
-  deliberate full test-coverage pass QUALITY_SCALE.md still defers (fixtures, mocked API
-  responses, `pytest-homeassistant-custom-component`) - just the first real test, added because
-  it directly closes a verified gap. Run after touching any `CHARGER_STATUS_*`/
-  `SCHEDULE_MODE_*`/`CHARGE_PRIORITY_*` constant or its translation entries.
+  `cumulative_charging_seconds`, etc.) are exercisable offline with hand-built fixture data - no
+  real HA instance or live account needed. `tests/test_helpers.py` now covers every function this
+  way (see `tests/_pod_home_loader.py` for how it imports helpers.py/const.py without Home
+  Assistant installed - reuse it rather than re-solving the relative-import problem). This is the
+  main way to check coordinator/entity-level logic beyond compiling, when adding new pure
+  functions or extending existing ones.
+- `pytest tests/` — the whole suite runs as one unified pytest session (`tests/conftest.py`
+  registers `pytest-homeassistant-custom-component` for everything, no offline/HA-dependent
+  split): `tests/test_translation_keys.py`, `tests/test_helpers.py`, and `tests/test_config_flow.py`
+  (config flow: user flow success/invalid auth, duplicate-email abort including
+  case-insensitivity, reauth success/failure) all run together. `pip install -r
+  requirements_test.txt` first (dev/test-only, never referenced by `manifest.json`). Always use
+  `python -m pytest tests/`, not bare `pytest` - only `-m` puts the repo root on `sys.path`,
+  needed for `custom_components` to import. **On this dev machine (Windows), the full suite is
+  currently broken** - Windows' `asyncio.ProactorEventLoop` needs a real loopback socket just to
+  construct itself, which the plugin's socket-blocking intercepts, breaking every test in the
+  session including the plain synchronous ones (confirmed local repro: 96 errors). This doesn't
+  happen on Linux (CI). Known, diagnosed, not being chased further locally - `.github/workflows/
+  test.yml` is what actually gates whether the suite passes; treat a local Windows failure here as
+  expected, not a regression, and check the GitHub Actions run instead. `async_get_clientsession`
+  is mocked in the config-flow tests regardless of platform - architecturally correct either way,
+  not a Windows workaround. **Still not covered**: the coordinator and the rest of the
+  entities - the deliberate full test-coverage pass QUALITY_SCALE.md still defers, config flow is
+  only the first slice of it.
 
 Everything above the API layer (`coordinator.py`, `entity.py`, `sensor.py`, `binary_sensor.py`,
 `config_flow.py`, `diagnostics.py`) is unverified beyond compiling and the offline `helpers.py`

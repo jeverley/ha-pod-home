@@ -53,6 +53,14 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
   LICENSE already existed. **Still open**: no tagged GitHub release yet - HACS can install
   straight from the default branch via a custom repository, but versioned upgrades need at least
   one release/tag; not done yet since the integration is still actively changing shape.
+- **config-flow-test-coverage** — ✅ `tests/test_config_flow.py`, using a real
+  `pytest-homeassistant-custom-component` harness (installed as a dev dependency this phase, run
+  as part of the unified `tests/` suite - see CLAUDE.md's Verification section). Covers the
+  user flow (success, invalid auth), duplicate-email abort (including case-insensitivity, since
+  `async_set_unique_id` lowercases), and the reauth flow (success updates the stored password,
+  invalid auth shows an error and leaves it unchanged). **Still open**: this is config_flow.py
+  only - `async_setup_entry` itself (the coordinator's first refresh, real or mocked) isn't
+  exercised by these tests, and remains part of the broader `test-coverage` gap above.
 
 ## Also addressed this phase, beyond the original four
 
@@ -63,13 +71,13 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
 
 ## Deferred - real work, not needed for a HACS-quality v1
 
-- **test-coverage / config-flow-test-coverage** — 95%/100% coverage requirements. `tests/` now
-  exists (`tests/test_translation_keys.py`, added to close a specific verified gap - see
-  DECISIONS.md), but that's not the deliberate full pass this rule actually needs (fixtures,
-  mocked API responses, `pytest-homeassistant-custom-component`, real coverage of the
-  coordinator/entities/config flow). Still the single biggest gap for a core submission and
-  genuinely substantial work. Worth doing before ever proposing this for core; not blocking for
-  personal/HACS use.
+- **test-coverage** — 95% coverage requirement, coordinator + entities. `tests/test_helpers.py`
+  (90 cases, offline) covers every pure function `coordinator.py`/`sensor.py` etc. lean on, but
+  the coordinator and entity classes themselves (the `DataUpdateCoordinator` subclass, every
+  platform's entity classes) still have zero direct test coverage - needs
+  `pytest-homeassistant-custom-component` with mocked API responses, a real HA test harness.
+  Real, substantial work, not started. Still the single biggest gap for a core submission; not
+  blocking for personal/HACS use.
 - **strict-typing** — full PEP-561 typing + a `py.typed` marker + entry in core's
   `.strict-typing` file. The code is already reasonably typed (`from __future__ import
   annotations`, most signatures annotated) but hasn't been audited against `mypy --strict`.
