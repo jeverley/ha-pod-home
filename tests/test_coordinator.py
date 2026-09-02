@@ -257,9 +257,21 @@ async def test_firmware_and_tariffs_not_refetched_within_staleness_window(
     re-fetch them."""
     api = _stub_api()
     api.async_list_chargers.return_value = [_charger_raw()]
+    # Each needs a genuinely parseable (non-empty) response for its _fetched_at to actually get
+    # stamped - the coordinator deliberately does NOT cache an empty/unparseable response (see
+    # its own comment: "a bad/unexpected response gets retried next poll"), so an empty-dict
+    # default (as most _stub_api() calls use) would legitimately keep re-fetching every poll.
     api.async_charger_firmware.return_value = [
         {"versionInfo": {"manifestId": "A"}, "updateStatus": {}, "serialNumber": "S"}
     ]
+    api.async_tariffs.return_value = {
+        "data": [{"tariffInfo": [{"days": ["MONDAY"], "start": "00:00", "end": "05:00", "price": 0.1}]}]
+    }
+    api.async_manual_schedules.return_value = {
+        "data": [{"uid": "w1", "startDay": 1, "startTime": "00:30:00", "endDay": 1,
+                   "endTime": "05:30:00", "status": {"isActive": True}}]
+    }
+    api.async_delegated_control.return_value = {"statusEffectiveFrom": "2026-01-01T00:00:00Z"}
 
     coordinator = _make_coordinator(hass, api)
     await coordinator._async_fetch_data()
