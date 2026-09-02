@@ -67,8 +67,17 @@ async def test_status_sensor_icon_mapping(hass: HomeAssistant) -> None:
 
 
 async def test_last_charge_sensors_prefer_current_over_latest(hass: HomeAssistant) -> None:
-    current = make_charge(id="c-current", energy_total=1.5, duration=600, cost_amount=None)
-    latest = make_charge(id="c-latest", energy_total=9.9, duration=9999, cost_amount=999)
+    # Different started_at values - two genuinely different sessions (current_charge is a new,
+    # still-open one mobile-api hasn't reported back yet), not the "same session, latest already
+    # finalized" case select_last_charge() specifically prefers latest_charge for.
+    current = make_charge(
+        id="c-current", started_at=datetime.datetime(2026, 1, 2, 12, 0, tzinfo=UTC),
+        energy_total=1.5, duration=600, cost_amount=None,
+    )
+    latest = make_charge(
+        id="c-latest", started_at=datetime.datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
+        energy_total=9.9, duration=9999, cost_amount=999,
+    )
     coordinator = make_coordinator(
         hass, {PPID: make_charger(current_charge=current, latest_charge=latest)}
     )
