@@ -26,10 +26,6 @@ if TYPE_CHECKING:
 
 PARALLEL_UPDATES = 0
 
-# Default boost duration when none has ever been set - deliberately short (require explicitly
-# dialing up for a long boost, not the other way round).
-_DEFAULT_BOOST_DURATION = datetime.time(0, 15)
-
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: PodHomeConfigEntry, async_add_entities: AddEntitiesCallback
@@ -92,12 +88,21 @@ class PodHomeVehicleReadyByTime(PodHomeVehicleEntity, PodHomeVehicleIntentsWrite
 
 
 class PodHomeBoostDurationTime(PodHomeEntity, RestoreEntity, TimeEntity):
-    """Local-only input for the "Boost for duration" button (button.py) - not derived from the
+    """One-shot input for the "Boost for duration" button (button.py) - not derived from the
     API, since there's no "configured boost duration" field to read back; this is purely a
     parameter the button reads at press time. Reuses TimeEntity's hh:mm picker to represent a
     *duration* (H hours M minutes), not a wall-clock time - per the user directly, HA has no
-    dedicated duration entity domain. Persists across restarts via RestoreEntity; defaults to
-    15 minutes if never set."""
+    dedicated duration entity domain.
+
+    Deliberately unset (None) until explicitly given a value - no default, matching the app's
+    own boost-duration prompt rather than assuming one. Persists across restarts via
+    RestoreEntity (so a pending value survives a restart before it's used), but button.py resets
+    it back to unset via async_reset() after each successful press - per the user directly, this
+    represents "execute this duration" rather than a sticky preference to remember between
+    boosts. Registers itself on the coordinator (see PodHomeDataUpdateCoordinator.
+    boost_duration_entities) so button.py can call async_reset() directly - pod_home owns both
+    entities, so a direct call is the right tool here, not a generic cross-integration service
+    (HA's time.set_value requires a real time value, can't clear one)."""
 
     _attr_translation_key = "boost_duration"
     _attr_name = "Boost duration"
@@ -105,24 +110,34 @@ class PodHomeBoostDurationTime(PodHomeEntity, RestoreEntity, TimeEntity):
 
     def __init__(self, coordinator, ppid: str) -> None:
         super().__init__(coordinator, ppid)
-        self._value: datetime.time = _DEFAULT_BOOST_DURATION
+        self._value: datetime.time | None = None
 
     @property
     def unique_id(self) -> str:
         return f"{DOMAIN}_{self.ppid}_boost_duration"
 
     @property
-    def native_value(self) -> datetime.time:
+    def native_value(self) -> datetime.time | None:
         return self._value
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        self.coordinator.boost_duration_entities[self.ppid] = self
         last_state = await self.async_get_last_state()
         if last_state is not None:
             restored = parse_time_of_day(last_state.state)
             if restored is not None:
                 self._value = restored
 
+    async def async_will_remove_from_hass(self) -> None:
+        self.coordinator.boost_duration_entities.pop(self.ppid, None)
+        await super().async_will_remove_from_hass()
+
     async def async_set_value(self, value: datetime.time) -> None:
         self._value = value
+        self.async_write_ha_state()
+
+    async def async_reset(self) -> None:
+        """Back to unset - called by button.py's Boost for duration after a successful press."""
+        self._value = None
         self.async_write_ha_state()

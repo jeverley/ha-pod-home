@@ -447,6 +447,13 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self._total_energy_store: Store = Store(
             hass, STICKY_STATE_STORAGE_VERSION, f"{DOMAIN}_{config_entry.entry_id}_total_energy"
         )
+        # Live PodHomeBoostDurationTime instances, keyed by ppid (time.py registers/deregisters
+        # itself in async_added_to_hass/async_will_remove_from_hass) - lets button.py reset the
+        # entity back to unset after a boost, which HA's generic time.set_value service can't do
+        # (its `time` field is required, no way to clear via it) - pod_home owns both entities,
+        # so a direct call is the right tool here, not a cross-integration service. Loosely typed
+        # (not PodHomeBoostDurationTime) to avoid coordinator.py importing a platform module.
+        self.boost_duration_entities: dict[str, Any] = {}
 
     async def async_load_sticky_state(self) -> None:
         """Restore Status's sticky timestamps and the Total Energy running total from a previous

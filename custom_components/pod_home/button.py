@@ -42,17 +42,21 @@ def _read_boost_duration(hass: HomeAssistant, ppid: str) -> datetime.time:
     """Reads the current value of the Boost duration time entity (time.py) via the entity
     registry + state machine, rather than a direct object reference - the two entities are set
     up independently by separate platforms, so this is the standard cross-entity read pattern
-    rather than a fragile string-built entity_id guess."""
+    rather than a fragile string-built entity_id guess. Boost duration has no default (see
+    time.py) - unset and a genuine 00:00 are both rejected here with a clean, actionable error
+    rather than reaching the API with a request Pod Point will 400 on (a zero-length override)."""
     registry = er.async_get(hass)
     entity_id = registry.async_get_entity_id("time", DOMAIN, f"{DOMAIN}_{ppid}_boost_duration")
     if entity_id is None:
         raise HomeAssistantError("Boost duration entity isn't registered yet")
     state = hass.states.get(entity_id)
     if state is None or state.state in ("unknown", "unavailable"):
-        raise HomeAssistantError("Boost duration isn't set yet")
+        raise HomeAssistantError("Enter a Boost duration before pressing this")
     duration = parse_time_of_day(state.state)
     if duration is None:
         raise HomeAssistantError(f"Couldn't parse Boost duration value {state.state!r}")
+    if duration == datetime.time(0, 0):
+        raise HomeAssistantError("Enter a Boost duration greater than zero before pressing this")
     return duration
 
 
@@ -95,7 +99,9 @@ class PodHomeBoostFullChargeButton(PodHomeEntity, ButtonEntity):
 
 class PodHomeBoostDurationButton(PodHomeEntity, ButtonEntity):
     """Triggers a boost for the duration set on Boost duration (time.py), read at press time -
-    matching the app's "Set duration" option."""
+    matching the app's "Set duration" option. Boost duration is a one-shot input, not a sticky
+    preference - per the user directly, resets back to unset after a successful press (not on
+    failure, so a rejected attempt can be retried without re-entering the value)."""
 
     _attr_translation_key = "boost_duration_button"
     _attr_name = "Boost for duration"
@@ -122,6 +128,12 @@ class PodHomeBoostDurationButton(PodHomeEntity, ButtonEntity):
             self.ppid, requested_at=requested_at, end_at=end_at
         )
         await self.coordinator.async_request_refresh()
+        # pod_home owns both entities, so a direct call is the right tool here rather than a
+        # generic cross-integration service (HA's time.set_value requires a real time value, no
+        # way to clear one via it) - see time.py's PodHomeBoostDurationTime.async_reset().
+        duration_entity = self.coordinator.boost_duration_entities.get(self.ppid)
+        if duration_entity is not None:
+            await duration_entity.async_reset()
 
 
 class PodHomeCancelBoostButton(PodHomeEntity, ButtonEntity):
