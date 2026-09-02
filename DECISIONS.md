@@ -2559,3 +2559,64 @@ Retested locally where possible (offline suite unaffected; the full merged suite
 dev machine's known Windows `ProactorEventLoop` gap, same as before this fix - see the "Merged
 into one unified `tests/` suite" entry above) and via the actual GitHub Actions run before
 considering this closed.
+
+## Cancel boost icon reverted to static; boost-start buttons gated on cable connected
+
+Two follow-ups from the user, both direct:
+
+- **Cancel boost's dynamic icon reverted to a static `mdi:timer-off-outline`.** Per the user:
+  `available` already carries the "is a boost active" signal (greyed out when nothing to
+  cancel) - a second, separate dynamic-icon mechanism duplicated that same signal rather than
+  adding new information. Simplified back to the icon this entity started with, before the
+  earlier "should the cancel-boost icon indicate an active boost" exploration added the dynamic
+  swap.
+- **Full charge and Boost for duration are now unavailable while the cable is unplugged**, per
+  the user: the app itself won't let you start a boost with nothing plugged in, so this matches
+  that rather than letting the button be pressed and fail live against the API. Uses the same
+  `is_momentarily_unplugged()` helper (helpers.py) the Cable status binary sensor already relies
+  on, keyed off `charger.charging_state` - no new logic, just applied to two more entities.
+  Cancel boost deliberately NOT gated the same way - cancelling an active boost should stay
+  possible even if the cable happens to read as unplugged at that instant (e.g. a momentary
+  blip), matching its own existing `boost_end_at is not None` gate instead.
+
+## Boost duration: no default, resets to unset after use, and a real live bug fixed along the way
+
+Per the user directly, across a few exchanges: Boost duration is being used as a one-shot
+command parameter ("execute this duration"), not a sticky preference - two decisions followed
+from that, plus a real bug the user hit live while discussing it.
+
+**Live bug found and fixed**: pressing Boost for duration with the picker left at `00:00`
+produced an unhandled `PodHomeApiError: mobile-api error 400` deep in a websocket-command
+traceback - Pod Point correctly rejects a zero-length override (`requestedAt == endAt`), but
+nothing on this side validated that before making the call. `_read_boost_duration()` (button.py)
+now rejects both "unset" and an explicit `00:00` with a clean `HomeAssistantError` ("Enter a
+Boost duration..." / "...greater than zero...") before ever reaching the API.
+
+**No default value** - `PodHomeBoostDurationTime.native_value` (time.py) starts and stays `None`
+until explicitly set, matching the app's own boost-duration prompt rather than assuming a
+value. `_read_boost_duration`'s existing "unknown"/"unavailable" state check already covers this
+cleanly (an unset `TimeEntity` reports "unknown"), so `Boost for duration` pressed with nothing
+entered yet gets the same clean error as the `00:00` case above, rather than silently boosting
+for some previously-configured or default length.
+
+**Resets back to unset after a successful press** - originally explored "reset to a 15-minute
+default" (a middle-ground the user hadn't actually asked for - a real overstep, called out
+directly: an implementation was started from a design discussion, not a request, and had to be
+paused and explained rather than pushed through). Landed on resetting to fully unset instead,
+matching "no default" above and forcing deliberate re-entry every time - a safety property, not
+just a style choice: without it, an unusual long duration set once (say, for a specific need)
+would silently persist and could be replayed by habit on a later press.
+
+**Mechanism for the reset - the real design point of this entry**: HA's generic `time.set_value`
+service (the only public way to set a `time` entity from outside its own integration) requires a
+real time value - there's no way to clear one back to unset through it. First plan reached for
+that generic service anyway (to set a *default* value, so the required-field limitation didn't
+yet bite); once the target became "unset", the limitation would have. Corrected by the user
+directly: **pod_home owns both entities, so a generic cross-integration service was never the
+right tool here in the first place** - a direct call is. `PodHomeBoostDurationTime` now registers
+itself on `PodHomeDataUpdateCoordinator.boost_duration_entities` (a plain `dict[str, Any]`,
+keyed by ppid, populated/cleared in `async_added_to_hass`/`async_will_remove_from_hass` - loosely
+typed rather than importing `PodHomeBoostDurationTime` into coordinator.py, keeping the
+platform-imports-coordinator direction one-way) and exposes `async_reset()`; button.py looks
+itself up via the coordinator and calls it directly. Not a new HA service, no `services.yaml` -
+this is internal-only, plain Python composition between two entities the same integration owns.
