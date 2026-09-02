@@ -17,7 +17,11 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.pod_home.const import DOMAIN
-from custom_components.pod_home.coordinator import PodHomeDataUpdateCoordinator
+from custom_components.pod_home.coordinator import (
+    FAST_POLL_INTERVAL,
+    SLOW_POLL_INTERVAL,
+    PodHomeDataUpdateCoordinator,
+)
 from custom_components.pod_home.podpoint_mobile_api import (
     PodHomeApiClient,
     PodHomeApiError,
@@ -243,3 +247,164 @@ async def test_deleted_charge_override_not_current_boost(hass: HomeAssistant) ->
     result = await coordinator._async_fetch_data()
 
     assert result[PPID].boost_end_at is None
+
+
+async def test_firmware_and_tariffs_not_refetched_within_staleness_window(
+    hass: HomeAssistant,
+) -> None:
+    """Firmware/tariffs/manual_schedules/delegated_control are cached on
+    FIRMWARE_TARIFF_REFRESH_INTERVAL - a second poll immediately after the first must not
+    re-fetch them."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_charger_firmware.return_value = [
+        {"versionInfo": {"manifestId": "A"}, "updateStatus": {}, "serialNumber": "S"}
+    ]
+
+    coordinator = _make_coordinator(hass, api)
+    await coordinator._async_fetch_data()
+    assert api.async_charger_firmware.call_count == 1
+    assert api.async_tariffs.call_count == 1
+    assert api.async_manual_schedules.call_count == 1
+    assert api.async_delegated_control.call_count == 1
+
+    await coordinator._async_fetch_data()
+    # Still cached - none of the four re-fetched on the very next poll.
+    assert api.async_charger_firmware.call_count == 1
+    assert api.async_tariffs.call_count == 1
+    assert api.async_manual_schedules.call_count == 1
+    assert api.async_delegated_control.call_count == 1
+    # But per-charger data fetched every poll (preferences, charge_overrides, connectivity) did
+    # get called again.
+    assert api.async_smart_charging_preferences.call_count == 2
+
+
+async def test_accumulate_total_energy_sums_finalized_charges_once_each(
+    hass: HomeAssistant,
+) -> None:
+    api = _stub_api()
+    coordinator = _make_coordinator(hass, api)
+
+    entries = [
+        (
+            PPID,
+            {"id": "c1", "endedAt": "2026-01-01T01:00:00Z", "energyTotal": 5.0},
+            {},
+        ),
+        (
+            PPID,
+            {"id": "c2", "endedAt": "2026-01-01T02:00:00Z", "energyTotal": 3.0},
+            {},
+        ),
+    ]
+    coordinator._accumulate_total_energy(entries)
+    assert coordinator._total_energy_kwh_by_ppid[PPID] == 8.0
+
+    # Same batch replayed (e.g. a re-poll covering an overlapping lookback window) - already
+    # counted (watermark has moved past both), must not double-add.
+    coordinator._accumulate_total_energy(entries)
+    assert coordinator._total_energy_kwh_by_ppid[PPID] == 8.0
+
+
+async def test_accumulate_total_energy_skips_still_open_sessions(hass: HomeAssistant) -> None:
+    api = _stub_api()
+    coordinator = _make_coordinator(hass, api)
+    entries = [(PPID, {"id": "c1", "endedAt": None, "energyTotal": 5.0}, {})]
+    coordinator._accumulate_total_energy(entries)
+    assert PPID not in coordinator._total_energy_kwh_by_ppid
+
+
+async def test_sticky_state_round_trips_through_store(hass: HomeAssistant) -> None:
+    api = _stub_api()
+    coordinator = _make_coordinator(hass, api)
+    now = datetime.datetime(2026, 1, 1, 12, 0, tzinfo=datetime.timezone.utc)
+    coordinator._charging_started_at_by_ppid[PPID] = now
+    coordinator._total_energy_kwh_by_ppid[PPID] = 42.0
+    coordinator._total_started_at_by_ppid[PPID] = now
+
+    await coordinator._sticky_store.async_save(coordinator._sticky_state_for_storage())
+    await coordinator._total_energy_store.async_save(coordinator._total_energy_state_for_storage())
+
+    # Simulate a restart: clear the in-memory state, then reload from the same Store the save
+    # above wrote to - a second coordinator instance would use a different (randomly-generated)
+    # MockConfigEntry.entry_id and so a different Store path, not actually testing persistence.
+    coordinator._charging_started_at_by_ppid = {}
+    coordinator._total_energy_kwh_by_ppid = {}
+    coordinator._total_started_at_by_ppid = {}
+    await coordinator.async_load_sticky_state()
+
+    assert coordinator._charging_started_at_by_ppid[PPID] == now
+    assert coordinator._total_energy_kwh_by_ppid[PPID] == 42.0
+    assert coordinator._total_started_at_by_ppid[PPID] == now
+
+
+async def test_adjust_poll_interval_speeds_up_after_recent_activity(hass: HomeAssistant) -> None:
+    api = _stub_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.update_interval = SLOW_POLL_INTERVAL
+    coordinator._last_seen_changed_at[PPID] = datetime.datetime.now(datetime.timezone.utc)
+    coordinator._async_adjust_poll_interval()
+    assert coordinator.update_interval == FAST_POLL_INTERVAL
+
+
+async def test_adjust_poll_interval_slows_down_without_recent_activity(
+    hass: HomeAssistant,
+) -> None:
+    api = _stub_api()
+    coordinator = _make_coordinator(hass, api)
+    coordinator.update_interval = FAST_POLL_INTERVAL
+    coordinator._last_seen_changed_at[PPID] = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
+    coordinator._async_adjust_poll_interval()
+    assert coordinator.update_interval == SLOW_POLL_INTERVAL
+
+
+async def test_api3_charges_matched_to_ppid_via_pod_id(hass: HomeAssistant) -> None:
+    api = _stub_api()
+    api.async_create_api3_session.return_value = {"sessions": {"user_id": 999}}
+    api.async_api3_pods.return_value = {"pods": [{"ppid": PPID, "unit_id": 555}]}
+    api.async_api3_charges.return_value = {
+        "charges": [
+            {
+                "id": 1,
+                "ends_at": None,
+                "starts_at": "2026-01-01T10:00:00Z",
+                "kwh_used": 2.5,
+                "pod": {"id": 555},
+                "billing_event": {"currency": "GBP"},
+            }
+        ]
+    }
+
+    coordinator = _make_coordinator(hass, api)
+    now = datetime.datetime(2026, 1, 1, 11, 0, tzinfo=datetime.timezone.utc)
+    await coordinator._async_refresh_api3_account(now)
+    await coordinator._async_refresh_api3_charges(now)
+
+    assert coordinator._current_charge_by_ppid[PPID].energy_total == 2.5
+    assert coordinator._current_charge_by_ppid[PPID].cost_currency == "GBP"
+    assert coordinator._current_charge_by_ppid[PPID].duration == 3600  # 1 hour, from now - starts_at
+
+
+async def test_api3_charges_unmatched_pod_id_warns_and_stays_empty(hass: HomeAssistant) -> None:
+    api = _stub_api()
+    api.async_create_api3_session.return_value = {"sessions": {"user_id": 999}}
+    api.async_api3_pods.return_value = {"pods": [{"ppid": PPID, "unit_id": 555}]}
+    api.async_api3_charges.return_value = {
+        "charges": [
+            {
+                "id": 1,
+                "ends_at": None,
+                "starts_at": "2026-01-01T10:00:00Z",
+                "kwh_used": 2.5,
+                "pod": {"id": 111},  # doesn't match any known unit_id
+                "billing_event": {},
+            }
+        ]
+    }
+
+    coordinator = _make_coordinator(hass, api)
+    now = datetime.datetime(2026, 1, 1, 12, 0, tzinfo=datetime.timezone.utc)
+    await coordinator._async_refresh_api3_account(now)
+    await coordinator._async_refresh_api3_charges(now)
+
+    assert coordinator._current_charge_by_ppid == {}
