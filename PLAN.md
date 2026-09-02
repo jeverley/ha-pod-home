@@ -95,9 +95,16 @@ reliably installable) release. Until then, the two copies can silently drift —
   running against a real HA instance across many live sessions since: config flow, coordinator,
   entities, and multiple real write endpoints have all been exercised live (see below), plus
   several real bugs found and fixed only because of that (api3 pod-id mapping, diagnostics
-  `AttributeError`, auth-token-persistence-on-restart, and others - see DECISIONS.md). Still
-  specifically unconfirmed: reauth flow, diagnostics ZIP contents, log behavior under a forced
-  failure, and Energy This Month/Cost This Month across a midnight/month rollover.
+  `AttributeError`, auth-token-persistence-on-restart, and others - see DECISIONS.md). Of the four
+  gaps this section used to list: **diagnostics ZIP contents - confirmed live** (a real download
+  inspected: `vehicle`/`firmware.serial_number` correctly `**REDACTED**`, no `entry.data`/
+  credentials anywhere); **Energy This Month/Cost This Month across a midnight/month rollover -
+  confirmed live** (observed resetting correctly). **Still open**: reauth flow and log behavior
+  under a forced failure, to be tested together (one forced auth failure exercises both). No code
+  change is needed for reauth to surface as a Repair issue - confirmed by reading HA core source
+  (`config_entries.py`'s `_async_init_reauth`) that this is automatic whenever
+  `ConfigEntryAuthFailed` is raised and the reauth flow shows a form, which `pod_home` already
+  does; still just needs live confirmation, same as the log-dedup behavior.
 - **Cable Status: done** - verified live, fixed, `chargingState`-derived now.
 - **Charge Mode select (Basic ⇄ Smart Charging switch) - deliberately still not built.**
   `delegatedControl.status` is read and surfaced (Charging Mode sensor); the write endpoint is

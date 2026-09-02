@@ -2383,3 +2383,40 @@ Three things from the user directly, in response to the "what's next" options pr
   can't read repository metadata (topics, file contents) on a **private** repo at all, regardless
   of what's actually there. Repo stays private for now (user's call); this check will keep
   failing until that changes - not a content bug to keep chasing.
+
+## Two of the four real-HA validation gaps confirmed live; reauth needs no code, just live confirmation
+
+- **Diagnostics ZIP - confirmed live.** The user attached a real downloaded diagnostics file
+  (`config_entry-pod_home-*.json`, HA 2026.8.3 on HAOS/aarch64). Matches what diagnostics.py is
+  supposed to produce exactly: `chargers` keyed by ppid, `vehicle: "**REDACTED**"`,
+  `firmware.serial_number: "**REDACTED**"`, no `entry.data`/credentials anywhere - confirms both
+  the redaction logic and the "entry.data left out entirely" correction just made to
+  QUALITY_SCALE.md above are actually true live, not just true in the source.
+- **Energy This Month/Cost This Month month rollover - confirmed live.** Per the user directly:
+  already observed resetting correctly at a real rollover, two days before this was asked about.
+- **Reauth "raise an issue" - clarified and resolved without any code change.** The user's first
+  ask ("can we raise an issue for the re-auth flow?") was initially misread as "open a GitHub
+  issue to track testing this" - a GitHub issue (`jeverley/ha-pod-home#1`) was created, then the
+  user corrected: they meant a real Home Assistant **Repair issue** (Settings → Repairs), i.e.
+  should `pod_home` be creating one itself when reauth is needed. Confirmed by reading
+  `homeassistant/config_entries.py` directly (the `pytest-homeassistant-custom-component`-pinned
+  `homeassistant==2025.1.4` installed locally) rather than guessing: `_async_init_reauth` already
+  creates exactly this Repair issue automatically, for every integration, whenever
+  `ConfigEntryAuthFailed` is raised and the resulting reauth flow doesn't auto-complete (shows a
+  form) -
+  ```python
+  issue_id = f"config_entry_reauth_{self.domain}_{self.entry_id}"
+  ir.async_create_issue(
+      hass, HOMEASSISTANT_DOMAIN, issue_id, data={"flow_id": result["flow_id"]},
+      is_fixable=False, issue_domain=self.domain, severity=ir.IssueSeverity.ERROR,
+      translation_key="config_entry_reauth", translation_placeholders={"name": self.title},
+  )
+  ```
+  `pod_home` already does both halves this depends on (`coordinator.py` raises
+  `ConfigEntryAuthFailed`; `config_flow.py` implements `async_step_reauth`/
+  `async_step_reauth_confirm`) - so this was already correctly wired up with zero code change
+  needed. The mistaken GitHub issue was closed rather than left open. **Not the same thing as the
+  `repair-issues` quality-scale rule** (checked separately via WebFetch to HA dev docs) - that
+  rule is about an integration raising its own issues for *other* fixable problems it detects,
+  unrelated to reauth's own dedicated (and automatic) mechanism; still correctly listed as
+  deferred/nice-to-have in QUALITY_SCALE.md, this finding doesn't change that.
