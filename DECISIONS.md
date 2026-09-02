@@ -2476,3 +2476,32 @@ auth failure and password change - the stale-refresh-token bug above is fixed fo
 in reasoning. [jeverley/ha-pod-home#1](https://github.com/jeverley/ha-pod-home/issues/1) closed
 with that confirmation. Forced-failure log-dedup behavior (`_warn_once`/`_clear_warning`) wasn't
 explicitly called out as confirmed alongside this - still open in PLAN.md.
+
+## Real HA log from the reauth test - top-level auth logging confirmed, _warn_once still not exercised
+
+The user attached a real downloaded HA log spanning the forced-failure/reauth/recovery window.
+Read closely rather than taken as blanket confirmation of "log behavior under a forced failure":
+
+- The 401 at `11:19:15` produced exactly one `ERROR "Authentication failed while fetching
+  pod_home data: ..."` line plus a `DEBUG "Full error:"` traceback, then clean recovery (two
+  subsequent polls both `Finished fetching pod_home data ... success: True`, no repeated ERROR
+  spam). Correct, expected behavior.
+- But that logging comes from **HA core's own `DataUpdateCoordinator`** - the traceback shows
+  `homeassistant/helpers/update_coordinator.py:435` calling `_async_update_data()`, which in
+  `coordinator.py` just does `except PodHomeAuthError as exc: raise ConfigEntryAuthFailed(str(exc))
+  from exc` - no pod_home logging call of its own on this path at all.
+- `_warn_once`/`_clear_warning` (the actual mechanism QUALITY_SCALE.md's `log-when-unavailable`
+  entry describes) is only used for non-fatal per-endpoint failures inside `_safe_call` -
+  tariffs/firmware/rewards/api3 session/api3 charges. None of those call sites' messages (nor
+  any `INFO "Recovered: ..."`) appear anywhere in the log, because a top-level auth failure
+  doesn't reach any of them - the whole poll fails at the first API call
+  (`async_list_chargers`), before those individual endpoints are ever attempted.
+- **Conclusion**: the auth-failure logging path is confirmed correct and not spammy. The
+  `_warn_once`/`_clear_warning` dedup mechanism itself remains genuinely unconfirmed - would need
+  a *non-fatal* single-endpoint failure (e.g. tariffs briefly erroring while the rest of the poll
+  succeeds) to actually exercise, not a full auth outage. PLAN.md worded to reflect this split
+  rather than mark the whole gap closed.
+
+Also noted, unrelated: a `WARNING ... blocking call to import_module ...
+custom_components.pod_point.config_flow` in the same log is about the old community `pod_point`
+integration (mattrayner's), not `pod_home` - not something to act on here.

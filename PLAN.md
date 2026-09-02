@@ -106,8 +106,16 @@ reliably installable) release. Until then, the two copies can silently drift —
   the post-reauth reload, silently trying to reuse the invalidated session instead of signing in
   fresh. Fixed (`config_flow.py` now clears that Store on a successful reauth) and **the fix is
   confirmed working live** - reauth now sticks. See DECISIONS.md and closed
-  [jeverley/ha-pod-home#1](https://github.com/jeverley/ha-pod-home/issues/1). **Still open**: log
-  behavior under a forced failure - wasn't explicitly confirmed as part of the reauth retest.
+  [jeverley/ha-pod-home#1](https://github.com/jeverley/ha-pod-home/issues/1). **Log behavior -
+  partially confirmed, real gap remains.** A real HA log from the reauth test showed the
+  top-level auth-failure path working correctly: one `ERROR "Authentication failed..."` +
+  `DEBUG` traceback, no repeated spam across several subsequent successful polls - but that
+  logging is HA core's own `DataUpdateCoordinator` behavior (`_async_update_data` just re-raises
+  `ConfigEntryAuthFailed`), not pod_home's own `_warn_once`/`_clear_warning` dedup. That dedup
+  mechanism governs a different, narrower class of failures - individual non-fatal endpoint
+  calls (tariffs, firmware, rewards, api3) wrapped in `_safe_call` - none of which appeared in
+  that log. **Still genuinely unconfirmed**: `_warn_once`'s warn-once/debug-on-repeat/
+  info-on-recovery behavior for one of those non-fatal endpoints specifically.
 - **Cable Status: done** - verified live, fixed, `chargingState`-derived now.
 - **Charge Mode select (Basic ⇄ Smart Charging switch) - deliberately still not built.**
   `delegatedControl.status` is read and surfaced (Charging Mode sensor); the write endpoint is
