@@ -75,12 +75,15 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
 ## Deferred - real work, not needed for a HACS-quality v1
 
 - **test-coverage** — 95% coverage requirement, coordinator + entities. `tests/test_helpers.py`
-  (90 cases, offline) covers every pure function `coordinator.py`/`sensor.py` etc. lean on, but
-  the coordinator and entity classes themselves (the `DataUpdateCoordinator` subclass, every
-  platform's entity classes) still have zero direct test coverage - needs
-  `pytest-homeassistant-custom-component` with mocked API responses, a real HA test harness.
-  Real, substantial work, not started. Still the single biggest gap for a core submission; not
-  blocking for personal/HACS use.
+  (90 cases, offline) covers every pure function `coordinator.py`/`sensor.py` etc. lean on.
+  `tests/test_coordinator.py` (9 cases, real HA harness, mocked `PodHomeApiClient`) is a first
+  slice of direct coordinator coverage - happy-path parsing (Basic and Smart Charging modes),
+  empty-`/chargers` handling, auth/connection/HTTP error paths, boost end time parsing. **Still
+  open**: most of `coordinator.py`'s staleness-cadence branches, `_accumulate_total_energy`,
+  sticky-state persistence, api3 charge matching, and adaptive polling aren't covered yet: every
+  entity platform's own classes (sensor.py, binary_sensor.py, etc.) still have zero direct
+  coverage. Still the single biggest gap for a core submission; not blocking for personal/HACS
+  use.
 - **strict-typing** — full PEP-561 typing + a `py.typed` marker + entry in core's
   `.strict-typing` file. The code is already reasonably typed (`from __future__ import
   annotations`, most signatures annotated) but hasn't been audited against `mypy --strict`.

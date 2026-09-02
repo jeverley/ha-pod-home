@@ -2633,3 +2633,34 @@ binary_sensor.py), not guessed, e.g. Charge rate's "null once charging stops", M
 "always null on this account so far", Cable status's "on when a cable is physically connected".
 Verified the full 32-entity list against `strings.json` again after the rewrite - exact match,
 no entities dropped or duplicated by the restructure.
+
+## tests/test_coordinator.py - first slice of coordinator test coverage
+
+Per the user ("test coverage"), following the recommendation from the "next steps" review: the
+biggest remaining QUALITY_SCALE.md gap is the coordinator/entities having zero direct test
+coverage. This is a first slice, not the full pass - `coordinator.py` is ~1400 lines with many
+independent staleness/gating branches (per-endpoint cadence tiers, charging-aware fetch
+gating, etc.); covering all of it would be its own multi-session effort.
+
+**Scope chosen**: `_async_fetch_data`/`_async_update_data` exercised directly against a fully
+mocked `PodHomeApiClient` (`unittest.mock.create_autospec`, so a renamed/removed client method
+fails the test loudly rather than silently mocking a typo'd name), bypassing `async_setup_entry`
+entirely - keeps focus on the coordinator's own parsing/staleness/error-handling logic in
+isolation, since config-entry setup is already covered by `tests/test_config_flow.py`. 9 cases:
+happy-path parsing in Basic mode (every `PodHomeCharger` field populated correctly from a
+realistic response shape, and confirms `smart-schedules/active` is *not* called - meaningless
+outside Smart Charging); Smart mode fetching and parsing `smart_schedule_windows`; empty
+`/chargers` on a first poll (returns `{}`) vs. a subsequent poll (keeps the previous `self.data`
+rather than wiping it - a real behavior worth locking down, not just an incidental effect);
+`PodHomeAuthError` translating to `ConfigEntryAuthFailed`; a connection-level failure (status 0)
+retrying `CONNECTION_RETRY_ATTEMPTS` times before raising `UpdateFailed` vs. a genuine HTTP error
+(status 500) raising immediately without retry; and boost end time parsing from
+`charge-overrides`, including a deleted override correctly not counting as a current boost.
+
+**Not covered by this slice** (real gaps, left open rather than silently claimed done): the many
+staleness-cadence branches (firmware/tariffs/manual-schedules refresh timing, the
+charging-aware vehicle/charges fetch tiers), `_accumulate_total_energy`'s watermark/dedup logic,
+sticky Status timestamp persistence via `Store`, api3 charge matching, and the adaptive poll
+interval adjustment. Also still fully open: every entity platform's own classes (sensor.py,
+binary_sensor.py, etc.) have zero direct coverage - `helpers.py`'s pure functions they lean on
+are covered (`tests/test_helpers.py`), but the entity classes themselves aren't.
