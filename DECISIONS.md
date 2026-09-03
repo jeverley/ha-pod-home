@@ -2729,3 +2729,22 @@ tests mock it, coordinator tests bypass it entirely); `async_sync_mode_gated_ent
 still code-reviewed-only. Unit test coverage is also a genuinely different claim from live
 verification against a real account - CLAUDE.md now states that distinction explicitly, so
 neither gets silently conflated with the other going forward.
+
+**Cross-checked test mocks against real captured `scratch/output/*.json` responses** (local-only
+reference, never copied into tracked files - see CLAUDE.md's "Repo layout" on `scratch/`): the
+`/chargers`, `tariffs`, `manual_schedules`, `charge-overrides`, and `delegated_control` mock
+shapes in `tests/_fixtures.py`/`tests/test_coordinator.py` all match real responses exactly.
+`smart_charging_chargers_and_vehicles.json`'s real shape confirmed `_vehicle_per_ppid()`'s
+parsing exactly (`[{ppid, vehicles: [{id, isPluggedInToThisCharger, isPrimary, vehicle: {...},
+currentIntent: {...}, intents: {details: [...]}}]}]`) - that parsing path had zero test coverage
+before (the stub always returned `[]`); added
+`test_vehicle_parsed_from_smart_charging_chargers_and_vehicles` with a synthetic-but-structurally
+-accurate fixture built from that confirmed shape. One shape remains comparatively less directly
+verified: the per-ppid `charge-statistics` response (`{"energy": {"totalUsage": ..., "cost":
+...}}`, `test_first_refresh_parses_charger_basic_mode`'s assumption) has no matching capture
+anywhere under `scratch/output` (grepped for `totalUsage`, zero hits) - `charges_stats.json`
+there is a different, account-wide endpoint (`async_charges_stats`, not the per-ppid
+`async_charge_statistics` the coordinator actually calls) with an unrelated shape
+(`data.summary.energy.home.total`). Not changed, since Month energy/cost has been live-verified
+end-to-end through the running integration per earlier entries in this file - but flagged here as
+an assumption without its own raw capture, rather than silently treated as equally confirmed.

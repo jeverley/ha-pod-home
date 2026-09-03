@@ -419,4 +419,70 @@ async def test_api3_charges_unmatched_pod_id_warns_and_stays_empty(hass: HomeAss
     await coordinator._async_refresh_api3_account(now)
     await coordinator._async_refresh_api3_charges(now)
 
+
+async def test_vehicle_parsed_from_smart_charging_chargers_and_vehicles(
+    hass: HomeAssistant,
+) -> None:
+    """Shape below matches a real captured response (vehicles/currentIntent/intents.details
+    nesting) - cross-checked against scratch/output locally, not copied from it."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_smart_charging_chargers_and_vehicles.return_value = [
+        {
+            "ppid": PPID,
+            "vehicles": [
+                {
+                    "id": "vehicle-link-1",
+                    "isPluggedInToThisCharger": True,
+                    "isPrimary": True,
+                    "vehicle": {
+                        "id": "vehicle-1",
+                        "vehicleInformation": {
+                            "brand": "TestMake",
+                            "model": "TestModel",
+                            "displayName": "My Test Car",
+                        },
+                        "chargeState": {
+                            "batteryCapacity": 64,
+                            "batteryLevelPercent": 55,
+                            "range": 210,
+                            "isCharging": True,
+                            "isFullyCharged": False,
+                            "chargeLimitPercent": 80,
+                            "chargeLimitSource": "vehicle",
+                            "powerDeliveryState": "PLUGGED_IN:CHARGING",
+                            "chargeRate": None,
+                            "maxCurrent": None,
+                            "chargeTimeRemaining": None,
+                            "lastUpdated": "2026-01-01T09:00:00Z",
+                        },
+                        "odometer": {"distanceKm": 12000},
+                    },
+                    "currentIntent": {
+                        "canMeetTarget": True,
+                        "cannotMeetTargetReason": None,
+                        "readyByTime": "2026-01-02T07:00:00Z",
+                        "chargeDetail": {"expectedChargeByTargetPercent": 80.0},
+                    },
+                    "intents": {
+                        "details": [{"dayOfWeek": "MONDAY", "chargeByTime": "07:00:00", "chargeKWh": 20}]
+                    },
+                }
+            ],
+        }
+    ]
+
+    coordinator = _make_coordinator(hass, api)
+    result = await coordinator._async_fetch_data()
+
+    vehicle = result[PPID].vehicle
+    assert vehicle is not None
+    assert vehicle.id == "vehicle-1"
+    assert vehicle.display_name == "My Test Car"
+    assert vehicle.battery_level_percent == 55
+    assert vehicle.is_plugged_in_to_this_charger is True
+    assert vehicle.can_meet_target is True
+    assert vehicle.intent_charge_kwh == 20
+    assert vehicle.ready_by == datetime.datetime(2026, 1, 2, 7, 0, tzinfo=datetime.timezone.utc)
+
     assert coordinator._current_charge_by_ppid == {}
