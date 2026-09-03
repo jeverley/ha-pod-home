@@ -50,7 +50,7 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
 - **docs-installation-parameters, docs-known-limitations** — ✅ README.md rewritten as end-user
   documentation: HACS custom-repository/manual installation, setup, a full entity list, Energy
   Dashboard/Charging Mode notes, a "Known limitations" section covering boost latency, the
-  Firmware version-string caveat, and remote-lock's absence.
+  Firmware version-string caveat, and Remote Lock being untested against real Solo 3S hardware.
 - **HACS packaging** — ✅ `hacs.json` added (minimal: name + render_readme), `.github/workflows/
   validate.yml` added (`hacs/action` + `hassfest`, matching HACS's own default-repo validation).
   LICENSE already existed. **Still open**: no tagged GitHub release yet - HACS can install
@@ -95,11 +95,12 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
 - **strict-typing** — full PEP-561 typing + a `py.typed` marker + entry in core's
   `.strict-typing` file. The code is already reasonably typed (`from __future__ import
   annotations`, most signatures annotated) but hasn't been audited against `mypy --strict`.
-- **action-setup** — once charge-now/remote-lock exist, register services in `async_setup`
-  (hass-level), not `async_setup_entry`, and validate the target entry inside the handler with
-  `ServiceValidationError` rather than gating registration on entry state. The *old*
-  `pod_point` integration already does this correctly (`services.py`) - just needs carrying
-  forward when write endpoints land.
+- **action-setup** — charge-now (button.py) and remote-lock (lock.py) both exist now as entity
+  actions, not services. If a service-based interface is ever wanted alongside them, register in
+  `async_setup` (hass-level), not `async_setup_entry`, and validate the target entry inside the
+  handler with `ServiceValidationError` rather than gating registration on entry state. The *old*
+  `pod_point` integration already does this correctly (`services.py`) - a reference if this gets
+  picked up.
 - **repair-issues, brands, discovery** — repair-issues is a nice-to-have; brands only matters
   for a core PR (a logo submitted to `home-assistant/brands`); discovery doesn't apply, this is
   a cloud API with nothing to discover on the local network.

@@ -2748,3 +2748,51 @@ there is a different, account-wide endpoint (`async_charges_stats`, not the per-
 (`data.summary.energy.home.total`). Not changed, since Month energy/cost has been live-verified
 end-to-end through the running integration per earlier entries in this file - but flagged here as
 an assumption without its own raw capture, rather than silently treated as equally confirmed.
+
+## Remote Lock built (`lock.py`) - Solo 3S-only, genuinely untestable live on this account
+
+Researched Pod Point's own app guide (`Pod-Home-app-guide.pdf`, fetched live from
+`cdn-www.pod-point.com`) to answer the user's question about what Remote Lock actually does,
+since third-party summaries were vague/contradictory on the mechanism. Confirmed, quoting the
+guide's "Remote lock" page: "Remote Lock prevents anyone from starting a charging session at
+your charger, without your permission. Your charger must be online and unplugged to lock or
+unlock." So it's an authorization gate on session-start, not a physical cable interlock -
+confirmed further by the Boost page's "Charger must be unlocked to Boost" and the LED table,
+where "solid yellow" covers both "waiting to start, unlocked" and "securely locked" (same visual
+state either way, consistent with a start-permission flag rather than a distinct physical-lock
+signal). The guide also states Remote Lock is **Solo 3S customers only** - and the user's own
+charger is a Solo 3, confirmed via `GET /remote-lock/{ppid}` returning `{"offMode": null}` live
+against this account (`scratch/pod-point-new-api-findings.md`), not merely inferred from the
+guide.
+
+The user asked to build it anyway, explicitly, having been told this constraint plainly first (a
+plan-mode-style decision point, not launched into without asking - see the Boost duration
+"design overstep" entry earlier in this file for why that discipline matters here). Built as
+`lock.py`'s `PodHomeRemoteLock` (HA's `lock` domain, not `switch` or a `select`/`number` config
+entity as the user first floated) - a `lock` entity is HA's own vocabulary for exactly this
+shape (a binary access-control state with a direct physical-effect toggle), and unlike Charge
+Priority/Target Charge/Ready By (all `EntityCategory.CONFIG`), a lock's state IS the device's
+operational state, not a setting - so, per HA's own entity_category guidance ("only for entities
+that allow changing settings, not state"), it carries no entity_category, same as the boost
+buttons.
+
+API shape (`scratch/podpoint_openapi.json`, `RemoteLockDTO`): `GET`/`POST /remote-lock/{ppid}`,
+body/response `{"offMode": bool | None}` - `true` locked, `false` unlocked, `null` confirmed live
+as this account's actual state (not just "unset"). The write path (`POST`) returns 501 for a
+charger model that doesn't support Remote Lock, per the schema - not confirmed live (no Solo 3S
+account available), but caught in `lock.py` and surfaced as a clean `HomeAssistantError` rather
+than a raw API error, since it's a fully anticipated case here. `offMode: null` maps to HA's
+`unknown` state (entity-availability convention: fetched fine, no applicable value right now),
+not `unavailable` - the fetch itself succeeds.
+
+Coordinator wiring mirrors firmware/tariffs/manual_schedules/delegated_control exactly: a new
+per-ppid `_remote_lock_off_mode_by_ppid`/`_remote_lock_fetched_at` pair, staleness-cached on
+`FIRMWARE_TARIFF_REFRESH_INTERVAL`, `fetched_at` stamped once the raw dict comes back non-empty
+(which `{"offMode": null}` is - a dict with one key is still truthy, so a genuine `null` doesn't
+get treated as "fetch failed, retry sooner").
+
+Unlike every other write entity in this integration, this one is flagged (docstring, README,
+PLAN.md) as **NOT YET TESTED against a real account, and may permanently stay that way** - the
+constraint isn't "haven't gotten round to it yet" like the others were, it's "this account's
+hardware cannot exercise this code path at all." Built and code-reviewed to the same standard as
+everything else, with the read path's `offMode: null` shape confirmed live either way.

@@ -150,9 +150,14 @@ reliably installable) release. Until then, the two copies can silently drift —
   see DECISIONS.md). Matches the app's own two boost options plus a cancel action, per the user
   directly. **All three confirmed working live**: Boost for duration worked first try; Boost
   full charge's flat-12h-`endAt` fix and Cancel boost have both since been confirmed live too.
-- **`remote-lock`**: still completely untouched - no read or write entities built. **Deliberately
-  deprioritized, not just deferred** - per the user directly, their own charger doesn't support
-  it, so there's no way to test it live even if built. Revisit only if that changes.
+- **`remote-lock`**: built (`lock.py`, `PodHomeRemoteLock`) per the user's explicit request,
+  despite confirming (Pod Point's own app guide) that Remote Lock is Solo 3S-only and the user's
+  own charger is a Solo 3 - genuinely untestable live on this account, not just "not yet tested".
+  `GET /remote-lock/{ppid}` returns `{"offMode": null}` live for this account, confirming the
+  unsupported state rather than assuming it; a 501 from the write endpoint (per the OpenAPI
+  schema, for unsupported charger models) is caught and surfaced as a clean error. Unlike every
+  other write entity here, this one may permanently stay flagged "NOT YET TESTED against a real
+  account" - see DECISIONS.md.
 - **Packaging - done**: `hacs.json`, LICENSE, `.github/workflows/validate.yml` (`hacs/action` +
   `hassfest`), README.md rewritten as end-user documentation. Installable today via HACS as a
   custom repository (Integrations → ⋮ → Custom repositories). `validate.yml`'s `hacs` job used

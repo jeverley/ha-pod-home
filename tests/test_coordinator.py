@@ -54,6 +54,7 @@ def _stub_api() -> PodHomeApiClient:
     api.async_tariffs.return_value = {}
     api.async_manual_schedules.return_value = {}
     api.async_delegated_control.return_value = {}
+    api.async_get_remote_lock_status.return_value = {}
     return api
 
 
@@ -486,3 +487,22 @@ async def test_vehicle_parsed_from_smart_charging_chargers_and_vehicles(
     assert vehicle.ready_by == datetime.datetime(2026, 1, 2, 7, 0, tzinfo=datetime.timezone.utc)
 
     assert coordinator._current_charge_by_ppid == {}
+
+
+async def test_remote_lock_status_parsed(hass: HomeAssistant) -> None:
+    """offMode: null is a genuine, confirmed-live response shape (unsupported charger model, or
+    unset) - a successful fetch, not treated as missing data. Two separate coordinators, not two
+    polls of the same one - offMode is cached on FIRMWARE_TARIFF_REFRESH_INTERVAL like firmware/
+    tariffs, so a second poll wouldn't re-fetch it (see
+    test_firmware_and_tariffs_not_refetched_within_staleness_window)."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_get_remote_lock_status.return_value = {"offMode": None}
+    result = await _make_coordinator(hass, api)._async_fetch_data()
+    assert result[PPID].remote_lock_off_mode is None
+
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_get_remote_lock_status.return_value = {"offMode": True}
+    result = await _make_coordinator(hass, api)._async_fetch_data()
+    assert result[PPID].remote_lock_off_mode is True

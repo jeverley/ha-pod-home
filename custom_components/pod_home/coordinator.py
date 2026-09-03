@@ -293,6 +293,10 @@ class PodHomeCharger:
     # above. Not the source of truth for current mode (delegated_control_status is - see
     # schedule_mode() in helpers.py).
     smart_charging_supported: bool | None
+    # Remote Lock's current state - GET /remote-lock/{ppid}, `RemoteLockDTO.offMode`. True
+    # locked, False unlocked, None when unset or (confirmed live on a Solo 3) the charger model
+    # doesn't support Remote Lock at all - see lock.py.
+    remote_lock_off_mode: bool | None
 
 
 def _parse_dt(value: str | None) -> datetime.datetime | None:
@@ -385,6 +389,10 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self._manual_schedules_fetched_at: dict[str, datetime.datetime] = {}
         self._status_effective_from_by_ppid: dict[str, datetime.datetime | None] = {}
         self._status_effective_from_fetched_at: dict[str, datetime.datetime] = {}
+        # offMode from GET /remote-lock/{ppid}: True locked, False unlocked, None either unset or
+        # (confirmed live on a Solo 3) genuinely unsupported by this charger model.
+        self._remote_lock_off_mode_by_ppid: dict[str, bool | None] = {}
+        self._remote_lock_fetched_at: dict[str, datetime.datetime] = {}
         # Fetched every poll alongside connectivity, not staleness-cached.
         self._max_price_by_ppid: dict[str, float | None] = {}
         # The active boost's end time, if any - also fetched every poll, same reasoning as
@@ -1019,6 +1027,12 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                     f"Couldn't fetch delegated control detail for {ppid} (non-fatal, will retry)",
                     self.api.async_delegated_control(ppid),
                 )
+            if self._stale(self._remote_lock_fetched_at, ppid, now):
+                stale_calls["remote_lock"] = self._safe_call(
+                    f"remote_lock:{ppid}",
+                    f"Couldn't fetch Remote Lock status for {ppid} (non-fatal, will retry)",
+                    self.api.async_get_remote_lock_status(ppid),
+                )
 
             if stale_calls:
                 results = dict(
@@ -1068,6 +1082,14 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                     if status_effective_from:
                         self._status_effective_from_by_ppid[ppid] = status_effective_from
                     self._status_effective_from_fetched_at[ppid] = now
+
+                # remote_lock_raw is {"offMode": bool | None} - a genuine `null` (unset, or this
+                # charger model doesn't support Remote Lock at all) is still a successful fetch,
+                # not a reason to retry sooner, so fetched_at is stamped either way.
+                remote_lock_raw = results.get("remote_lock")
+                if remote_lock_raw:
+                    self._remote_lock_off_mode_by_ppid[ppid] = remote_lock_raw.get("offMode")
+                    self._remote_lock_fetched_at[ppid] = now
 
             month_energy, month_cost = self._month_stats_by_ppid.get(ppid, (None, None))
 
@@ -1143,6 +1165,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                 max_price=self._max_price_by_ppid.get(ppid),
                 boost_end_at=self._boost_end_at_by_ppid.get(ppid),
                 smart_charging_supported=self._smart_charging_supported_by_ppid.get(ppid),
+                remote_lock_off_mode=self._remote_lock_off_mode_by_ppid.get(ppid),
             )
 
         # Coalesced, not one write per poll - the sticky dicts can change up to once a minute.

@@ -63,6 +63,7 @@ Each table's **Category** column is the same grouping Home Assistant's own devic
 | Full charge            | Controls      | Button         | Boost ("Charge Now") to 100%, matching the app |
 | Boost for duration     | Controls      | Button         | Boost for the duration set above, matching the app |
 | Cancel boost           | Controls      | Button         | Only available while a boost is active |
+| Remote lock            | Controls      | Lock           | Solo 3S only - state stays `unknown` on other charger models (confirmed live via `offMode: null`), including the account this integration is developed against |
 | Charge priority        | Configuration | Select         | Smart Charging only, disabled by default outside it |
 | Charging state         | Diagnostic    | Sensor         | Raw wire value, disabled by default |
 | Charging mode          | Diagnostic    | Sensor         | Smart / Basic |
@@ -120,6 +121,11 @@ doesn't add a mode-switch control):
 - **Dynamic device creation (a charger added to the account appearing without a restart) is
   built but not verified against a second physical charger** - only ever tested against a
   single-charger account.
+- **Remote lock is untested against a real Solo 3S** - it's a Solo 3S-only feature (per Pod
+  Point's own app guide) and the account this integration is developed against has a Solo 3,
+  which reports `offMode: null` (state `unknown`) rather than a real locked/unlocked value.
+  Built code-reviewed-only for that reason - if you have a Solo 3S and try it, feedback on
+  whether it works as expected is genuinely useful.
 - Not yet packaged for HACS's default repository (no releases/tags yet) - install as a custom
   repository (see above) for now.
 
