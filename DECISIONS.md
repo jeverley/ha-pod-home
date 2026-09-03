@@ -2362,3 +2362,200 @@ Per the user directly: underscore, not hyphen, matching Python module-name conve
 a package/CLI-name convention. Cosmetic - `.github/workflows/test.yml` and CLAUDE.md updated to
 match. Earlier entries above still say `requirements-test.txt` where they're describing what was
 true at the time - left as written, per this file's append-only rule.
+
+## Boost live-confirmed in full; remote-lock deliberately deprioritized; HACS validate.yml root cause confirmed
+
+Three things from the user directly, in response to the "what's next" options presented:
+
+- **Boost full charge and Cancel boost both confirmed working live** - the last two boost pieces
+  that were built-but-untested. All three boost buttons (Full charge, Boost for duration, Cancel
+  boost) are now live-confirmed. `button.py`'s module docstring updated (no longer says "NOT YET
+  TESTED"); PLAN.md updated to match.
+- **`remote-lock` deliberately deprioritized, not just deferred**: the user's own charger doesn't
+  support it, so there's no way to test it live even if built - matches this project's standing
+  rule (CLAUDE.md's write-endpoint discipline: don't mark a write as working without live
+  confirmation, and by extension don't build toward something that can never get that
+  confirmation on this account). Revisit only if that changes.
+- **`validate.yml`'s `hacs` job root cause confirmed, not just suspected**: GitHub topics were
+  added (`gh repo view` confirms `ev-charging`/`home-assistant`/`pod-point`/`pod-home` are
+  genuinely set), but the `hacs` job's `topics` check still fails identically to before, alongside
+  `hacsjson`/`integration_manifest`. This confirms the earlier hypothesis - HACS's validator
+  can't read repository metadata (topics, file contents) on a **private** repo at all, regardless
+  of what's actually there. Repo stays private for now (user's call); this check will keep
+  failing until that changes - not a content bug to keep chasing.
+
+## Two of the four real-HA validation gaps confirmed live; reauth needs no code, just live confirmation
+
+- **Diagnostics ZIP - confirmed live.** The user attached a real downloaded diagnostics file
+  (`config_entry-pod_home-*.json`, HA 2026.8.3 on HAOS/aarch64). Matches what diagnostics.py is
+  supposed to produce exactly: `chargers` keyed by ppid, `vehicle: "**REDACTED**"`,
+  `firmware.serial_number: "**REDACTED**"`, no `entry.data`/credentials anywhere - confirms both
+  the redaction logic and the "entry.data left out entirely" correction just made to
+  QUALITY_SCALE.md above are actually true live, not just true in the source.
+- **Energy This Month/Cost This Month month rollover - confirmed live.** Per the user directly:
+  already observed resetting correctly at a real rollover, two days before this was asked about.
+- **Reauth "raise an issue" - clarified and resolved without any code change.** The user's first
+  ask ("can we raise an issue for the re-auth flow?") was initially misread as "open a GitHub
+  issue to track testing this" - a GitHub issue (`jeverley/ha-pod-home#1`) was created, then the
+  user corrected: they meant a real Home Assistant **Repair issue** (Settings → Repairs), i.e.
+  should `pod_home` be creating one itself when reauth is needed. Confirmed by reading
+  `homeassistant/config_entries.py` directly (the `pytest-homeassistant-custom-component`-pinned
+  `homeassistant==2025.1.4` installed locally) rather than guessing: `_async_init_reauth` already
+  creates exactly this Repair issue automatically, for every integration, whenever
+  `ConfigEntryAuthFailed` is raised and the resulting reauth flow doesn't auto-complete (shows a
+  form) -
+  ```python
+  issue_id = f"config_entry_reauth_{self.domain}_{self.entry_id}"
+  ir.async_create_issue(
+      hass, HOMEASSISTANT_DOMAIN, issue_id, data={"flow_id": result["flow_id"]},
+      is_fixable=False, issue_domain=self.domain, severity=ir.IssueSeverity.ERROR,
+      translation_key="config_entry_reauth", translation_placeholders={"name": self.title},
+  )
+  ```
+  `pod_home` already does both halves this depends on (`coordinator.py` raises
+  `ConfigEntryAuthFailed`; `config_flow.py` implements `async_step_reauth`/
+  `async_step_reauth_confirm`) - so this was already correctly wired up with zero code change
+  needed. The mistaken GitHub issue was closed rather than left open. **Not the same thing as the
+  `repair-issues` quality-scale rule** (checked separately via WebFetch to HA dev docs) - that
+  rule is about an integration raising its own issues for *other* fixable problems it detects,
+  unrelated to reauth's own dedicated (and automatic) mechanism; still correctly listed as
+  deferred/nice-to-have in QUALITY_SCALE.md, this finding doesn't change that.
+
+## Correction: "diagnostics ZIP" was wrong - it's a plain JSON file download
+
+Per the user directly. Every prior mention in this file and PLAN.md called HA's diagnostics
+download a "ZIP" - it isn't, at least not for this integration/HA version: Settings → Devices &
+services → Pod Home → ⋮ → Download diagnostics produces a single `.json` file (matches the
+`config_entry-pod_home-*.json` filename on the real file the user attached earlier). PLAN.md's
+wording fixed to "diagnostics download contents" rather than "ZIP contents" - this file's own
+earlier "Diagnostics ZIP - confirmed live" entry left as written per the append-only rule, but
+the underlying fact it confirmed (redaction working correctly, no credentials in the output) is
+unaffected by the file-format wording being wrong.
+
+## Real bug found live: reauth immediately re-failed after a correct password change
+
+The user tested reauth live: the Repair issue fired correctly (confirming the earlier finding
+that HA core creates it automatically), and submitting the new password in the reauth form was
+accepted and the issue disappeared - but a new one **immediately reappeared** with the same 401,
+even though the password was genuinely correct.
+
+**Root cause**: `__init__.py`'s `async_setup_entry` always calls `auth.import_tokens(auth_data)`
+with the Firebase refresh token persisted in a `Store` keyed by `entry.entry_id` - which does
+*not* change across a reauth (reauth updates the existing config entry and reloads it, it doesn't
+create a new one). `config_flow.py`'s `async_step_reauth_confirm` validated the *new* password
+correctly (via its own throwaway `PodHomeAuth` instance, which never touches the Store), then
+called `async_update_reload_and_abort`, which reloads the entry - and that reload's
+`async_setup_entry` unconditionally restored the *old*, pre-password-change refresh token from
+Store. `PodHomeAuth.async_get_id_token()` (auth.py) prefers refreshing an existing refresh token
+over signing in fresh whenever one is present, regardless of what `self._password` currently is -
+so every subsequent request kept trying to use the stale session tied to the old password,
+getting rejected by mobile-api (401) even though Firebase itself may have accepted the refresh
+briefly (explains the "repair disappears, then immediately reappears" pattern - a genuine sign-in
+with the new password never actually happened at the production `PodHomeAuth` instance).
+
+**Fix**: `config_flow.py`'s `async_step_reauth_confirm` now clears that Store
+(`Store(hass, AUTH_STORAGE_VERSION, auth_store_key(entry_id)).async_remove()`) immediately after
+validating the new password, before reloading - forcing the reloaded `PodHomeAuth` to sign in
+fresh with the new password instead of trying to reuse the old session.
+`AUTH_STORAGE_VERSION`/`auth_store_key()` moved to const.py so both `__init__.py` and
+`config_flow.py` share the exact key-construction logic rather than duplicating the f-string
+(a second inconsistent copy would have silently reintroduced this same class of bug).
+`Store.async_remove()` is confirmed safe to call even when no file exists yet (HA core wraps the
+delete in `suppress(FileNotFoundError)`) - matters for the fresh-install/first-ever-setup case,
+and for the existing `tests/test_config_flow.py` reauth tests, which don't mock `Store` and so
+now exercise a real (no-op, ephemeral test storage dir) removal.
+
+**Not yet re-tested live** - this is a real fix for a confirmed live bug, but per this project's
+write-endpoint/live-confirmation discipline, needs the user to actually force another auth
+failure and confirm reauth now sticks before this is considered closed.
+
+## Reauth fix confirmed working live
+
+Per the user directly: "confirmed resolved with new code." Reauth now sticks after a real forced
+auth failure and password change - the stale-refresh-token bug above is fixed for real, not just
+in reasoning. [jeverley/ha-pod-home#1](https://github.com/jeverley/ha-pod-home/issues/1) closed
+with that confirmation. Forced-failure log-dedup behavior (`_warn_once`/`_clear_warning`) wasn't
+explicitly called out as confirmed alongside this - still open in PLAN.md.
+
+## Real HA log from the reauth test - top-level auth logging confirmed, _warn_once still not exercised
+
+The user attached a real downloaded HA log spanning the forced-failure/reauth/recovery window.
+Read closely rather than taken as blanket confirmation of "log behavior under a forced failure":
+
+- The 401 at `11:19:15` produced exactly one `ERROR "Authentication failed while fetching
+  pod_home data: ..."` line plus a `DEBUG "Full error:"` traceback, then clean recovery (two
+  subsequent polls both `Finished fetching pod_home data ... success: True`, no repeated ERROR
+  spam). Correct, expected behavior.
+- But that logging comes from **HA core's own `DataUpdateCoordinator`** - the traceback shows
+  `homeassistant/helpers/update_coordinator.py:435` calling `_async_update_data()`, which in
+  `coordinator.py` just does `except PodHomeAuthError as exc: raise ConfigEntryAuthFailed(str(exc))
+  from exc` - no pod_home logging call of its own on this path at all.
+- `_warn_once`/`_clear_warning` (the actual mechanism QUALITY_SCALE.md's `log-when-unavailable`
+  entry describes) is only used for non-fatal per-endpoint failures inside `_safe_call` -
+  tariffs/firmware/rewards/api3 session/api3 charges. None of those call sites' messages (nor
+  any `INFO "Recovered: ..."`) appear anywhere in the log, because a top-level auth failure
+  doesn't reach any of them - the whole poll fails at the first API call
+  (`async_list_chargers`), before those individual endpoints are ever attempted.
+- **Conclusion**: the auth-failure logging path is confirmed correct and not spammy. The
+  `_warn_once`/`_clear_warning` dedup mechanism itself remains genuinely unconfirmed - would need
+  a *non-fatal* single-endpoint failure (e.g. tariffs briefly erroring while the rest of the poll
+  succeeds) to actually exercise, not a full auth outage. PLAN.md worded to reflect this split
+  rather than mark the whole gap closed.
+
+Also noted, unrelated: a `WARNING ... blocking call to import_module ...
+custom_components.pod_point.config_flow` in the same log is about the old community `pod_point`
+integration (mattrayner's), not `pod_home` - not something to act on here.
+
+## Code review of the reauth fix - 8 findings, applied
+
+`/code-review` against `git diff b1763b0~1..HEAD` (the reauth fix plus the test infrastructure
+added alongside it this session). 8 findings, all applied:
+
+- **Stale-timer race (the most severe finding)**: creating a *new* `Store` instance in
+  `config_flow.py` just to call `.async_remove()` can't cancel the *old*, still-live
+  `auth_store` instance's pending delayed-save timer (`Store._delay_handle` is per-instance
+  state) - if a token refresh landed within `AUTH_SAVE_DELAY` (5s) of the user submitting the
+  reauth form, that old timer can still fire afterwards and rewrite the stale
+  pre-password-change token back to disk, right after the fix just cleared it, reintroducing
+  the bug on the *next* restart. Rather than plumb a reference to the live instance across the
+  config-flow/entry-setup boundary (real complexity for a narrow case), fixed at the write path
+  instead: `__init__.py` now captures the password `auth` was constructed with
+  (`signed_in_password`) and `_save_auth_tokens()` compares it against `entry.data`'s *current*
+  password (read live, not from a stale closure) before saving - `entry.data` is mutated in
+  place by a reauth, not replaced, so this catches a delayed write landing after reauth
+  regardless of timing, and generalizes to *any* future path that changes the password, not just
+  this one. This also meaningfully (if not completely) addresses the separate "fix only lives at
+  one call site" altitude finding below - protection now lives in the write path itself, keyed
+  off `entry.data`, rather than solely in `config_flow.py`'s reauth branch.
+- **Unguarded `Store.async_remove()`**: wrapped in `try/except Exception` (matching
+  `__init__.py`'s own `async_load()` guard) - a failed clear must not crash reauth after a
+  correct password was already accepted; the write-path guard above is the real backstop if a
+  clear is ever skipped.
+- **Regression test didn't actually assert the Store gets cleared**:
+  `test_reauth_flow_success_updates_password` now pre-populates a stale token via `Store` before
+  running the flow, and asserts `auth_store.async_load() is None` afterward, not just that
+  `entry.data[CONF_PASSWORD]` changed - this is the test that would have caught the original bug.
+- **Altitude (fix only at one call site, `PodHomeAuth.import_tokens()` trusts any token)**:
+  meaningfully mitigated by the write-path guard above (keyed to `entry.data`, not to
+  `config_flow.py` specifically), but not fully addressed - `import_tokens()`/
+  `async_get_id_token()` in `podpoint_mobile_api/auth.py` still have no intrinsic way to refuse a
+  token that doesn't match current credentials. Left as-is rather than a larger
+  `podpoint_mobile_api` API change (binding tokens to a credential hash) - out of scope for a
+  minimal fix; the write-path guard closes the practical risk described in the original finding.
+- **`CHARGING_STATE_UNKNOWN` missing from `test_charger_status_plain_mapping`'s parametrize
+  list**: added explicitly (mapped to `None`) rather than only being incidentally covered by the
+  generic `"totally-unrecognized"` case.
+- **`tests/conftest.py`'s docstring too narrative**: trimmed to state the fact and point to
+  DECISIONS.md, per CLAUDE.md's "Comments and docstrings" convention.
+- **Duplicate-email tests near-identical**: `test_user_flow_duplicate_email_aborts` and
+  `test_user_flow_duplicate_email_is_case_insensitive` merged into one
+  `@pytest.mark.parametrize("email", [...])` test.
+- **Redundant Store delete-then-load round trip on every reauth**: left as-is. The two
+  sequential executor round-trips are on a rare, user-initiated, one-time-per-reauth path, not a
+  hot path - avoiding them would mean threading state across the reload boundary for negligible
+  real benefit, not a good trade for a "minimal edit."
+
+Retested locally where possible (offline suite unaffected; the full merged suite still hits this
+dev machine's known Windows `ProactorEventLoop` gap, same as before this fix - see the "Merged
+into one unified `tests/` suite" entry above) and via the actual GitHub Actions run before
+considering this closed.

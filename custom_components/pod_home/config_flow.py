@@ -13,10 +13,11 @@ from homeassistant.helpers.selector import (
     TextSelectorConfig,
     TextSelectorType,
 )
+from homeassistant.helpers.storage import Store
 
 # TEMPORARY: vendored copy, see __init__.py's import comment.
 from .podpoint_mobile_api import PodHomeAuth, PodHomeAuthError
-from .const import CONF_EMAIL, CONF_PASSWORD, DOMAIN
+from .const import AUTH_STORAGE_VERSION, CONF_EMAIL, CONF_PASSWORD, DOMAIN, auth_store_key
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,6 +92,21 @@ class PodHomeConfigFlow(ConfigFlow, domain=DOMAIN):
                 _LOGGER.debug("Sign-in failed during reauth: %s", exc)
                 errors["base"] = "invalid_auth"
             else:
+                # The persisted Firebase refresh token (see __init__.py) is keyed by entry_id,
+                # which doesn't change on reauth - without clearing it, the reload below would
+                # restore the *old* session (from before the password change) and silently
+                # refresh that instead of signing in fresh with the new password, immediately
+                # failing again. See DECISIONS.md. A failed clear must not block reauth from
+                # completing (matches __init__.py's own async_load guard) - __init__.py's
+                # write-time password check is the real backstop if this is ever skipped.
+                try:
+                    await Store(
+                        self.hass, AUTH_STORAGE_VERSION, auth_store_key(reauth_entry.entry_id)
+                    ).async_remove()
+                except Exception:  # noqa: BLE001
+                    _LOGGER.warning(
+                        "Couldn't clear saved auth tokens during reauth", exc_info=True
+                    )
                 return self.async_update_reload_and_abort(
                     reauth_entry,
                     data={**reauth_entry.data, CONF_PASSWORD: user_input[CONF_PASSWORD]},

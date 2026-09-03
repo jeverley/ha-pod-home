@@ -13,6 +13,16 @@ MANUFACTURER = "Pod Point"
 CONF_EMAIL = "email"
 CONF_PASSWORD = "password"
 
+# Firebase refresh-token Store (see __init__.py's async_setup_entry) - one per config entry,
+# shared with config_flow.py, which must clear it on a successful reauth (see DECISIONS.md: a
+# stale refresh token from before a password change must not survive a reauth).
+AUTH_STORAGE_VERSION = 1
+
+
+def auth_store_key(entry_id: str) -> str:
+    """Storage key for the Firebase auth-token Store."""
+    return f"{DOMAIN}_{entry_id}_auth"
+
 # connectivity-status-v2 wire values. No _OPTIONS list - unlike CHARGING_STATE_*, nothing
 # currently validates connectionState against a closed set.
 CONNECTION_STATE_ONLINE = "Online"  # confirmed live

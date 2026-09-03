@@ -192,6 +192,7 @@ def test_is_momentarily_unplugged():
         (const.CHARGING_STATE_SUSPENDED_EVSE, const.CHARGER_STATUS_PAUSED),
         (const.CHARGING_STATE_PREPARING, const.CHARGER_STATUS_PREPARING),
         (const.CHARGING_STATE_FINISHING, const.CHARGER_STATUS_FINISHING),
+        (const.CHARGING_STATE_UNKNOWN, None),
         ("totally-unrecognized", None),
         (None, None),
     ],

@@ -2,8 +2,8 @@
 
 WRITE ENDPOINT with a real physical effect on the charger (see CLAUDE.md's "Write endpoints"
 section). Built to match the app's own two boost options (Full charge / Set duration) plus a
-cancel action, per the user directly - NOT YET TESTED against a real account. Do not press these
-outside of the user explicitly doing so live, knowing what it'll do.
+cancel action, per the user directly - all three confirmed working live (see DECISIONS.md/
+PLAN.md). Do not press these outside of the user explicitly doing so live, knowing what it'll do.
 """
 from __future__ import annotations
 
