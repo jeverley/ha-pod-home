@@ -19,7 +19,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .entity import PodHomeEntity, async_setup_dynamic_chargers
-from .helpers import parse_time_of_day
+from .helpers import is_momentarily_unplugged, parse_time_of_day
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -42,17 +42,21 @@ def _read_boost_duration(hass: HomeAssistant, ppid: str) -> datetime.time:
     """Reads the current value of the Boost duration time entity (time.py) via the entity
     registry + state machine, rather than a direct object reference - the two entities are set
     up independently by separate platforms, so this is the standard cross-entity read pattern
-    rather than a fragile string-built entity_id guess."""
+    rather than a fragile string-built entity_id guess. Boost duration has no default (see
+    time.py) - unset and a genuine 00:00 are both rejected here with a clean, actionable error
+    rather than reaching the API with a request Pod Point will 400 on (a zero-length override)."""
     registry = er.async_get(hass)
     entity_id = registry.async_get_entity_id("time", DOMAIN, f"{DOMAIN}_{ppid}_boost_duration")
     if entity_id is None:
         raise HomeAssistantError("Boost duration entity isn't registered yet")
     state = hass.states.get(entity_id)
     if state is None or state.state in ("unknown", "unavailable"):
-        raise HomeAssistantError("Boost duration isn't set yet")
+        raise HomeAssistantError("Enter a Boost duration before pressing this")
     duration = parse_time_of_day(state.state)
     if duration is None:
         raise HomeAssistantError(f"Couldn't parse Boost duration value {state.state!r}")
+    if duration == datetime.time(0, 0):
+        raise HomeAssistantError("Enter a Boost duration greater than zero before pressing this")
     return duration
 
 
@@ -76,6 +80,13 @@ class PodHomeBoostFullChargeButton(PodHomeEntity, ButtonEntity):
     def unique_id(self) -> str:
         return f"{DOMAIN}_{self.ppid}_boost_full_charge"
 
+    @property
+    def available(self) -> bool:
+        # The app itself won't start a boost with the cable unplugged - matched here rather
+        # than left to fail live against the API. super().available's charger-not-None check
+        # short-circuits before this touches self.charger, same pattern as Cancel boost below.
+        return super().available and not is_momentarily_unplugged(self.charger.charging_state)
+
     async def async_press(self) -> None:
         if not self.charger:
             raise HomeAssistantError("No charger to boost")
@@ -88,7 +99,9 @@ class PodHomeBoostFullChargeButton(PodHomeEntity, ButtonEntity):
 
 class PodHomeBoostDurationButton(PodHomeEntity, ButtonEntity):
     """Triggers a boost for the duration set on Boost duration (time.py), read at press time -
-    matching the app's "Set duration" option."""
+    matching the app's "Set duration" option. Boost duration is a one-shot input, not a sticky
+    preference - per the user directly, resets back to unset after a successful press (not on
+    failure, so a rejected attempt can be retried without re-entering the value)."""
 
     _attr_translation_key = "boost_duration_button"
     _attr_name = "Boost for duration"
@@ -97,6 +110,11 @@ class PodHomeBoostDurationButton(PodHomeEntity, ButtonEntity):
     @property
     def unique_id(self) -> str:
         return f"{DOMAIN}_{self.ppid}_boost_duration_button"
+
+    @property
+    def available(self) -> bool:
+        # The app itself won't start a boost with the cable unplugged - see Full charge above.
+        return super().available and not is_momentarily_unplugged(self.charger.charging_state)
 
     async def async_press(self) -> None:
         if not self.charger:
@@ -110,6 +128,12 @@ class PodHomeBoostDurationButton(PodHomeEntity, ButtonEntity):
             self.ppid, requested_at=requested_at, end_at=end_at
         )
         await self.coordinator.async_request_refresh()
+        # pod_home owns both entities, so a direct call is the right tool here rather than a
+        # generic cross-integration service (HA's time.set_value requires a real time value, no
+        # way to clear one via it) - see time.py's PodHomeBoostDurationTime.async_reset().
+        duration_entity = self.coordinator.boost_duration_entities.get(self.ppid)
+        if duration_entity is not None:
+            await duration_entity.async_reset()
 
 
 class PodHomeCancelBoostButton(PodHomeEntity, ButtonEntity):
@@ -118,6 +142,7 @@ class PodHomeCancelBoostButton(PodHomeEntity, ButtonEntity):
 
     _attr_translation_key = "boost_cancel"
     _attr_name = "Cancel boost"
+    _attr_icon = "mdi:timer-off-outline"
 
     @property
     def unique_id(self) -> str:
@@ -128,19 +153,10 @@ class PodHomeCancelBoostButton(PodHomeEntity, ButtonEntity):
         # Unlike the entity-availability convention for sensors (unavailable = can't fetch data),
         # a button's availability controls whether it's pressable at all - greying this out when
         # there's nothing to cancel prevents a no-op DELETE, matching HA's own convention for
-        # action entities that don't currently apply (e.g. a media player's "next track").
+        # action entities that don't currently apply (e.g. a media player's "next track"). This
+        # already carries the "is a boost active" signal, so the icon stays static rather than
+        # duplicating that via a second, redundant dynamic-icon mechanism - see DECISIONS.md.
         return super().available and self.charger.boost_end_at is not None
-
-    @property
-    def icon(self) -> str:
-        # ButtonEntity has no on/off or device_class-driven state, so HA's frontend doesn't
-        # apply any automatic colour here regardless of icon choice - only *which* icon shows
-        # is under this integration's control. Swap to an alert-styled icon while a boost is
-        # actually running, so there's something real to cancel.
-        charger = self.charger
-        if charger and charger.boost_end_at is not None:
-            return "mdi:timer-alert-outline"
-        return "mdi:timer-off-outline"
 
     async def async_press(self) -> None:
         if not self.charger:
