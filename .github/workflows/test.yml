@@ -1,0 +1,45 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyflakes
+      - run: |
+          python -m py_compile custom_components/pod_home/*.py \
+            podpoint-mobile-api/src/podpoint_mobile_api/*.py
+      - run: |
+          python -m pyflakes custom_components/pod_home/*.py \
+            podpoint-mobile-api/src/podpoint_mobile_api/*.py
+
+  podpoint-mobile-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e podpoint-mobile-api
+      - run: python -c "import podpoint_mobile_api"
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements_test.txt
+      # python -m pytest, not bare `pytest` - only the former puts the repo root (and so
+      # custom_components/) on sys.path. One unified session - see tests/conftest.py.
+      - run: python -m pytest tests/ -v

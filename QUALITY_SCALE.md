@@ -44,6 +44,24 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
   platform files. Code-reviewed only, not end-to-end verified - no second charger available to
   test against.
 
+- **docs-installation-parameters, docs-known-limitations** — ✅ README.md rewritten as end-user
+  documentation: HACS custom-repository/manual installation, setup, a full entity list, Energy
+  Dashboard/Charging Mode notes, a "Known limitations" section covering boost latency, the
+  Firmware version-string caveat, and remote-lock's absence.
+- **HACS packaging** — ✅ `hacs.json` added (minimal: name + render_readme), `.github/workflows/
+  validate.yml` added (`hacs/action` + `hassfest`, matching HACS's own default-repo validation).
+  LICENSE already existed. **Still open**: no tagged GitHub release yet - HACS can install
+  straight from the default branch via a custom repository, but versioned upgrades need at least
+  one release/tag; not done yet since the integration is still actively changing shape.
+- **config-flow-test-coverage** — ✅ `tests/test_config_flow.py`, using a real
+  `pytest-homeassistant-custom-component` harness (installed as a dev dependency this phase, run
+  as part of the unified `tests/` suite - see CLAUDE.md's Verification section). Covers the
+  user flow (success, invalid auth), duplicate-email abort (including case-insensitivity, since
+  `async_set_unique_id` lowercases), and the reauth flow (success updates the stored password,
+  invalid auth shows an error and leaves it unchanged). **Still open**: this is config_flow.py
+  only - `async_setup_entry` itself (the coordinator's first refresh, real or mocked) isn't
+  exercised by these tests, and remains part of the broader `test-coverage` gap above.
+
 ## Also addressed this phase, beyond the original four
 
 - **Unconfirmed enum values (real correctness issue, not in the original list)** — an
@@ -53,13 +71,13 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
 
 ## Deferred - real work, not needed for a HACS-quality v1
 
-- **test-coverage / config-flow-test-coverage** — 95%/100% coverage requirements. `tests/` now
-  exists (`tests/test_translation_keys.py`, added to close a specific verified gap - see
-  DECISIONS.md), but that's not the deliberate full pass this rule actually needs (fixtures,
-  mocked API responses, `pytest-homeassistant-custom-component`, real coverage of the
-  coordinator/entities/config flow). Still the single biggest gap for a core submission and
-  genuinely substantial work. Worth doing before ever proposing this for core; not blocking for
-  personal/HACS use.
+- **test-coverage** — 95% coverage requirement, coordinator + entities. `tests/test_helpers.py`
+  (90 cases, offline) covers every pure function `coordinator.py`/`sensor.py` etc. lean on, but
+  the coordinator and entity classes themselves (the `DataUpdateCoordinator` subclass, every
+  platform's entity classes) still have zero direct test coverage - needs
+  `pytest-homeassistant-custom-component` with mocked API responses, a real HA test harness.
+  Real, substantial work, not started. Still the single biggest gap for a core submission; not
+  blocking for personal/HACS use.
 - **strict-typing** — full PEP-561 typing + a `py.typed` marker + entry in core's
   `.strict-typing` file. The code is already reasonably typed (`from __future__ import
   annotations`, most signatures annotated) but hasn't been audited against `mypy --strict`.
@@ -71,10 +89,12 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
 - **repair-issues, brands, discovery** — repair-issues is a nice-to-have; brands only matters
   for a core PR (a logo submitted to `home-assistant/brands`); discovery doesn't apply, this is
   a cloud API with nothing to discover on the local network.
-- **docs-* rules** (installation instructions, supported devices, troubleshooting, known
-  limitations, etc.) — the current README is dev-notes, not end-user documentation. HACS shows
-  the README as the integration's info page, so this matters for HACS too, just not urgent
-  while the integration itself is still changing shape.
+- **docs-supported-devices, docs-troubleshooting, docs-data-update, docs-use-cases,
+  docs-examples, docs-configuration-parameters, docs-removal-instructions** — a real device
+  compatibility list (only ever tested against one Solo 3), troubleshooting steps, etc. Not
+  urgent while this is a single-account personal integration rather than something with a wider
+  user base filing real support requests. See "Closed this phase" below for the docs/packaging
+  work that has landed.
 
 ## Not applicable
 

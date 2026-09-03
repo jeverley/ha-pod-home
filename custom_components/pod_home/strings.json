@@ -76,7 +76,8 @@
       "vehicle_target_charge": { "name": "Target charge" }
     },
     "time": {
-      "vehicle_ready_by": { "name": "Ready by" }
+      "vehicle_ready_by": { "name": "Ready by" },
+      "boost_duration": { "name": "Boost duration" }
     },
     "select": {
       "charging_strategy": {
@@ -86,6 +87,11 @@
     },
     "calendar": {
       "schedule": { "name": "Schedule" }
+    },
+    "button": {
+      "boost_full_charge": { "name": "Full charge" },
+      "boost_duration_button": { "name": "Boost for duration" },
+      "boost_cancel": { "name": "Cancel boost" }
     }
   }
 }

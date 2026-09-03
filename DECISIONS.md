@@ -1963,3 +1963,402 @@ copy of the same idea. QUALITY_SCALE.md's test-coverage entry updated to note th
 first real test exists now, but it's not the deliberate full pass (fixtures, mocked API
 responses, `pytest-homeassistant-custom-component`, coordinator/entity/config-flow coverage)
 that rule actually needs - the old standalone script is deleted, not kept alongside the test.
+
+## Boost buttons (`charge-overrides`) built
+
+Per the user directly, matching the app's own two boost options plus a cancel action: `Boost
+full charge` (indefinite override), `Boost for duration` (reads a local duration input at press
+time), `Cancel boost` (deletes the active override) - three `ButtonEntity`s (`button.py`, new
+platform), all charger-scoped. **NOT YET TESTED against a real account** - same write-endpoint
+discipline as Ready By/Target Charge/Charge Priority before their live confirmation; built and
+compiled/offline-verified only.
+
+Request body confirmed via the account's public OpenAPI schema (`ChargeOverrideRequestDTO`), not
+guessed: `{requestedAt: <required>, endAt: <nullable>}`, with `endAt`'s own schema description
+stating "Omit or pass null for an indefinite (Always On) override". `DELETE
+/chargers/{ppid}/charge-overrides` (Cancel boost) is also schema-confirmed, no body.
+
+**Correction after live testing**: Boost for duration worked first try; `endAt: null` for Boost
+full charge was rejected by the server (403), and separately, the user triggered "Full charge"
+from the app itself and observed a real end time exactly 12 hours out - not indefinite at all.
+The schema documenting `endAt: null` as a valid, accepted value doesn't mean this account's
+server actually honours it, and more importantly the app's own "Full charge" was never indefinite
+in the first place - a wrong assumption corrected by real evidence, not just the 403. Fixed:
+`PodHomeBoostFullChargeButton` now sends `endAt = requestedAt + 12h` (new `_FULL_CHARGE_DURATION`
+constant, button.py) instead of `None`. `async_create_charge_override()`'s `end_at` parameter
+stays nullable in the client (the schema-documented option, kept in case it's ever useful
+elsewhere or the 403 turns out to be narrower than it looks), but the docstring no longer asserts
+it works - callers should pass a real end time, per what's now confirmed live.
+
+`_async_write()` (podpoint_mobile_api/client.py) already generalized over HTTP method via
+`session.request(method, ...)`, so adding POST/DELETE support was two thin wrappers
+(`_async_post`/`_async_delete`) rather than new request-handling logic - `_async_delete` passes
+`json_body=None` to `_async_write`, which aiohttp treats as "no JSON payload" (widened that
+parameter's type hint from `dict` to `dict | None` to make this explicit rather than implicit).
+
+**Boost duration (`time.py`) is a genuinely local entity, not backed by the coordinator/API at
+all** - per the user directly, reusing `TimeEntity`'s hh:mm picker widget to represent a
+*duration* (H hours M minutes) rather than a wall-clock time, since HA has no dedicated duration
+entity domain. There's no "configured boost duration" API field to read back (it's purely a
+button-press-time parameter), so this entity's `native_value` comes from `self._value`, a plain
+instance attribute, not `self.charger`. Persists across restarts via `RestoreEntity` mixed in
+alongside `PodHomeEntity`/`CoordinatorEntity` - the actual restore-plus-coordinator MRO
+interaction is unverified beyond compiling, like everything else above the API layer; worth
+confirming this combination behaves as expected the first time it's actually restarted inside
+real HA. Defaults to 15 minutes if never set - deliberately short, requiring an explicit increase
+for a longer boost rather than the reverse.
+
+`Boost for duration`'s button reads the duration entity's current value via the entity registry
++ `hass.states.get()` (`_read_boost_duration()` in button.py) rather than holding a direct Python
+object reference to the `time.py` entity instance - the two are constructed independently by
+separate platform `async_setup_entry` calls, so the entity registry + state machine is the
+standard HA cross-entity read pattern here, not a workaround.
+
+None of the three buttons, nor the duration input, carry an `entity_category` - per the user
+directly, these belong in the device page's "Controls" group (interactive, act-on-now entities),
+not "Configuration" (a background preference like Charge Priority) - matching HA's own frontend
+grouping convention, not just a style preference.
+
+**Cancelling a boost doesn't immediately clear the schedule server-side.** After a live Cancel
+boost, the user observed the smart-charging schedule still showing some of the boost's future
+intervals for a while, in both the Pod Point app itself and this integration's `Schedule`
+calendar. Because the app shows the identical stale intervals, this is a server-side recompute
+lag on Pod Point's backend (the schedule plan not being regenerated instantly on cancellation),
+not a bug in `calendar.py`'s rendering of whatever `smart_schedule_windows` the API currently
+returns - no code change made. Not confirmed how long the lag lasts or whether a manual refresh
+speeds it up; noted here as an observed real-account quirk rather than investigated further.
+
+## HACS packaging + README rewrite
+
+`hacs.json` added (minimal shape: `name` + `render_readme`) - no `homeassistant` minimum-version
+key set, since no real floor has ever been tested against; no `country`/`zip_release` fields,
+neither applies. `.github/workflows/validate.yml` added running `hacs/action` and
+`home-assistant/actions/hassfest`, matching what HACS's own default-repository validation runs -
+this repo isn't on that list yet, but the workflow catches the same class of manifest/hacs.json
+mistakes early regardless. LICENSE already existed from before this session.
+
+README.md rewritten from dev-notes into end-user documentation (installation via HACS custom
+repository or manual copy, setup steps, the full current entity list, Energy Dashboard and
+Charging Mode guidance, a "Known limitations" section). Confirmed while writing the installation
+section that manual/HACS install genuinely needs no separate `pip install` step: all three
+`podpoint_mobile_api` imports in the shipped integration (`__init__.py`, `config_flow.py`,
+`coordinator.py`) are relative (`from .podpoint_mobile_api import ...`), resolving to the vendored
+copy under `custom_components/pod_home/podpoint_mobile_api/`, not the standalone package -
+`manifest.json`'s empty `requirements` was previously documented (old README) as meaning HA
+"won't auto-install the package... unless it's manually pip-installed first," which was already
+wrong by the time that sentence was read again now - the vendoring makes the integration
+self-contained. Old dev-notes README also claimed charge-overrides had "produced no reaction
+until the charger's own next check-in" as an unqualified statement; kept that pull-based/~5-minute
+latency behaviour in the new README's "Known limitations" section, since it's still accurate and
+relevant to the now-implemented boost buttons.
+
+## Correction: single-rate tariff does NOT revert to Basic Charging
+
+The earlier `smart_charging_supported` entry above ("selecting a tariff with more rates, or one
+where the supplier controls charging directly, reverts the account to Basic Charging
+automatically") conflated two different things under "supplier controls charging directly."
+Corrected, per the user directly: a single-rate tariff does **not** cause a revert to Basic
+Charging - Smart Charging keeps working on one, with Pod Point coordinating directly with the
+supplier to charge during low-demand periods. That supplier coordination on a single-rate tariff
+is normal Smart Charging behaviour, not a trigger for reverting to Basic. The only confirmed
+revert trigger is a tariff with more than two rate windows. `smart_charging_supported` itself
+(coordinator.py/sensor.py) still reflects live API data either way and needed no code change -
+this was a documentation-only error in how that flag's cause was described in README.md/
+DECISIONS.md, not in the code that reads it.
+
+## HACS packaging README follow-ups from live feedback
+
+Three corrections/restructures to the README.md written above, from the user's own review of it:
+
+- **Energy Dashboard**: the user's actual dashboard uses **Total energy** for the energy panel,
+  not Month energy - corrected the recommendation. Total energy is the live-inclusive running
+  total (a session in progress counts immediately, see its docstring in sensor.py), Month energy
+  lags until each session finalizes; Month cost is still the one used for the cost panel, since
+  no live-inclusive Total cost sensor exists.
+- **Charging Mode**: see the correction entry directly above.
+- **"What you get"**: restructured into two tables (charger device, car device) rather than prose
+  paragraphs, per the user's request to call out that these are genuinely two separate HA devices.
+  First pass of that table wrongly placed Ready by/Target charge under the charger device - both
+  are actually `PodHomeVehicleEntity` (time.py/number.py), i.e. car-device entities, confirmed
+  against `_MODE_GATED_ENTITIES` in entity.py (`("time", "_ready_by", "vehicle")`,
+  `("number", "_target_charge", "vehicle")`). Moved to the car device table alongside Expected
+  charge, which is also vehicle-scoped and Smart-Charging-gated the same way.
+
+## README "What you get" split into three devices, grouped by category
+
+Per the user's request to add category/split the tables further. Two corrections made along the
+way:
+
+- **A third device exists and was missing entirely**: Rewards balance is `PodHomeAccountEntity`
+  (entity.py), grouped under its own account-level "Pod Point" device (one per config entry,
+  `DeviceInfo(identifiers={(DOMAIN, config_entry.entry_id)})`) - not the charger device where the
+  first table pass had it. Added as its own third device section.
+- **Category column reframed as a per-device split into Sensors/Controls/Configuration/
+  Diagnostic tables**, matching how Home Assistant's own device page actually groups entities:
+  `entity_category` (`CONFIG`/`DIAGNOSTIC`) drives Configuration/Diagnostic directly; everything
+  uncategorized then splits by domain into Sensors (`sensor`/`binary_sensor`) or Controls
+  (everything else this integration ships - `button`, `number`, `select`, `time`, `update`,
+  `calendar`). The Controls-domain-set part of this (which non-sensor domains land in Controls)
+  is stated with the same confidence as the earlier live conversation on this topic - a
+  well-established HA frontend convention, not something re-verified against frontend source for
+  this doc pass.
+
+## README "Known limitations" - two bullets removed
+
+Per the user directly: the boost-latency bullet (~5 min pull-based command latency) isn't
+actually a limitation of this integration - the app has the exact same latency, since it's a
+property of the charger's own check-in cadence, not something either client controls. Removed
+rather than reworded. The "remote cable lock isn't implemented yet" bullet was also removed for
+now, per the user's request - remote-lock remains untouched in the code/PLAN.md either way, this
+is a doc-only removal, not a decision to drop it from scope.
+
+## tests/test_helpers.py - offline coverage for helpers.py's pure functions
+
+First of two planned pieces (per the user, offline first, full HA suite second - see
+QUALITY_SCALE.md). 90 cases across every function in helpers.py.
+
+**Loading problem solved**: helpers.py has zero Home Assistant dependency, but its
+`from .const import ...` is a *relative* import, which fails if imported as a bare top-level
+module (`ImportError: attempted relative import with no known parent package` - confirmed by
+trying it). test_translation_keys.py's existing `sys.path` trick only works for const.py because
+const.py itself has no relative imports. Importing the real `custom_components.pod_home` package
+to get a proper parent isn't an option either - its `__init__.py` unconditionally imports
+`homeassistant`, not installed in this environment. Solved with a new `tests/_pod_home_loader.py`:
+registers a synthetic `pod_home` module in `sys.modules` (a bare `types.ModuleType` with
+`__path__` set to the real source directory, never executing the real `__init__.py`), then loads
+const.py/helpers.py as its submodules via `importlib.util.spec_from_file_location` - this lets
+helpers.py's relative import resolve normally. Reusable by any future offline test file that
+needs const.py/helpers.py.
+
+**Fixture approach**: PodHomeCharger/PodHomeCharge/PodHomeTariffWindow/etc. are real dataclasses,
+but they're defined in coordinator.py, which imports Home Assistant heavily at module level - not
+importable the same way. Since every helpers.py function under test only does plain attribute
+access on these objects (duck typing, and type hints are just strings under
+`from __future__ import annotations` so nothing enforces the real dataclass at runtime),
+test_helpers.py uses small `SimpleNamespace`-based factory functions (`_charger()`, `_charge()`,
+`_tariff_window()`, etc.) instead of importing coordinator.py at all - matches CLAUDE.md's
+"hand-built fixture data" description of how this was always meant to be tested.
+
+**Coverage**: every `CHARGING_STATE_*` → `CHARGER_STATUS_*` mapping in `charger_status()`
+including all four Finished-sticky scenarios (sticky while nothing newer, cleared by a newer
+charging_started_at, cleared by a newer cable_unplugged_at, never sticky without
+charge_finished_at); `select_last_charge()`'s same-session/different-session/tolerance branches;
+`is_single_rate_tariff()`/`charging_priority_label()`/`max_price_for_charging_priority()`
+including the single-rate "can't disambiguate" case and a round-trip check between the write and
+read sides; `expand_manual_schedule_events()`'s same-day/midnight-crossing/week-boundary-wrap/
+inactive-window/missing-fields cases (the midnight-crossing and week-wrap cases match the
+function's own docstring caveat that they're "not confirmed to occur live" - tested for
+correctness of the code as written, not as a claim these shapes have been seen from the real
+API); `smart_schedule_events()`'s CHARGING-only inclusion and range-clamping; and
+`cumulative_charging_seconds()`'s window-clipping and the "real 0 vs. None" distinction its own
+docstring calls out.
+
+## pytest-homeassistant-custom-component installed - real HA test harness, first slice: config flow
+
+Second half of the two-part plan (offline helpers.py tests first, full HA suite second - per the
+user). Installed globally into this dev machine's system Python (no venv exists for this repo,
+matching how `podpoint-mobile-api` was already installed - `pip install -e podpoint-mobile-api`,
+confirmed via `pip show`). **Worth knowing**: this pulled in `homeassistant==2025.1.4` and ~100
+packages, and `pip` reported real version conflicts against other unrelated projects on this
+machine sharing the same global Python (esphome, androguard, aioesphomeapi - downgraded
+`cryptography`/`aiohttp`/`pillow`/`jinja2`/`pyyaml`/`requests`/`voluptuous`/`bleak` versions those
+projects had pinned higher). Not fixed or investigated further - out of this repo's scope - but
+flagged here since it's a real side effect of work done in this session, not contained to
+`podpoint`.
+
+**Four genuine environment problems hit and solved, in order** (all Windows-specific; irrelevant
+on the Linux CI Home Assistant's own test suite runs on, which is presumably why none of this is
+documented anywhere obvious upstream):
+
+1. **The plugin is disruptive session-wide once installed.** Just having
+   `pytest-homeassistant-custom-component` importable makes pytest auto-load its plugin for
+   *every* test in the session (entry-point-based), which swaps pytest-asyncio's `event_loop`
+   fixture for HA's own and blocks real sockets via `pytest-socket` - broke the already-passing
+   `tests/test_helpers.py`/`tests/test_translation_keys.py` immediately on install, even though
+   neither file touches Home Assistant. Fixed with a root `pytest.ini` (`-p no:homeassistant`,
+   entry-point name confirmed via `importlib.metadata.entry_points(group="pytest11")` - it's
+   `homeassistant`, not the package's own dotted name) plus `--ignore=tests/integration`, so a
+   bare `pytest`/`pytest tests/` only ever collects the offline suite.
+2. **Windows' `ProactorEventLoop` needs a real loopback socket just to exist.** Its internal
+   self-pipe uses `socket.socketpair()`, which pytest-socket's blocking (still active once the
+   plugin is deliberately re-enabled for `tests/integration/`, see below) intercepts before any
+   test code runs, raising `SocketBlockedError` during `event_loop` fixture setup. Fixed with
+   `--force-enable-socket` in `pytest.ini` - not a real loss of coverage, since every actual
+   network call in these tests is mocked at the auth-client boundary anyway (see point 4).
+3. **The async `hass` fixture wasn't being awaited by fixtures that depend on it**
+   (`enable_custom_integrations(hass)` received the raw `async_generator`, not a real
+   `HomeAssistant`, and crashed with `AttributeError: 'async_generator' object has no attribute
+   'data'`). Fixed with `asyncio_mode = auto` in `pytest.ini`.
+4. **`homeassistant`'s `async_get_clientsession` hardcodes `aiohttp`'s `AsyncResolver`**, which
+   requires `aiodns` to be installed at all (so `aiodns` must stay pinned to the exact version
+   `homeassistant==2025.1.4` declares, `==3.2.0` - a newer `aiodns` resolved by default breaks the
+   pin) *and* requires the running event loop to be either a plain `SelectorEventLoop` or (on
+   Windows, off the default Proactor policy) the exact `winloop.Loop` instance - neither of which
+   `homeassistant.runner.HassEventLoopPolicy` (a thin subclass of `asyncio.DefaultEventLoopPolicy`,
+   which is `WindowsProactorEventLoopPolicy` on Windows) will ever hand back, installing `winloop`
+   or not. Rather than fight the event loop policy itself (would mean monkeypatching
+   `asyncio.DefaultEventLoopPolicy` before `homeassistant.runner` is first imported - fragile,
+   invasive, and pointless for what these tests actually need), `test_config_flow.py` patches
+   `custom_components.pod_home.config_flow.async_get_clientsession` directly in its autouse
+   `no_real_setup` fixture. Architecturally clean, not just a workaround: every test in this file
+   already independently mocks `PodHomeAuth.async_get_id_token`, which never touches the session
+   object it's given, so the session's realness was never relevant to what's under test.
+
+**Subtree isolation, and why it's a *separate* pytest invocation, not a flag**: `tests/integration/
+conftest.py` re-declares `pytest_plugins = ["pytest_homeassistant_custom_component.plugins"]`
+(the dotted submodule, not the bare package name - the bare name has no fixtures, confirmed by
+trying it first and getting `fixture 'enable_custom_integrations' not found` even though it's
+right there in `plugins.py`). Tried re-enabling via a `-p homeassistant` CLI flag instead of the
+nested `pytest_plugins` declaration first (avoids pytest's "nested conftest declaring
+pytest_plugins" deprecation error when the parent `tests/` dir is *also* being collected in the
+same session) - didn't work: `--force-enable-socket` stopped being honoured with that toggle
+order for reasons not fully root-caused, socket blocking came back. Reverted to the
+`pytest_plugins` declaration, which does work correctly - but only when `tests/integration/` is
+targeted directly as its own pytest invocation, never together with `tests/` in one run (confirmed
+both ways: `pytest tests/integration/` - 6 passed; `pytest tests/` with the nested
+`pytest_plugins` restored - fails at collection with pytest's non-top-level-conftest error).
+`--ignore=tests/integration` in the root `pytest.ini` keeps the two suites from ever colliding
+by accident. This is a real operational split, not a temporary workaround: **`pytest tests/
+homeassistant/` must always be run separately from `pytest tests/`**, documented in CLAUDE.md's
+Verification section.
+
+**Coverage landed**: `tests/integration/test_config_flow.py` - user flow (success, invalid
+auth), duplicate-email abort (including case-insensitivity, since `async_set_unique_id`
+lowercases the email before comparing), reauth flow (success updates the stored password and
+leaves the email unchanged; invalid auth shows an error and leaves the password unchanged). Every
+test patches `custom_components.pod_home.async_setup_entry` to a no-op success - these tests are
+about the flow's own behaviour, not about the coordinator's first refresh actually succeeding,
+which stays part of the still-open coordinator/entity test-coverage gap (see QUALITY_SCALE.md).
+
+## .github/workflows/test.yml - both test suites moved to CI
+
+Per the user directly: run the tests on GitHub instead of only locally. Four jobs, all
+`ubuntu-latest`: `lint` (py_compile/pyflakes across both `custom_components/pod_home/` and
+`podpoint-mobile-api/`), `podpoint-mobile-api` (installs it with `pip install -e` and imports it -
+the one existing check beyond compiling for that package), `offline-tests` (`pytest tests/`, just
+`pytest` itself as a dependency), `integration-tests` (`pip install -r requirements-test.txt`
+then `pytest tests/integration/`, kept as its own separate invocation on CI too - the
+`pytest.ini`/`conftest.py` split documented in the previous entry applies here unchanged).
+
+Deliberately not folded into the existing `.github/workflows/validate.yml` (hacs/action +
+hassfest) - different concern (test correctness vs. HACS/manifest schema validation), separate
+file keeps each focused and lets one fail without obscuring the other in the Actions UI.
+
+Expected to be markedly less fragile than the local Windows run that led to this suite existing:
+GitHub's runners are Linux, `pytest-homeassistant-custom-component`'s actual target platform - none
+of the four Windows-specific problems from the previous entry (ProactorEventLoop's socketpair,
+aiodns/winloop's event-loop-type requirement) should apply there. The `async_get_clientsession`
+mock in `test_config_flow.py` stays regardless - it's the architecturally correct choice on any
+platform (isolates the config-flow test from real network entirely), not merely a Windows
+workaround. Not yet confirmed green on an actual GitHub Actions run - first push will tell.
+
+## First real CI run failed both test jobs - two genuine bugs in the workflow itself, fixed
+
+Checked the actual run (`gh run view`) rather than assuming green from "not yet confirmed" above.
+Both `offline-tests` and `integration-tests` failed, neither for a Linux-vs-Windows reason -
+both were bugs in `test.yml` itself:
+
+1. **`offline-tests` failed with `pytest: error: unrecognized arguments: --force-enable-socket`.**
+   Root cause: `--force-enable-socket` was living in the *shared* root `pytest.ini`'s `addopts`,
+   which every pytest invocation reads - including `offline-tests`, whose job never installs
+   `pytest-homeassistant-custom-component` (so `pytest-socket`, the plugin that owns that flag,
+   isn't present either). An unrecognized CLI option is a hard error, unlike an unknown ini key
+   (only warns) - so this broke immediately. Fixed by moving `--force-enable-socket` (and
+   `asyncio_mode`, same reasoning, passed as `-o asyncio_mode=auto`) out of the shared
+   `pytest.ini` entirely, onto the `integration-tests` job's own command line only. Root
+   `pytest.ini` now only has `-p no:homeassistant --ignore=tests/integration` - both safe
+   unconditionally, neither depends on a plugin being installed.
+2. **`integration-tests` failed with `ModuleNotFoundError: No module named 'custom_components'`.**
+   Root cause: `test.yml` ran bare `pytest tests/integration/ -v`. Only `python -m pytest` (not
+   the standalone `pytest` script) inserts the current working directory onto `sys.path` - bare
+   `pytest` relies purely on its own rootdir-insertion logic, which for a test file with no
+   `__init__.py` anywhere above it only adds that file's *own* directory (`tests/integration/`),
+   never the repo root three levels up. Every local verification in the previous entry used
+   `python -m pytest ...` throughout (habit, not a deliberate choice at the time) and so never hit
+   this - the workflow file was the one place still using bare `pytest`. Fixed by switching both
+   `test.yml` jobs to `python -m pytest`, and documented as a hard requirement in
+   `tests/integration/conftest.py`'s docstring and CLAUDE.md so it isn't silently reintroduced.
+
+Neither bug was actually Windows/Linux-specific - both would have broken a local run too if
+someone had copied `test.yml`'s exact command lines instead of the ones this file's own docstring
+documents. Retested locally after the fix (`python -m pytest tests/integration/
+--force-enable-socket -o asyncio_mode=auto` matching the corrected `test.yml` exactly): 6 passed.
+
+Confirmed on the actual next GitHub Actions run (`33545679973`): all four jobs green -
+`lint`, `podpoint-mobile-api`, `offline-tests`, `integration-tests`.
+
+## `tests/homeassistant/` renamed to `tests/integration/`
+
+Per the user directly: a subfolder named "homeassistant" read oddly for a repo where *everything*
+is Home Assistant code - it looks like it's claiming to be the one place that tests Home
+Assistant, when what it actually means is "the tests that need a running HA test harness."
+`tests/integration/` says that directly, using the standard, framework-agnostic unit-vs-
+integration split any Python developer already recognizes, rather than an HA-specific-sounding
+name. CI job renamed to match (`homeassistant-tests` -> `integration-tests`).
+
+**Tried first, confirmed not viable**: merging both suites into one unified pytest session (so
+there'd be no split at all) - the actual root cause of the "weird" structure. Set
+`--force-enable-socket`/`asyncio_mode = auto` globally and let the plugin auto-load for the whole
+`tests/` tree, no `-p no:homeassistant`/`--ignore` anywhere. Broke immediately: even with the
+right flags, `pytest-homeassistant-custom-component`'s other autouse fixtures still interfere
+with plain synchronous tests that never asked for a `hass` fixture at all - `tests/test_helpers.py`
+went from 90 passing to 96 errors (event_loop fixture failures on tests that don't use asyncio).
+Confirmed this isn't fixable by tuning ini options further - it's a structural conflict between
+"a session where HA's test harness is active" and "a session where it isn't," not a matter of
+getting the right flags. The two-invocation split stays; only the naming changed.
+
+Every path/job-name reference updated together (`pytest.ini`, `tests/integration/conftest.py`,
+`.github/workflows/test.yml`, `requirements-test.txt`, CLAUDE.md, QUALITY_SCALE.md) - retested
+both suites after the rename (`python -m pytest tests/` - 90 passed; `python -m pytest
+tests/integration/ --force-enable-socket -o asyncio_mode=auto` - 6 passed) before pushing.
+
+## Merged into one unified `tests/` suite - CI (Linux) is now the authoritative verification, not this dev machine
+
+Per the user directly, in immediate follow-up to the rename above: still felt wrong to have a
+split at all, and asked to remove the Windows-specific workarounds - now that CI actually runs on
+Linux, that's the real verification environment, not this local Windows dev machine. The earlier
+"tried first, confirmed not viable" merge attempt (previous entry) was re-examined with that
+framing: it failed with the exact same Windows-only `ProactorEventLoop`/`socket.socketpair()`
+mechanism documented in the very first HA-harness entry, not a fundamental cross-platform
+incompatibility between "sync tests" and "the plugin active for the session." Nothing in that
+failure mode is Linux-specific - Unix event loops build their self-pipe via `os.pipe()`, not a
+blocked `socket.socketpair()` call, so pytest-socket's blocking shouldn't intercept it there.
+Decided to trust that reasoning and restructure for real, verifying on the actual CI (Linux)
+rather than this local (Windows) machine, since local Windows repro is now a known-broken,
+diagnosed-and-accepted gap, not a signal to act on.
+
+**Restructure**: `tests/integration/` merged back into flat `tests/` - `test_config_flow.py`
+moved up, `tests/integration/conftest.py`'s content merged into a single `tests/conftest.py` that
+just registers the plugin unconditionally (`pytest_plugins` removed entirely - no `-p
+no:homeassistant` anywhere left to fight against, so the entry-point auto-load is the only
+registration path now, avoiding the "Plugin already registered under a different name" error that
+a redundant explicit `pytest_plugins` alongside auto-load produces). Root `pytest.ini` reduced to
+just `asyncio_mode = auto` - no `-p no:homeassistant`, no `--ignore`, no `--force-enable-socket`
+(not needed at all once there's no Windows-specific ProactorEventLoop construction path forcing
+it - removed rather than kept "just in case", since keeping unnecessary Windows-only flags around
+is exactly the clutter being removed here). `requirements-test.txt` reduced to just
+`pytest-homeassistant-custom-component` - the explicit `aiodns==3.2.0` pin and the
+Windows-conditional `winloop` line both dropped: `aiodns==3.2.0` was only needed because this
+specific local machine had a stray newer `aiodns` from an earlier manual `pip install` polluting
+things, not something a fresh CI environment would ever hit (installing `homeassistant` alone
+already hard-pins `aiodns==3.2.0` via its own declared dependencies); `winloop` was purely a
+Windows/ProactorEventLoop fix with no Linux relevance at all now that the whole flow it was
+patching around isn't reachable. `test.yml`'s four jobs collapsed to three - `offline-tests` and
+`integration-tests` merged into one `tests` job (`pip install -r requirements-test.txt` then
+`python -m pytest tests/ -v`); `lint` and `podpoint-mobile-api` stay separate, different concerns.
+
+**Locally (Windows) this is now expected to fail** - confirmed: `python -m pytest tests/ -q`
+after this change produces 96 errors, the exact same `ProactorEventLoop`/`_ssock` construction
+failure as every earlier Windows repro in this file. Deliberately not chased further or worked
+around again - CLAUDE.md's Verification section now says plainly that `.github/workflows/
+test.yml` is the authoritative place this suite is checked, and a local Windows failure here is
+expected, not a regression. Not yet confirmed green on the actual next GitHub Actions run at the
+time of writing this entry - check the Actions tab (or `gh run list --workflow=test.yml`) for the
+real result rather than trusting this paragraph's expectation.
+
+## requirements-test.txt renamed to requirements_test.txt
+
+Per the user directly: underscore, not hyphen, matching Python module-name convention rather than
+a package/CLI-name convention. Cosmetic - `.github/workflows/test.yml` and CLAUDE.md updated to
+match. Earlier entries above still say `requirements-test.txt` where they're describing what was
+true at the time - left as written, per this file's append-only rule.
