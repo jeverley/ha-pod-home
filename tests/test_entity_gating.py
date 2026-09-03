@@ -57,3 +57,29 @@ async def test_leaves_a_user_disabled_entity_alone(hass: HomeAssistant) -> None:
     async_sync_support_gated_entities(hass, coordinator)
 
     assert registry.entities[entity_id].disabled_by == er.RegistryEntryDisabler.USER
+
+
+async def test_a_manual_enable_of_our_own_disable_survives_the_next_sync(
+    hass: HomeAssistant,
+) -> None:
+    """Regression test for a real bug: HA's UI "enable" action sets disabled_by=None regardless
+    of who disabled it, so a user re-enabling an entity WE'D disabled looks identical to "never
+    touched" on the next sync - which used to disable it right back. entity_gate_applied_state
+    (coordinator.py) tracks what WE last wrote, so a mismatch (disabled_by=None when we expected
+    our own INTEGRATION disable to still be there) is recognised as a user override and left
+    alone, not re-applied."""
+    entity_id = _register_remote_lock(hass, PPID)
+    coordinator = make_coordinator(hass, {PPID: make_charger(remote_lock_off_mode=None)})
+
+    # First sync: unsupported, so we disable it ourselves.
+    async_sync_support_gated_entities(hass, coordinator)
+    registry = er.async_get(hass)
+    assert registry.entities[entity_id].disabled_by == er.RegistryEntryDisabler.INTEGRATION
+
+    # User manually re-enables it via the UI - HA sets disabled_by back to None, same as if it
+    # had simply never been disabled.
+    registry.async_update_entity(entity_id, disabled_by=None)
+
+    # Still unsupported - a naive re-sync would disable it again. It must not.
+    async_sync_support_gated_entities(hass, coordinator)
+    assert registry.entities[entity_id].disabled_by is None

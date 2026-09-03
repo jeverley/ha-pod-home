@@ -2835,3 +2835,34 @@ five `scratch/*.py` probe scripts (`probe_all.py`, `smoke_test_api.py`,
 `check_interval_probe.py`, `boost_watcher_probe.py`, `vehicle_sync_probe.py`) by forcing
 `asyncio.WindowsSelectorEventLoopPolicy()` before `asyncio.run(main())` on `sys.platform ==
 "win32"`. Local-only fix (scratch/ is gitignored), not committed.
+
+## Fixed: manually re-enabling a gated entity got silently disabled again on the next poll
+
+Live bug report from the user: enabling the (disabled-by-default) Remote Lock entity by hand in
+the UI got flipped back to disabled on the next coordinator update. Root cause was in
+`_async_apply_disabled_state` (entity.py), shared by all three gating axes (mode/tariff/support):
+HA's "enable" UI action sets `disabled_by` back to `None` regardless of who disabled the entity -
+there's no `enabled_by` equivalent recording *who* last enabled it. So `entry.disabled_by is
+None` looked identical whether it meant "never touched, still the default" or "a user just
+overrode our disable" - the `not wants_enabled and entry.disabled_by is None` branch couldn't
+tell them apart, and re-disabled either way.
+
+Fixed by giving the coordinator a small in-memory tracking dict,
+`entity_gate_applied_state: dict[str, bool]` (entity_id -> the enabled state WE last wrote,
+public/no-underscore like `boost_duration_entities` - a cross-module-accessed field, not
+internal-only). Before acting, `_async_apply_disabled_state` now checks whether the registry's
+*current* `disabled_by` still matches what's recorded as our last write; a mismatch means
+something else (the user) changed it since, and the function returns without touching it or
+updating the tracking - so it keeps deferring on every future poll too, not just the one where
+the divergence was first noticed. Not persisted across restarts - a fresh disable-by-default pass
+after a restart is expected and consistent with `entity_registry_enabled_default` semantics
+generally, so in-memory-only is the right amount of durability here, not a Store.
+
+This was a bug in shared, general-purpose gating infrastructure, not something specific to
+Remote Lock - mode-gating and tariff-gating had exactly the same latent bug, just less likely to
+be hit in practice (Ready By/Target Charge start *enabled* by default in Smart Charging mode, so
+manually re-enabling them while gated off is a much less common interaction than Remote Lock's
+"try enabling it to see if your hardware supports it" - which is precisely the interaction the
+README asks Solo 3S owners to attempt). Fixed once, in the shared function, benefiting all three
+gates. Covered by a new regression test in `tests/test_entity_gating.py`
+(`test_a_manual_enable_of_our_own_disable_survives_the_next_sync`).

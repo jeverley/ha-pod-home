@@ -245,7 +245,9 @@ def async_sync_mode_gated_entities(
             wants_enabled = mode == SCHEDULE_MODE_SMART_CHARGING
             for platform_domain, suffix, scope in _MODE_GATED_ENTITIES:
                 if scope == "charger":
-                    _async_apply_disabled_state(registry, platform_domain, f"{ppid}{suffix}", wants_enabled)
+                    _async_apply_disabled_state(
+                        coordinator, registry, platform_domain, f"{ppid}{suffix}", wants_enabled
+                    )
         vehicle_id = charger.vehicle.id if charger.vehicle else None
         if vehicle_id and vehicle_id not in vehicle_wants_enabled:
             vehicle_wants_enabled[vehicle_id] = wants_enabled
@@ -256,12 +258,16 @@ def async_sync_mode_gated_entities(
         for platform_domain, suffix, scope in _MODE_GATED_ENTITIES:
             if scope != "charger":
                 _async_apply_disabled_state(
-                    registry, platform_domain, f"{vehicle_id}{suffix}", wants_enabled
+                    coordinator, registry, platform_domain, f"{vehicle_id}{suffix}", wants_enabled
                 )
 
 
 def _async_apply_disabled_state(
-    registry: er.EntityRegistry, platform_domain: str, unique_id_body: str, wants_enabled: bool
+    coordinator: PodHomeDataUpdateCoordinator,
+    registry: er.EntityRegistry,
+    platform_domain: str,
+    unique_id_body: str,
+    wants_enabled: bool,
 ) -> None:
     unique_id = f"{DOMAIN}_{unique_id_body}"
     entity_id = registry.async_get_entity_id(platform_domain, DOMAIN, unique_id)
@@ -278,12 +284,26 @@ def _async_apply_disabled_state(
     entry = registry.entities.get(entity_id)
     if entry is None:
         return
+
+    # If the registry's current enabled/disabled state no longer matches what WE last wrote for
+    # this entity_id, something else changed it since - a user's own manual toggle in the UI,
+    # since disabled_by=None looks identical whether it's "still what we set" or "the user just
+    # re-enabled it". Defer to that rather than fighting it: skip silently, and deliberately
+    # don't update our tracking, so we keep deferring on every later poll too, not just this one.
+    last_applied = coordinator.entity_gate_applied_state.get(entity_id)
+    if last_applied is not None:
+        expected_disabled_by = None if last_applied else er.RegistryEntryDisabler.INTEGRATION
+        if entry.disabled_by != expected_disabled_by:
+            return
+
     is_disabled_by_us = entry.disabled_by == er.RegistryEntryDisabler.INTEGRATION
     if wants_enabled and is_disabled_by_us:
         registry.async_update_entity(entity_id, disabled_by=None)
+        coordinator.entity_gate_applied_state[entity_id] = True
     elif not wants_enabled and entry.disabled_by is None:
         # Only disable if nothing else already disabled it.
         registry.async_update_entity(entity_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION)
+        coordinator.entity_gate_applied_state[entity_id] = False
 
 
 # Entities gated on the account's tariff shape, not Charging Mode - see is_single_rate_tariff()
@@ -308,7 +328,9 @@ def async_sync_tariff_gated_entities(
             continue
         wants_enabled = not is_single_rate
         for platform_domain, suffix in _TARIFF_GATED_ENTITIES:
-            _async_apply_disabled_state(registry, platform_domain, f"{ppid}{suffix}", wants_enabled)
+            _async_apply_disabled_state(
+                coordinator, registry, platform_domain, f"{ppid}{suffix}", wants_enabled
+            )
 
 
 # Entities gated on whether THIS charger's hardware actually supports the feature at all - not
@@ -337,4 +359,6 @@ def async_sync_support_gated_entities(
     for ppid, charger in coordinator.data.items():
         wants_enabled = charger.remote_lock_off_mode is not None
         for platform_domain, suffix in _SUPPORT_GATED_ENTITIES:
-            _async_apply_disabled_state(registry, platform_domain, f"{ppid}{suffix}", wants_enabled)
+            _async_apply_disabled_state(
+                coordinator, registry, platform_domain, f"{ppid}{suffix}", wants_enabled
+            )

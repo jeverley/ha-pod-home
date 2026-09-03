@@ -462,6 +462,14 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # so a direct call is the right tool here, not a cross-integration service. Loosely typed
         # (not PodHomeBoostDurationTime) to avoid coordinator.py importing a platform module.
         self.boost_duration_entities: dict[str, Any] = {}
+        # entity_id -> the enabled state (registry disabled_by=None) WE last wrote for it, via
+        # entity.py's mode/tariff/support gating (_async_apply_disabled_state). In-memory only,
+        # not persisted - reset on restart is fine, matches enabled_default semantics. Lets that
+        # function tell "still exactly what we last set it to" apart from "something else (a
+        # user manually toggling it) changed it since" - without this, a user re-enabling an
+        # entity we'd disabled would get silently disabled again on the next poll, since
+        # disabled_by=None looks identical either way. See DECISIONS.md.
+        self.entity_gate_applied_state: dict[str, bool] = {}
 
     async def async_load_sticky_state(self) -> None:
         """Restore Status's sticky timestamps and the Total Energy running total from a previous
