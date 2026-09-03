@@ -19,7 +19,7 @@ from .entity import (
     async_setup_dynamic_chargers,
     async_setup_dynamic_vehicles,
 )
-from .helpers import parse_time_of_day, smart_mode_available
+from .helpers import is_momentarily_unplugged, parse_time_of_day, smart_mode_available
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -122,6 +122,12 @@ class PodHomeBoostDurationTime(PodHomeEntity, RestoreEntity, TimeEntity):
     @property
     def unique_id(self) -> str:
         return f"{DOMAIN}_{self.ppid}_boost_duration"
+
+    @property
+    def available(self) -> bool:
+        # Same cable-unplugged gate as the boost buttons themselves (button.py) - there's
+        # nothing to prepare a boost duration for with no cable connected.
+        return super().available and not is_momentarily_unplugged(self.charger.charging_state)
 
     @property
     def native_value(self) -> datetime.time | None:

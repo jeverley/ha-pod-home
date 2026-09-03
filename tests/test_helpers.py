@@ -340,6 +340,22 @@ def test_is_single_rate_tariff_unknown(windows):
     assert helpers.is_single_rate_tariff(windows) is None
 
 
+def test_charge_priority_available_false_on_confirmed_single_rate():
+    windows = [_tariff_window(0.10), _tariff_window(0.10)]
+    assert helpers.charge_priority_available(windows) is False
+
+
+def test_charge_priority_available_true_on_multi_rate():
+    windows = [_tariff_window(0.10), _tariff_window(0.30)]
+    assert helpers.charge_priority_available(windows) is True
+
+
+@pytest.mark.parametrize("windows", [None, [], [_tariff_window(None)]])
+def test_charge_priority_available_true_when_unknown(windows):
+    # Not yet known - defaults available, not guessed unavailable.
+    assert helpers.charge_priority_available(windows) is True
+
+
 def test_charging_priority_label_lowest_and_highest():
     windows = [_tariff_window(0.10), _tariff_window(0.30)]
     assert helpers.charging_priority_label(0.10, windows) == const.CHARGE_PRIORITY_LOWEST_COST

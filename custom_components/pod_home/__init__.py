@@ -13,7 +13,6 @@ from homeassistant.helpers.storage import Store
 from .podpoint_mobile_api import PodHomeApiClient, PodHomeAuth
 from .const import AUTH_STORAGE_VERSION, CONF_EMAIL, CONF_PASSWORD, auth_store_key
 from .coordinator import PodHomeDataUpdateCoordinator
-from .entity import async_sync_tariff_gated_entities
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,15 +82,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> b
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Initial reconciliation, then re-run on every coordinator update since tariff shape can
-    # change at any time from the app. Charging-Mode gating (Ready By/Target Charge/Expected
-    # Charge/Electricity Rate) and Remote Lock's hardware-support gating both moved off this
-    # entity-registry mechanism - see DECISIONS.md - so tariff shape is the only remaining axis
-    # using it.
-    async_sync_tariff_gated_entities(hass, coordinator)
-    entry.async_on_unload(
-        coordinator.async_add_listener(lambda: async_sync_tariff_gated_entities(hass, coordinator))
-    )
     return True
 
 

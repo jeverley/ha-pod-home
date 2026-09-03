@@ -392,7 +392,10 @@ class PodHomeTotalEnergySensor(PodHomeEntity, SensorEntity):
 
 
 class PodHomeElectricityRateSensor(PodHomeEntity, SensorEntity):
-    """Current electricity rate, computed from the account's configured tariff windows."""
+    """Current electricity rate, computed from the account's configured tariff windows. NOT
+    mode-gated - the rate is a property of the account's tariff, applicable regardless of
+    whether Smart Charging is currently active (e.g. deciding when to charge manually in Basic
+    mode) - see DECISIONS.md."""
 
     _attr_translation_key = "electricity_rate"
     _attr_name = "Electricity rate"
@@ -401,11 +404,6 @@ class PodHomeElectricityRateSensor(PodHomeEntity, SensorEntity):
     @property
     def unique_id(self) -> str:
         return f"{DOMAIN}_{self.ppid}_electricity_rate"
-
-    @property
-    def available(self) -> bool:
-        # Smart-Charging-only - see smart_mode_available() (helpers.py) and DECISIONS.md.
-        return super().available and smart_mode_available(self.charger.delegated_control_status)
 
     @property
     def native_value(self) -> float | None:

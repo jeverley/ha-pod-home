@@ -245,17 +245,25 @@ def select_last_charge(
 
 
 def is_single_rate_tariff(tariff_windows: list["PodHomeTariffWindow"] | None) -> bool | None:
-    """Whether every priced window in the account's tariff shares the same rate. Used to gate the
-    Charge Priority select's entity-registry enabled state (see
-    async_sync_tariff_gated_entities() in entity.py). Returns None, not True/False, when there's
-    not enough data to tell (no tariff fetched yet, or no window has a known price) - the caller
-    leaves the entity's existing enabled state alone in that case."""
+    """Whether every priced window in the account's tariff shares the same rate. Returns None,
+    not True/False, when there's not enough data to tell (no tariff fetched yet, or no window
+    has a known price)."""
     if not tariff_windows:
         return None
     prices = [w.price for w in tariff_windows if w.price is not None]
     if not prices:
         return None
     return math.isclose(min(prices), max(prices), abs_tol=0.0005)
+
+
+def charge_priority_available(tariff_windows: list["PodHomeTariffWindow"] | None) -> bool:
+    """Whether Charge Priority should report itself available - unavailable only once the
+    tariff is CONFIRMED single-rate (choosing a cost-vs-completion priority is meaningless with
+    only one rate); not yet knowing the tariff shape defaults to available, same "don't guess
+    unavailable from missing data" policy as smart_mode_available(). Tariff shape genuinely
+    changes live (a supplier switch, a tariff change from the app), so this is `available`, not
+    entity-registry disable - see DECISIONS.md."""
+    return is_single_rate_tariff(tariff_windows) is not True
 
 
 def charging_priority_label(

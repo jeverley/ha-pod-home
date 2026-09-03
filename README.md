@@ -54,17 +54,17 @@ Each table's **Category** column is the same grouping Home Assistant's own devic
 | Month energy           | Sensors       | Sensor         | Finalized charges only, resets each calendar month |
 | Month cost             | Sensors       | Sensor         | Finalized charges only, resets each calendar month |
 | Total energy           | Sensors       | Sensor         | Live-inclusive running total since this install started tracking - see "Energy Dashboard" below |
-| Electricity rate       | Sensors       | Sensor         | Current tariff rate, computed from your configured tariff windows - shows `unavailable` outside Smart Charging |
+| Electricity rate       | Sensors       | Sensor         | Current tariff rate, computed from your configured tariff windows - not mode-gated, applies in Basic Charging too |
 | Boost end time         | Sensors       | Sensor         | When the active boost ends, if any |
 | Cable status           | Sensors       | Binary sensor  | On when a cable is physically connected |
 | Firmware               | Controls      | Update         | See "Known limitations" for what the version number does and doesn't tell you |
 | Schedule               | Controls      | Calendar       | Manual schedule (Basic) or live smart-charging plan (Smart), whichever mode is active |
-| Boost duration         | Controls      | Time           | Local input (hh:mm) for Boost for duration below - no default, resets after each use |
+| Boost duration         | Controls      | Time           | Local input (hh:mm) for Boost for duration below - no default, resets after each use, shows `unavailable` with cable unplugged |
 | Full charge            | Controls      | Button         | Boost ("Charge Now") to 100%, matching the app |
 | Boost for duration     | Controls      | Button         | Boost for the duration set above, matching the app |
 | Cancel boost           | Controls      | Button         | Only available while a boost is active |
 | Remote lock            | Controls      | Lock           | Solo 3S only. Entity isn't created at all until this charger confirms support (added dynamically once detected, no restart needed) - never appears on a model that doesn't support it (confirmed live via `offMode: null`), including the account this integration is developed against |
-| Charge priority        | Configuration | Select         | Smart Charging only, disabled by default outside it |
+| Charge priority        | Configuration | Select         | Not mode-gated - shows `unavailable` only on a single-rate tariff, where there's no cost-vs-completion choice to make |
 | Charging state         | Diagnostic    | Sensor         | Raw wire value, disabled by default |
 | Charging mode          | Diagnostic    | Sensor         | Smart / Basic |
 | Connectivity           | Diagnostic    | Binary sensor  | On when the charger is reachable via Pod Point's cloud |
@@ -104,10 +104,12 @@ Pod Point chargers run in one of two modes, switched from the Pod Home app (this
 doesn't add a mode-switch control):
 
 - **Smart Charging** - schedule-optimized charging to a target %, by a target time, aware of your
-  tariff. Ready by/Target charge/Charge priority/Electricity rate only apply here, and are
-  automatically disabled outside this mode. Works on a single-rate or two-rate tariff - Pod Point
-  coordinates directly with your supplier to charge during low-demand periods even on a
-  single-rate tariff, this does not force a switch to Basic Charging.
+  tariff. Ready by/Target charge/Expected charge only apply here, and show `unavailable` outside
+  this mode. Charge priority and Electricity rate aren't mode-gated - they depend on your tariff
+  shape, not which mode is active, so they can still be relevant while on Basic Charging. Works
+  on a single-rate or two-rate tariff - Pod Point coordinates directly with your supplier to
+  charge during low-demand periods even on a single-rate tariff, this does not force a switch to
+  Basic Charging.
 - **Basic Charging** - the charger follows its own fixed manual schedule instead. Selecting a
   tariff with more than two rate windows reverts the account to Basic Charging automatically -
   that's Pod Point's own behaviour, not something this integration decides.

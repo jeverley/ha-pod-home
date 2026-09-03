@@ -141,16 +141,20 @@ reliably installable) release. Until then, the two copies can silently drift —
   fixed to write `maxPrice` directly instead, then reconfirmed live ("That works now." - see
   DECISIONS.md). Not mode-gated - confirmed via the app that it's always viewable/changeable
   regardless of Charging Mode (corrected after an initial wrong assumption - see DECISIONS.md).
-  Also built: mode-conditional entities (Ready By/Target Charge/Expected Charge/Electricity Rate
-  report `unavailable` outside Smart Charging mode, via each entity's own `available` - not
-  entity-registry gating, see DECISIONS.md for why that moved) and a unified `Schedule` calendar
-  (`calendar.py`, mirrors the `Schedule` sensor - one entity adapting to whichever mode is
-  active, not two mode-specific ones). See DECISIONS.md for all three.
+  Tariff-gated via `available` instead: unavailable only on a confirmed single-rate tariff, where
+  there's no real cost-vs-completion choice to make. Also built: mode-conditional entities (Ready
+  By/Target Charge/Expected Charge report `unavailable` outside Smart Charging mode, via each
+  entity's own `available`) and a unified `Schedule` calendar (`calendar.py`, mirrors the
+  `Schedule` sensor - one entity adapting to whichever mode is active, not two mode-specific
+  ones). Electricity Rate is neither mode- nor tariff-gated - it's a plain tariff-derived value,
+  applicable regardless of mode. See DECISIONS.md for the full reasoning behind all of this.
 - **`charge-overrides` (boost) - built and confirmed working live** (`button.py`: Boost full
   charge/Boost for duration/Cancel boost; `time.py`: Boost duration, a local-only hh:mm input,
   see DECISIONS.md). Matches the app's own two boost options plus a cancel action, per the user
   directly. **All three confirmed working live**: Boost for duration worked first try; Boost
   full charge's flat-12h-`endAt` fix and Cancel boost have both since been confirmed live too.
+  Boost duration shares the same cable-unplugged `available` gate as the two Boost buttons -
+  nothing to prepare a duration for with no cable connected.
 - **`remote-lock`**: built (`lock.py`, `PodHomeRemoteLock`) per the user's explicit request,
   despite confirming (Pod Point's own app guide) that Remote Lock is Solo 3S-only and the user's
   own charger is a Solo 3 - genuinely untestable live on this account, not just "not yet tested".

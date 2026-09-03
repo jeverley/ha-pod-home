@@ -2929,3 +2929,43 @@ remaining registry-gated axis), keeping the manual-re-enable regression test rel
 the four moved entities. `tests/test_lock.py` still covers `is_locked`; dynamic *creation* itself
 (the `predicate` mechanism) has no dedicated test - same acknowledged gap as
 `async_setup_dynamic_chargers`'s no-predicate path already had (see QUALITY_SCALE.md).
+
+## Entity-registry gating retired entirely; Charge Priority moves to `available`; Electricity Rate ungated; Boost duration gets cable gating
+
+Follow-up to the previous redesign entry, per the user's further pushback: applied the same
+"live/reversible → `available`, permanent → no-creation" reasoning consistently, all the way
+through, rather than leaving Charge Priority as the one remaining registry-gated entity.
+
+**Charge Priority (`select.py`) moved from entity-registry disable to `available`.** Tariff shape
+- like Charging Mode - genuinely changes live (a supplier switch, a tariff change from the app),
+so it belongs on the same axis as Ready By/Target Charge/Expected Charge, not treated as a
+special case. New `charge_priority_available()` (helpers.py) mirrors `smart_mode_available()`'s
+own "unresolved data defaults to available, don't guess unavailable" policy:
+`is_single_rate_tariff(...) is not True` - unavailable only once single-rate is CONFIRMED, same
+permissive default the old registry-gating code had (`is_single_rate is None: continue`, i.e.
+leave the initially-enabled state alone).
+
+**With Charge Priority moved, nothing in this integration uses entity-registry gating any more** -
+`_async_apply_disabled_state`, `_TARIFF_GATED_ENTITIES`, `async_sync_tariff_gated_entities`
+(entity.py), `coordinator.entity_gate_applied_state`, and the `__init__.py` wiring that called
+them are all deleted, not just unused. `tests/test_entity_gating.py` (which had been rewritten
+to test tariff-gating after Remote Lock moved off it - see the previous two DECISIONS.md entries)
+is deleted too - there is no longer a registry-gating mechanism left for it to exercise. The
+manual-re-enable bug this mechanism had (see the earlier "Fixed: manually re-enabled gated
+entity..." entry) is now moot rather than fixed-and-still-relevant - noted here for anyone
+reading that entry later and wondering whether the fix still matters: it doesn't, the mechanism
+it fixed is gone.
+
+**Electricity Rate (`sensor.py`) had its Charging-Mode gating removed outright, not moved to
+`available`.** Caught in review: the rate is a property of the account's *tariff*, not of
+whether Smart Charging happens to be active right now - it's just as real and just as useful
+while on Basic Charging (e.g. deciding when to charge manually). Gating it on Charging Mode was
+importing Ready By/Target Charge's own reasoning without checking it actually applied here; it
+didn't. Now uses the plain `PodHomeEntity.available` (charger exists), no mode or tariff check at
+all.
+
+**Boost duration (`time.py`'s `PodHomeBoostDurationTime`) gained the same cable-unplugged
+`available` gate the two Boost buttons already had** (button.py) - per the user directly, there's
+nothing to prepare a boost duration for with no cable connected, so the input and the actions it
+feeds should share one availability story rather than the input staying enabled while both
+buttons that consume it grey out.

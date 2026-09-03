@@ -1,25 +1,20 @@
 """Base entity for the Pod Home integration."""
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import ATTRIBUTION, DAY_OF_WEEK_OPTIONS, DOMAIN, MANUFACTURER
 from .coordinator import PodHomeCharge, PodHomeCharger, PodHomeDataUpdateCoordinator, PodHomeVehicle
-from .helpers import humanize_model_style, is_single_rate_tariff, select_last_charge
+from .helpers import humanize_model_style, select_last_charge
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
-
-_LOGGER = logging.getLogger(__name__)
 
 
 class PodHomeEntity(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
@@ -168,10 +163,9 @@ def async_setup_dynamic_chargers(
     not permanently skipped - `_async_add_new_chargers` re-evaluates every coordinator update via
     the same `known_ppids` dedup as the no-predicate case, so a ppid that starts failing the
     predicate (a transient fetch hiccup on its first poll, say) still gets the entity the moment
-    a later poll passes it. This is deliberately NOT the same mechanism as entity-registry
-    disable/enable (_async_apply_disabled_state below) - a capability that's permanently absent
-    should mean the entity never exists at all, not exist-but-disabled forever; see DECISIONS.md
-    for why Remote Lock moved off registry-gating to this instead."""
+    a later poll passes it. This is deliberately NOT entity-registry disable/enable (retired
+    entirely from this integration - see DECISIONS.md) - a capability that's permanently absent
+    should mean the entity never exists at all, not exist-but-disabled forever."""
     known_ppids: set[str] = set()
 
     def _async_add_new_chargers() -> None:
@@ -221,73 +215,3 @@ def async_setup_dynamic_vehicles(
     entry.async_on_unload(coordinator.async_add_listener(_async_add_new_vehicles))
 
 
-def _async_apply_disabled_state(
-    coordinator: PodHomeDataUpdateCoordinator,
-    registry: er.EntityRegistry,
-    platform_domain: str,
-    unique_id_body: str,
-    wants_enabled: bool,
-) -> None:
-    unique_id = f"{DOMAIN}_{unique_id_body}"
-    entity_id = registry.async_get_entity_id(platform_domain, DOMAIN, unique_id)
-    if entity_id is None:
-        # Expected in the common case (e.g. no vehicle linked yet); also what a stale manifest
-        # suffix looks like, so kept at debug rather than silent.
-        _LOGGER.debug(
-            "No registered entity for %s.%s (unique_id=%s) - skipping gate reconciliation",
-            platform_domain,
-            DOMAIN,
-            unique_id,
-        )
-        return
-    entry = registry.entities.get(entity_id)
-    if entry is None:
-        return
-
-    # If the registry's current enabled/disabled state no longer matches what WE last wrote for
-    # this entity_id, something else changed it since - a user's own manual toggle in the UI,
-    # since disabled_by=None looks identical whether it's "still what we set" or "the user just
-    # re-enabled it". Defer to that rather than fighting it: skip silently, and deliberately
-    # don't update our tracking, so we keep deferring on every later poll too, not just this one.
-    last_applied = coordinator.entity_gate_applied_state.get(entity_id)
-    if last_applied is not None:
-        expected_disabled_by = None if last_applied else er.RegistryEntryDisabler.INTEGRATION
-        if entry.disabled_by != expected_disabled_by:
-            return
-
-    is_disabled_by_us = entry.disabled_by == er.RegistryEntryDisabler.INTEGRATION
-    if wants_enabled and is_disabled_by_us:
-        registry.async_update_entity(entity_id, disabled_by=None)
-        coordinator.entity_gate_applied_state[entity_id] = True
-    elif not wants_enabled and entry.disabled_by is None:
-        # Only disable if nothing else already disabled it.
-        registry.async_update_entity(entity_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION)
-        coordinator.entity_gate_applied_state[entity_id] = False
-
-
-# Entities gated on the account's tariff shape, not Charging Mode - see is_single_rate_tariff()
-# (helpers.py). (platform_domain, unique_id_suffix) - always charger-scoped so far, no scope
-# column needed yet.
-_TARIFF_GATED_ENTITIES: list[tuple[str, str]] = [
-    ("select", "_charging_strategy"),
-]
-
-
-@callback
-def async_sync_tariff_gated_entities(
-    hass: HomeAssistant, coordinator: PodHomeDataUpdateCoordinator
-) -> None:
-    """Enable/disable (via the entity registry, not `available` - see DECISIONS.md for why
-    tariff-shape gating stays on this mechanism while Charging-Mode gating moved off it) each
-    entity in _TARIFF_GATED_ENTITIES to match its charger's tariff shape. A charger whose tariff
-    isn't known yet is left alone rather than guessed either way."""
-    registry = er.async_get(hass)
-    for ppid, charger in coordinator.data.items():
-        is_single_rate = is_single_rate_tariff(charger.tariff_windows)
-        if is_single_rate is None:
-            continue
-        wants_enabled = not is_single_rate
-        for platform_domain, suffix in _TARIFF_GATED_ENTITIES:
-            _async_apply_disabled_state(
-                coordinator, registry, platform_domain, f"{ppid}{suffix}", wants_enabled
-            )
