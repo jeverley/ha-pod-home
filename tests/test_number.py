@@ -41,3 +41,17 @@ async def test_target_charge_set_value_without_vehicle_raises(hass: HomeAssistan
     entity = number.PodHomeVehicleTargetChargeNumber(coordinator, "v1")
     with pytest.raises(HomeAssistantError):
         await entity.async_set_native_value(50)
+
+
+async def test_target_charge_available_only_in_smart_charging_mode(hass: HomeAssistant) -> None:
+    vehicle = make_vehicle(id="v1")
+    coordinator = make_coordinator(
+        hass, {PPID: make_charger(vehicle=vehicle, delegated_control_status="ACTIVE")}
+    )
+    entity = number.PodHomeVehicleTargetChargeNumber(coordinator, "v1")
+    assert entity.available is True
+
+    coordinator.data = {
+        PPID: make_charger(vehicle=vehicle, delegated_control_status="INACTIVE")
+    }
+    assert entity.available is False

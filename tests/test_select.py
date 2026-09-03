@@ -46,3 +46,17 @@ async def test_select_option_without_tariff_data_raises(hass: HomeAssistant) -> 
     entity = select.PodHomeChargingStrategySelect(coordinator, PPID)
     with pytest.raises(HomeAssistantError):
         await entity.async_select_option(CHARGE_PRIORITY_LOWEST_COST)
+
+
+async def test_available_unless_tariff_confirmed_single_rate(hass: HomeAssistant) -> None:
+    coordinator = make_coordinator(hass, {PPID: make_charger(tariff_windows=_windows())})
+    entity = select.PodHomeChargingStrategySelect(coordinator, PPID)
+    assert entity.available is True  # two-rate tariff
+
+    single_rate = [make_tariff_window(price=0.15), make_tariff_window(price=0.15)]
+    coordinator.data = {PPID: make_charger(tariff_windows=single_rate)}
+    assert entity.available is False
+
+    # Not yet known - defaults available, not guessed unavailable.
+    coordinator.data = {PPID: make_charger(tariff_windows=None)}
+    assert entity.available is True

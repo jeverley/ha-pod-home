@@ -152,6 +152,20 @@ def test_schedule_mode(status, expected):
 
 
 @pytest.mark.parametrize(
+    "status,expected",
+    [
+        (const.DELEGATED_CONTROL_ACTIVE, True),
+        (const.DELEGATED_CONTROL_INACTIVE, False),
+        ("PENDING", True),  # unresolved - not guessed unavailable
+        ("UNKNOWN", True),
+        (None, True),
+    ],
+)
+def test_smart_mode_available(status, expected):
+    assert helpers.smart_mode_available(status) == expected
+
+
+@pytest.mark.parametrize(
     "raw,expected",
     [
         ("14:30:00", datetime.time(14, 30, 0)),
@@ -324,6 +338,22 @@ def test_is_single_rate_tariff_false():
 @pytest.mark.parametrize("windows", [None, [], [_tariff_window(None)]])
 def test_is_single_rate_tariff_unknown(windows):
     assert helpers.is_single_rate_tariff(windows) is None
+
+
+def test_charge_priority_available_false_on_confirmed_single_rate():
+    windows = [_tariff_window(0.10), _tariff_window(0.10)]
+    assert helpers.charge_priority_available(windows) is False
+
+
+def test_charge_priority_available_true_on_multi_rate():
+    windows = [_tariff_window(0.10), _tariff_window(0.30)]
+    assert helpers.charge_priority_available(windows) is True
+
+
+@pytest.mark.parametrize("windows", [None, [], [_tariff_window(None)]])
+def test_charge_priority_available_true_when_unknown(windows):
+    # Not yet known - defaults available, not guessed unavailable.
+    assert helpers.charge_priority_available(windows) is True
 
 
 def test_charging_priority_label_lowest_and_highest():

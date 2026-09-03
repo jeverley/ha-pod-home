@@ -19,7 +19,7 @@ from .entity import (
     async_setup_dynamic_chargers,
     async_setup_dynamic_vehicles,
 )
-from .helpers import parse_time_of_day
+from .helpers import is_momentarily_unplugged, parse_time_of_day, smart_mode_available
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -62,12 +62,19 @@ class PodHomeVehicleReadyByTime(PodHomeVehicleEntity, PodHomeVehicleIntentsWrite
     _attr_name = "Ready by"
     _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:clock-time-four-outline"
-    # Smart-Charging-only (see _MODE_GATED_ENTITIES in entity.py).
-    _attr_entity_registry_enabled_default = False
 
     @property
     def unique_id(self) -> str:
         return f"{DOMAIN}_{self.vehicle_id}_ready_by"
+
+    @property
+    def available(self) -> bool:
+        # Smart-Charging-only - see smart_mode_available() (helpers.py) and DECISIONS.md for why
+        # this is `available`, not entity-registry disable: Charging Mode genuinely toggles live.
+        charger = self._charger_for_vehicle()
+        return super().available and smart_mode_available(
+            charger.delegated_control_status if charger else None
+        )
 
     @property
     def native_value(self) -> datetime.time | None:
@@ -115,6 +122,12 @@ class PodHomeBoostDurationTime(PodHomeEntity, RestoreEntity, TimeEntity):
     @property
     def unique_id(self) -> str:
         return f"{DOMAIN}_{self.ppid}_boost_duration"
+
+    @property
+    def available(self) -> bool:
+        # Same cable-unplugged gate as the boost buttons themselves (button.py) - there's
+        # nothing to prepare a boost duration for with no cable connected.
+        return super().available and not is_momentarily_unplugged(self.charger.charging_state)
 
     @property
     def native_value(self) -> datetime.time | None:

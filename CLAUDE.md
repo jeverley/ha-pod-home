@@ -16,8 +16,18 @@ there (this repo's own commit-message conventions still apply per-commit on the 
 the whole feature, matching how `master`'s own history already reads (each commit there is one
 coherent chapter, not a blow-by-blow). No GitHub PR - local squash-merge only, since this is a
 solo-maintained repo and CI already runs on every push to `master`. Delete the branch after
-merging. Don't commit directly to `master` for anything beyond a genuinely one-line, self-
-contained change (a doc typo, a single CI-config tweak).
+merging - `git branch -D <branch>`, not `-d`: a squash-merge's commit is a new SHA, not an
+ancestor of the branch tip, so git always sees a squashed branch as "not fully merged". Don't
+commit directly to `master` for anything beyond a genuinely one-line, self-contained change (a
+doc typo, a single CI-config tweak).
+
+**Every push to `master` runs both CI workflows** (`test.yml` + `validate.yml`) - real minutes,
+not free. A sequence like "fix a bug in X" → "redesign X" → "delete X entirely" pushed as three
+separate commits triggers three full CI runs for work that reads, in hindsight, as one change -
+and leaves a "fix" commit in the permanent history for a mechanism that no longer exists by the
+next commit. Batch related work on one branch and squash-merge it as a single push, the same way
+`master`'s own history already reads one coherent chapter per commit - don't push-per-step out of
+habit just because each individual step compiles and passes lint.
 
 ## Quality scale
 

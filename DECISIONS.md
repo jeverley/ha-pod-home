@@ -2835,3 +2835,137 @@ five `scratch/*.py` probe scripts (`probe_all.py`, `smoke_test_api.py`,
 `check_interval_probe.py`, `boost_watcher_probe.py`, `vehicle_sync_probe.py`) by forcing
 `asyncio.WindowsSelectorEventLoopPolicy()` before `asyncio.run(main())` on `sys.platform ==
 "win32"`. Local-only fix (scratch/ is gitignored), not committed.
+
+## Fixed: manually re-enabling a gated entity got silently disabled again on the next poll
+
+Live bug report from the user: enabling the (disabled-by-default) Remote Lock entity by hand in
+the UI got flipped back to disabled on the next coordinator update. Root cause was in
+`_async_apply_disabled_state` (entity.py), shared by all three gating axes (mode/tariff/support):
+HA's "enable" UI action sets `disabled_by` back to `None` regardless of who disabled the entity -
+there's no `enabled_by` equivalent recording *who* last enabled it. So `entry.disabled_by is
+None` looked identical whether it meant "never touched, still the default" or "a user just
+overrode our disable" - the `not wants_enabled and entry.disabled_by is None` branch couldn't
+tell them apart, and re-disabled either way.
+
+Fixed by giving the coordinator a small in-memory tracking dict,
+`entity_gate_applied_state: dict[str, bool]` (entity_id -> the enabled state WE last wrote,
+public/no-underscore like `boost_duration_entities` - a cross-module-accessed field, not
+internal-only). Before acting, `_async_apply_disabled_state` now checks whether the registry's
+*current* `disabled_by` still matches what's recorded as our last write; a mismatch means
+something else (the user) changed it since, and the function returns without touching it or
+updating the tracking - so it keeps deferring on every future poll too, not just the one where
+the divergence was first noticed. Not persisted across restarts - a fresh disable-by-default pass
+after a restart is expected and consistent with `entity_registry_enabled_default` semantics
+generally, so in-memory-only is the right amount of durability here, not a Store.
+
+This was a bug in shared, general-purpose gating infrastructure, not something specific to
+Remote Lock - mode-gating and tariff-gating had exactly the same latent bug, just less likely to
+be hit in practice (Ready By/Target Charge start *enabled* by default in Smart Charging mode, so
+manually re-enabling them while gated off is a much less common interaction than Remote Lock's
+"try enabling it to see if your hardware supports it" - which is precisely the interaction the
+README asks Solo 3S owners to attempt). Fixed once, in the shared function, benefiting all three
+gates. Covered by a new regression test in `tests/test_entity_gating.py`
+(`test_a_manual_enable_of_our_own_disable_survives_the_next_sync`).
+
+## Redesigned entity gating: `available` for Charging-Mode (live/reversible), no-creation for Remote Lock (permanent hardware fact)
+
+Follow-up to the manual-re-enable bug fix above, after further discussion (including researching
+HA's own quality-scale docs and a community forum thread on dynamic entity enabling - see below).
+Landed on a genuinely different mechanism for each of the two axes previously both handled by
+entity-registry disable/enable, rather than keeping the general fix as the final answer for both:
+
+**Charging-Mode gating (Ready By, Target Charge, Expected Charge, Electricity Rate) moved to
+`available`.** These four entities are no longer entity-registry-gated at all -
+`async_sync_mode_gated_entities` and `_MODE_GATED_ENTITIES` are removed from entity.py, and each
+entity's static `_attr_entity_registry_enabled_default = False` is removed too. Instead each has
+its own `available` override calling `smart_mode_available()` (new, helpers.py - offline
+pure-function testable, mirrors `schedule_mode()`'s own "None means don't guess" handling for an
+unresolved status). The entities are now always visible, showing `unavailable` while Charging
+Mode is Basic. Justified two ways: (1) HA's entity-unavailable quality-scale rule technically
+means "can't fetch data," not "not applicable in current config" - but Charging Mode is a live,
+frequently-reversible setting the user changes from the app at any time, and `unavailable`
+carries an accurate "temporarily not offered, may resolve" connotation for something that
+genuinely does resolve on its own the moment Smart Charging is re-enabled - unlike Remote Lock
+below. (2) A HA community thread (community.home-assistant.io/t/dynamically-enable-entities,
+one of the few pieces of real precedent found for this kind of runtime gating - HA core itself
+has almost none, see below) specifically recommends `available` over registry disable/enable for
+exactly this shape of problem, citing the fact that a user's registry choice, once made, is meant
+to be theirs from then on - which is precisely the bug the previous entry in this file just fixed.
+
+**Remote Lock moved to no-creation-until-confirmed-supported**, the opposite direction - the
+entity is no longer created-then-disabled at all. `async_setup_dynamic_chargers` (entity.py)
+gained an optional `predicate` parameter; lock.py now only creates `PodHomeRemoteLock` for a ppid
+once `remote_lock_off_mode is not None`, re-evaluated on every coordinator update via the same
+`known_ppids`-style dedup as the no-predicate case (not a one-shot decision at first-seen-ppid
+time), so a transient fetch failure on a charger's very first poll just delays creation to a
+later successful poll rather than permanently skipping it - the exact fragility concern raised
+earlier against creation-gating, resolved by re-checking every poll instead of only once. This
+is deliberately NOT `available` either: hardware support is a one-time, permanent fact about a
+specific physical charger (never toggles back and forth the way Charging Mode does), so there's
+no ongoing "might come back" state worth representing with a live property - once true, it's
+true forever, and the honest representation of "your hardware doesn't have this" is simply not
+listing the entity, not showing a permanently-`unavailable` one. The registry-gating alternative
+(what the entity used to do) was ruled out for the same reason `unavailable` was for this specific
+case: a Solo 3 owner would see either a permanently-`unavailable` or a permanently-disabled
+Remote Lock entity forever, and `unavailable` specifically carries a "something's wrong, worth
+investigating" connotation across the HA ecosystem (there's a whole tier of community
+notification blueprints built on `is_state('unavailable')` as a health signal) that would be
+actively misleading for a fact that isn't a problem and will never resolve.
+
+**Precedent check, for the record**: searched `home-assistant/core` directly (`gh api
+search/code`) for `async_update_entity(...disabled_by=...)` outside the registry/entity_platform
+internals - every real hit (`airvisual`, `rainbird`, `wolflink`, `nextdns`) turned out to be
+one-time migration code (unique_id renames, config-subentry moves), not an ongoing per-poll
+capability check. Neither of pod_home's two mechanisms here has strong direct core precedent;
+both are reasoned from HA's stated principles (the entity-unavailable rule, the
+entity-disabled-by-default rule, the community thread) rather than copied from an existing
+integration doing the same thing.
+
+**Test changes**: `tests/test_entity_gating.py` was rewritten - the support-gating tests
+(`async_sync_support_gated_entities`, now removed) were replaced with equivalent coverage of the
+same shared-bug-fix pattern applied to tariff-gating (`async_sync_tariff_gated_entities`, the one
+remaining registry-gated axis), keeping the manual-re-enable regression test relevant.
+`tests/test_time.py`/`test_number.py`/`test_sensor.py` gained `available`-in-Basic-mode cases for
+the four moved entities. `tests/test_lock.py` still covers `is_locked`; dynamic *creation* itself
+(the `predicate` mechanism) has no dedicated test - same acknowledged gap as
+`async_setup_dynamic_chargers`'s no-predicate path already had (see QUALITY_SCALE.md).
+
+## Entity-registry gating retired entirely; Charge Priority moves to `available`; Electricity Rate ungated; Boost duration gets cable gating
+
+Follow-up to the previous redesign entry, per the user's further pushback: applied the same
+"live/reversible → `available`, permanent → no-creation" reasoning consistently, all the way
+through, rather than leaving Charge Priority as the one remaining registry-gated entity.
+
+**Charge Priority (`select.py`) moved from entity-registry disable to `available`.** Tariff shape
+- like Charging Mode - genuinely changes live (a supplier switch, a tariff change from the app),
+so it belongs on the same axis as Ready By/Target Charge/Expected Charge, not treated as a
+special case. New `charge_priority_available()` (helpers.py) mirrors `smart_mode_available()`'s
+own "unresolved data defaults to available, don't guess unavailable" policy:
+`is_single_rate_tariff(...) is not True` - unavailable only once single-rate is CONFIRMED, same
+permissive default the old registry-gating code had (`is_single_rate is None: continue`, i.e.
+leave the initially-enabled state alone).
+
+**With Charge Priority moved, nothing in this integration uses entity-registry gating any more** -
+`_async_apply_disabled_state`, `_TARIFF_GATED_ENTITIES`, `async_sync_tariff_gated_entities`
+(entity.py), `coordinator.entity_gate_applied_state`, and the `__init__.py` wiring that called
+them are all deleted, not just unused. `tests/test_entity_gating.py` (which had been rewritten
+to test tariff-gating after Remote Lock moved off it - see the previous two DECISIONS.md entries)
+is deleted too - there is no longer a registry-gating mechanism left for it to exercise. The
+manual-re-enable bug this mechanism had (see the earlier "Fixed: manually re-enabled gated
+entity..." entry) is now moot rather than fixed-and-still-relevant - noted here for anyone
+reading that entry later and wondering whether the fix still matters: it doesn't, the mechanism
+it fixed is gone.
+
+**Electricity Rate (`sensor.py`) had its Charging-Mode gating removed outright, not moved to
+`available`.** Caught in review: the rate is a property of the account's *tariff*, not of
+whether Smart Charging happens to be active right now - it's just as real and just as useful
+while on Basic Charging (e.g. deciding when to charge manually). Gating it on Charging Mode was
+importing Ready By/Target Charge's own reasoning without checking it actually applied here; it
+didn't. Now uses the plain `PodHomeEntity.available` (charger exists), no mode or tariff check at
+all.
+
+**Boost duration (`time.py`'s `PodHomeBoostDurationTime`) gained the same cable-unplugged
+`available` gate the two Boost buttons already had** (button.py) - per the user directly, there's
+nothing to prepare a boost duration for with no cable connected, so the input and the actions it
+feeds should share one availability story rather than the input staying enabled while both
+buttons that consume it grey out.

@@ -163,6 +163,15 @@ async def test_electricity_rate_sensor_picks_current_window_and_cheapest_flag(
         assert entity.extra_state_attributes == {"is_cheapest_rate": False}
 
 
+async def test_electricity_rate_available_regardless_of_charging_mode(hass: HomeAssistant) -> None:
+    """NOT mode-gated - the rate is a tariff property, applicable in Basic mode too."""
+    coordinator = make_coordinator(
+        hass, {PPID: make_charger(delegated_control_status="INACTIVE")}
+    )
+    entity = sensor.PodHomeElectricityRateSensor(coordinator, PPID)
+    assert entity.available is True
+
+
 async def test_vehicle_range_odometer_suggested_unit_from_account_preference(
     hass: HomeAssistant,
 ) -> None:
@@ -200,6 +209,20 @@ async def test_vehicle_expected_charge_attributes(hass: HomeAssistant) -> None:
         "can_meet_target": False,
         "cannot_meet_target_reason": "PRICE",
     }
+
+
+async def test_expected_charge_available_only_in_smart_charging_mode(hass: HomeAssistant) -> None:
+    vehicle = make_vehicle(id="v1")
+    coordinator = make_coordinator(
+        hass, {PPID: make_charger(vehicle=vehicle, delegated_control_status="ACTIVE")}
+    )
+    entity = sensor.PodHomeVehicleExpectedChargeSensor(coordinator, "v1")
+    assert entity.available is True
+
+    coordinator.data = {
+        PPID: make_charger(vehicle=vehicle, delegated_control_status="INACTIVE")
+    }
+    assert entity.available is False
 
 
 async def test_vehicle_power_delivery_state_known_or_none(hass: HomeAssistant) -> None:
