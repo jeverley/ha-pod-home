@@ -50,7 +50,7 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
 - **docs-installation-parameters, docs-known-limitations** — ✅ README.md rewritten as end-user
   documentation: HACS custom-repository/manual installation, setup, a full entity list, Energy
   Dashboard/Charging Mode notes, a "Known limitations" section covering boost latency, the
-  Firmware version-string caveat, and remote-lock's absence.
+  Firmware version-string caveat, and Remote Lock being untested against real Solo 3S hardware.
 - **HACS packaging** — ✅ `hacs.json` added (minimal: name + render_readme), `.github/workflows/
   validate.yml` added (`hacs/action` + `hassfest`, matching HACS's own default-repo validation).
   LICENSE already existed. **Still open**: no tagged GitHub release yet - HACS can install
@@ -72,16 +72,19 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
   error paths, staleness-cadence caching, `_accumulate_total_energy`, sticky-state persistence via
   `Store`, adaptive polling, and api3 charge matching; every entity platform now has its own test
   file (`test_sensor.py`/`test_binary_sensor.py`/`test_number.py`/`test_select.py`/`test_time.py`/
-  `test_calendar.py`/`test_button.py`/`test_update.py`) covering entities with genuine logic
-  (derived values, conditional availability/attributes, unit/currency handling, write-endpoint
-  calls and their error paths) - a pure field-passthrough sensor gets one assertion, not
-  exhaustive coverage of every trivial property. 159 tests total. **Still open, honestly**: this
-  isn't formal 95%-line-coverage-tool-measured - no `pytest-cov` run has actually confirmed the
-  percentage; a handful of `PodHomeVehicleReadyByTime`/dynamic-device-creation/mode-and-tariff-
-  gating-reconciliation (`async_sync_mode_gated_entities`/`async_sync_tariff_gated_entities` in
-  entity.py) paths remain untested; and `config_flow.py`'s `async_setup_entry` integration (the
-  coordinator's real first refresh, not mocked) still isn't exercised end-to-end. Good enough to
-  call this deferred item substantially done, not literally 100%.
+  `test_calendar.py`/`test_button.py`/`test_update.py`/`test_lock.py`) covering entities with
+  genuine logic (derived values, conditional availability/attributes, unit/currency handling,
+  write-endpoint calls and their error paths) - a pure field-passthrough sensor gets one
+  assertion, not exhaustive coverage of every trivial property. `tests/test_entity_gating.py`
+  covers the newest gating axis (`async_sync_support_gated_entities`). 170+ tests total. **Still
+  open, honestly**: this isn't formal 95%-line-coverage-tool-measured - no `pytest-cov` run has
+  actually confirmed the percentage; a handful of `PodHomeVehicleReadyByTime`/dynamic-device-
+  creation paths remain untested; the two OLDER gating-reconciliation functions
+  (`async_sync_mode_gated_entities`/`async_sync_tariff_gated_entities` in entity.py, unlike the
+  newer `async_sync_support_gated_entities`) still have no test coverage; and
+  `config_flow.py`'s `async_setup_entry` integration (the coordinator's real first refresh, not
+  mocked) still isn't exercised end-to-end. Good enough to call this deferred item substantially
+  done, not literally 100%.
 
 ## Also addressed this phase, beyond the original four
 
@@ -95,11 +98,12 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
 - **strict-typing** — full PEP-561 typing + a `py.typed` marker + entry in core's
   `.strict-typing` file. The code is already reasonably typed (`from __future__ import
   annotations`, most signatures annotated) but hasn't been audited against `mypy --strict`.
-- **action-setup** — once charge-now/remote-lock exist, register services in `async_setup`
-  (hass-level), not `async_setup_entry`, and validate the target entry inside the handler with
-  `ServiceValidationError` rather than gating registration on entry state. The *old*
-  `pod_point` integration already does this correctly (`services.py`) - just needs carrying
-  forward when write endpoints land.
+- **action-setup** — charge-now (button.py) and remote-lock (lock.py) both exist now as entity
+  actions, not services. If a service-based interface is ever wanted alongside them, register in
+  `async_setup` (hass-level), not `async_setup_entry`, and validate the target entry inside the
+  handler with `ServiceValidationError` rather than gating registration on entry state. The *old*
+  `pod_point` integration already does this correctly (`services.py`) - a reference if this gets
+  picked up.
 - **repair-issues, brands, discovery** — repair-issues is a nice-to-have; brands only matters
   for a core PR (a logo submitted to `home-assistant/brands`); discovery doesn't apply, this is
   a cloud API with nothing to discover on the local network.

@@ -92,6 +92,9 @@
       "boost_full_charge": { "name": "Full charge" },
       "boost_duration_button": { "name": "Boost for duration" },
       "boost_cancel": { "name": "Cancel boost" }
+    },
+    "lock": {
+      "remote_lock": { "name": "Remote lock" }
     }
   }
 }

@@ -2748,3 +2748,90 @@ there is a different, account-wide endpoint (`async_charges_stats`, not the per-
 (`data.summary.energy.home.total`). Not changed, since Month energy/cost has been live-verified
 end-to-end through the running integration per earlier entries in this file - but flagged here as
 an assumption without its own raw capture, rather than silently treated as equally confirmed.
+
+## Remote Lock built (`lock.py`) - Solo 3S-only, genuinely untestable live on this account
+
+Researched Pod Point's own app guide (`Pod-Home-app-guide.pdf`, fetched live from
+`cdn-www.pod-point.com`) to answer the user's question about what Remote Lock actually does,
+since third-party summaries were vague/contradictory on the mechanism. Confirmed, quoting the
+guide's "Remote lock" page: "Remote Lock prevents anyone from starting a charging session at
+your charger, without your permission. Your charger must be online and unplugged to lock or
+unlock." So it's an authorization gate on session-start, not a physical cable interlock -
+confirmed further by the Boost page's "Charger must be unlocked to Boost" and the LED table,
+where "solid yellow" covers both "waiting to start, unlocked" and "securely locked" (same visual
+state either way, consistent with a start-permission flag rather than a distinct physical-lock
+signal). The guide also states Remote Lock is **Solo 3S customers only** - and the user's own
+charger is a Solo 3, confirmed via `GET /remote-lock/{ppid}` returning `{"offMode": null}` live
+against this account (`scratch/pod-point-new-api-findings.md`), not merely inferred from the
+guide.
+
+The user asked to build it anyway, explicitly, having been told this constraint plainly first (a
+plan-mode-style decision point, not launched into without asking - see the Boost duration
+"design overstep" entry earlier in this file for why that discipline matters here). Built as
+`lock.py`'s `PodHomeRemoteLock` (HA's `lock` domain, not `switch` or a `select`/`number` config
+entity as the user first floated) - a `lock` entity is HA's own vocabulary for exactly this
+shape (a binary access-control state with a direct physical-effect toggle), and unlike Charge
+Priority/Target Charge/Ready By (all `EntityCategory.CONFIG`), a lock's state IS the device's
+operational state, not a setting - so, per HA's own entity_category guidance ("only for entities
+that allow changing settings, not state"), it carries no entity_category, same as the boost
+buttons.
+
+API shape (`scratch/podpoint_openapi.json`, `RemoteLockDTO`): `GET`/`POST /remote-lock/{ppid}`,
+body/response `{"offMode": bool | None}` - `true` locked, `false` unlocked, `null` confirmed live
+as this account's actual state (not just "unset"). The write path (`POST`) returns 501 for a
+charger model that doesn't support Remote Lock, per the schema - not confirmed live (no Solo 3S
+account available), but caught in `lock.py` and surfaced as a clean `HomeAssistantError` rather
+than a raw API error, since it's a fully anticipated case here. `offMode: null` maps to HA's
+`unknown` state (entity-availability convention: fetched fine, no applicable value right now),
+not `unavailable` - the fetch itself succeeds.
+
+Coordinator wiring mirrors firmware/tariffs/manual_schedules/delegated_control exactly: a new
+per-ppid `_remote_lock_off_mode_by_ppid`/`_remote_lock_fetched_at` pair, staleness-cached on
+`FIRMWARE_TARIFF_REFRESH_INTERVAL`, `fetched_at` stamped once the raw dict comes back non-empty
+(which `{"offMode": null}` is - a dict with one key is still truthy, so a genuine `null` doesn't
+get treated as "fetch failed, retry sooner").
+
+Unlike every other write entity in this integration, this one is flagged (docstring, README,
+PLAN.md) as **NOT YET TESTED against a real account, and may permanently stay that way** - the
+constraint isn't "haven't gotten round to it yet" like the others were, it's "this account's
+hardware cannot exercise this code path at all." Built and code-reviewed to the same standard as
+everything else, with the read path's `offMode: null` shape confirmed live either way.
+
+## Remote Lock gated disabled-by-default on unsupported hardware; scratch/ probe scripts fixed for a Windows aiodns regression
+
+Per the user directly: Remote Lock shouldn't be enabled by default on a charger that doesn't
+support it - it would just sit there permanently reading `unknown` on every Solo 3 install,
+which is worse UX than not showing it at all. Added a third gating axis alongside the existing
+Charging-Mode (`_MODE_GATED_ENTITIES`) and tariff-shape (`_TARIFF_GATED_ENTITIES`) mechanisms in
+`entity.py`: `_SUPPORT_GATED_ENTITIES`/`async_sync_support_gated_entities`, wired into
+`__init__.py` the same way (initial sync + `coordinator.async_add_listener`).
+
+The gating rule is deliberately asymmetric to the other two: mode/tariff gating treats "haven't
+resolved a value yet" as "leave alone, don't guess" (see `async_sync_mode_gated_entities`'s own
+comment). Support-gating treats it as "disable" instead - `remote_lock_off_mode` has only ever
+been observed `null` on a charger CONFIRMED not to support Remote Lock (a Solo 3 - see the
+"Remote Lock built" entry above), never confirmed null-but-supported on a Solo 3S. Until an
+account with 3S hardware can settle that ambiguity, defaulting to disabled whenever a real bool
+has never been seen is the safer read: a false negative (hidden until the first real toggle from
+the app) is cheaper than cluttering every unsupported install with a permanently-unknown entity.
+Once a real value IS observed, it's cached on the coordinator (staleness-cached like
+firmware/tariffs, not re-fetched every poll) and the entity stays enabled from then on.
+
+Added `tests/test_entity_gating.py` covering the new function (disabled when never-seen, enabled
+once a real value lands, a user's own manual disable left alone) - the pre-existing mode/tariff
+gating functions still have no test coverage of their own (unchanged, still an open gap - see
+QUALITY_SCALE.md).
+
+Separately, while re-testing this live the user hit `scratch/probe_all.py` failing outright with
+`RuntimeError: aiodns needs a SelectorEventLoop on Windows`. Root-caused: not a regression from
+this session's work on `lock.py` - `pip install -r requirements_test.txt` (done for the
+test-coverage phase, see the "160 tests" entry) pulls in `pytest-homeassistant-custom-component`
+→ `homeassistant`, which pins `aiodns==3.2.0` **unconditionally** (unlike aiohttp's own optional
+`aiodns` extra, platform-gated to linux/darwin). Once `aiodns` is present in the shared Python
+environment at all, `aiohttp.ClientSession()` picks it as the default resolver regardless of
+platform, and `aiodns` requires a `SelectorEventLoop` on Windows (`asyncio.run()` defaults to
+`ProactorEventLoop` there since 3.8) - https://github.com/saghul/aiodns/issues/86. Fixed in all
+five `scratch/*.py` probe scripts (`probe_all.py`, `smoke_test_api.py`,
+`check_interval_probe.py`, `boost_watcher_probe.py`, `vehicle_sync_probe.py`) by forcing
+`asyncio.WindowsSelectorEventLoopPolicy()` before `asyncio.run(main())` on `sys.platform ==
+"win32"`. Local-only fix (scratch/ is gitignored), not committed.

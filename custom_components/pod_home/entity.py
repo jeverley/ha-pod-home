@@ -309,3 +309,32 @@ def async_sync_tariff_gated_entities(
         wants_enabled = not is_single_rate
         for platform_domain, suffix in _TARIFF_GATED_ENTITIES:
             _async_apply_disabled_state(registry, platform_domain, f"{ppid}{suffix}", wants_enabled)
+
+
+# Entities gated on whether THIS charger's hardware actually supports the feature at all - not
+# Charging Mode or tariff shape, a per-model capability. Only Remote Lock so far.
+_SUPPORT_GATED_ENTITIES: list[tuple[str, str]] = [
+    ("lock", "_remote_lock"),
+]
+
+
+@callback
+def async_sync_support_gated_entities(
+    hass: HomeAssistant, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
+    """Enable/disable (same mechanism as async_sync_mode_gated_entities) each entity in
+    _SUPPORT_GATED_ENTITIES, based on whether its charger has ever reported a real value for the
+    underlying capability. Unlike mode/tariff gating, "unresolved" (never seen a real value) is
+    treated as "disable", not "leave alone" - `remote_lock_off_mode` has only ever been observed
+    `None` on a charger model confirmed NOT to support Remote Lock at all (a Solo 3 - see
+    DECISIONS.md), never confirmed null-but-supported on a Solo 3S. Until an account with 3S
+    hardware can confirm that distinction, staying disabled whenever a real bool has never been
+    seen is the safer default - hiding it until the first real toggle beats cluttering every
+    unsupported install with a permanently `unknown` entity. Once a real value IS seen, it's
+    cached on the coordinator (see coordinator.py) and stays enabled from then on, even across a
+    later poll where the fetch is skipped (staleness caching, not re-fetched every poll)."""
+    registry = er.async_get(hass)
+    for ppid, charger in coordinator.data.items():
+        wants_enabled = charger.remote_lock_off_mode is not None
+        for platform_domain, suffix in _SUPPORT_GATED_ENTITIES:
+            _async_apply_disabled_state(registry, platform_domain, f"{ppid}{suffix}", wants_enabled)

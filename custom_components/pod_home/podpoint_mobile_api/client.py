@@ -1,5 +1,5 @@
-"""Async client for mobile-api.pod-point.com. Mostly read-only - charge-overrides and
-remote-lock have real physical side effects on the charger and aren't implemented here.
+"""Async client for mobile-api.pod-point.com. Mostly read-only.
+async_create_charge_override(), async_delete_charge_override(), async_set_remote_lock(),
 async_set_vehicle_intents(), async_set_vehicle_charge_limit(), and
 async_set_charge_priority_max_price() are writes with real effects on a vehicle/charger -
 callers must treat them with the same explicit-authorization discipline as any other write path.
@@ -260,9 +260,20 @@ class PodHomeApiClient:
         await self._async_delete(f"/chargers/{ppid}/charge-overrides")
 
     async def async_get_remote_lock_status(self, ppid: str) -> dict:
-        """GET /remote-lock/{ppid} - reads the current lock state. Read-only; does not set the
-        lock (that would be a POST/PUT, not implemented)."""
+        """GET /remote-lock/{ppid} - reads the current lock state (`RemoteLockDTO`:
+        `{"offMode": bool | None}`). `offMode: null` confirmed live for a charger model that
+        doesn't support Remote Lock (a Solo 3, not 3S) - not just "not yet set"."""
         return await self._async_get(f"/remote-lock/{ppid}")
+
+    async def async_set_remote_lock(self, ppid: str, off_mode: bool) -> None:
+        """POST /remote-lock/{ppid} - sets Remote Lock. Body shape confirmed via the account's
+        public OpenAPI schema (`RemoteLockDTO`): `{"offMode": bool}`. `offMode: true` is Remote
+        Lock engaged (charger won't start a new session); `false` is unlocked. Per the schema,
+        the server returns 501 for a charger model that doesn't support Remote Lock (a Solo 3,
+        not 3S) - not confirmed live, since no account with 3S hardware has been available to
+        test this call. WRITE ENDPOINT with a real physical-access effect on the charger - see
+        CLAUDE.md."""
+        await self._async_post(f"/remote-lock/{ppid}", {"offMode": off_mode})
 
     async def async_warranty(self, ppid: str) -> dict:
         """GET /warranties/{ppid}."""
