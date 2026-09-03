@@ -2969,3 +2969,48 @@ all.
 nothing to prepare a boost duration for with no cable connected, so the input and the actions it
 feeds should share one availability story rather than the input staying enabled while both
 buttons that consume it grey out.
+
+## Code-review fixes: reauth stale-token race actually closed; Remote Lock fetched every poll; docstring/doc cleanup
+
+A `/code-review` pass against the whole session's diff (since the base integration build) found two
+real, confirmed bugs plus several cleanup items - all fixed:
+
+1. **The reauth stale-token guard (`__init__.py`'s `_save_auth_tokens`) was checked at schedule
+   time, not write time**, so it didn't actually close the race it was built for. HA's
+   `Store.async_delay_save` stores `data_func` and calls it unconditionally when its timer fires
+   (confirmed by reading the installed `homeassistant.helpers.storage.Store` source) - the guard's
+   early `return` before calling `async_delay_save` only prevented *scheduling* a new write, not a
+   write already scheduled moments earlier by a token refresh. A refresh landing within
+   `AUTH_SAVE_DELAY` (5s) of completing reauth could still fire afterwards, since
+   `async_unload_entry` never cancels the pre-reload `auth_store` instance's pending timer (a
+   different Python object from the post-reload one, per the earlier "Store instance race
+   condition" entry) - reintroducing the exact stale-token bug this mechanism existed to prevent.
+   Fixed by moving the check inside the `data_func` closure itself (`_export_if_still_current`),
+   so it's re-evaluated at the moment Store actually calls it, not just when it's scheduled.
+2. **Remote Lock's `offMode` was staleness-cached on the 6-hour `FIRMWARE_TARIFF_REFRESH_INTERVAL`**,
+   unlike every other user-write-target field (`max_price`, `boost_end_at`), which are
+   deliberately fetched every poll. Pressing lock/unlock and calling `async_request_refresh()`
+   wouldn't actually re-fetch the new state for up to 6 hours - a successful write looked like it
+   silently failed. Moved into the same "fetched every poll" group as preferences/charge_overrides
+   (one extra `asyncio.gather` member per branch), `_remote_lock_fetched_at` removed as no longer
+   needed.
+3. Several inline code comments/docstrings (`button.py`, `time.py`, `coordinator.py`) used
+   "confirmed live"/"per the user directly" narrative framing, which CLAUDE.md's "Comments and
+   docstrings" section explicitly reserves for DECISIONS.md - trimmed to terse factual statements.
+4. `lock.py`'s `PodHomeRemoteLock` docstring claimed the online precondition was "mirrored via
+   `available`" when no such override exists - corrected to state plainly that neither precondition
+   (online or unplugged) is enforced client-side.
+5. `CLAUDE.md`/`PLAN.md` still described the mode/tariff-gating reconciliation functions
+   (`async_sync_mode_gated_entities` etc.) as an untested-but-present gap, after they were deleted
+   entirely in the entity-gating redesign - updated to describe the actual remaining gap
+   (`async_setup_dynamic_chargers`'s `predicate`-gated creation path, which QUALITY_SCALE.md
+   already correctly listed).
+6. The cable-unplugged `available` check (`not is_momentarily_unplugged(...)`) was duplicated
+   across both Boost buttons and Boost duration; the mode-gated `available` check (resolve
+   charger, guard None, call `smart_mode_available`) was duplicated across Ready By/Target
+   Charge/Expected Charge. Both collapsed into small shared properties on the base classes
+   (`PodHomeEntity._cable_connected`, `PodHomeVehicleEntity._smart_mode_available`) rather than a
+   declarative registry-style mechanism - deliberately not reintroducing the kind of gating table
+   this session already retired twice (see the entity-gating redesign entries above). This also
+   removed the redundant double charger-resolution the review flagged (each override no longer
+   eagerly re-resolves the charger before the `and` short-circuit already guarantees it).

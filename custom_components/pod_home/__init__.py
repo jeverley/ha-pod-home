@@ -58,10 +58,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> b
         # delayed write landing after a reauth has since changed the password - without this,
         # a save scheduled just before reauth completes can still fire afterwards and persist
         # the old, now-invalid session, reintroducing the bug this guard exists to prevent (see
-        # DECISIONS.md).
-        if entry.data.get(CONF_PASSWORD) != signed_in_password:
-            return
-        auth_store.async_delay_save(auth.export_tokens, AUTH_SAVE_DELAY)
+        # DECISIONS.md). Re-checked inside this closure (Store's own data_func, called at actual
+        # write time) rather than only before scheduling - async_delay_save's data_func runs
+        # unconditionally whenever its timer fires, and reauth's Store.async_remove() runs on a
+        # separate Store instance that can't cancel this one's pending write, so a check made
+        # only at schedule time can't catch a refresh that lands in between.
+        def _export_if_still_current() -> dict | None:
+            if entry.data.get(CONF_PASSWORD) != signed_in_password:
+                return None
+            return auth.export_tokens()
+
+        auth_store.async_delay_save(_export_if_still_current, AUTH_SAVE_DELAY)
 
     auth = PodHomeAuth(
         session,

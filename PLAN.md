@@ -179,8 +179,8 @@ reliably installable) release. Until then, the two copies can silently drift —
   `pytest-homeassistant-custom-component` harness) across the coordinator and all 8 entity
   platforms, plus offline `tests/test_helpers.py`. See QUALITY_SCALE.md's `test-coverage` entry
   for the honest remaining-gaps list (no measured `pytest-cov` percentage, `async_setup_entry`'s
-  real first refresh, entity.py's mode/tariff-gating reconciliation functions, dynamic-device
-  creation - all still untested). Test mocks cross-checked against real captured
+  real first refresh, dynamic-device creation including the `predicate`-gated creation path -
+  all still untested). Test mocks cross-checked against real captured
   `scratch/output/*.json` responses locally (never copied into tracked files) - see DECISIONS.md.
 - **CI cadence**: both workflows (`test.yml`, `validate.yml`) now run on push to master, every
   PR, manual dispatch, and weekly (Sundays 00:00 UTC) - the weekly run catches HA-core/HACS

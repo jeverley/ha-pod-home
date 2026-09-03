@@ -19,7 +19,7 @@ from .entity import (
     async_setup_dynamic_chargers,
     async_setup_dynamic_vehicles,
 )
-from .helpers import is_momentarily_unplugged, parse_time_of_day, smart_mode_available
+from .helpers import parse_time_of_day
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -69,12 +69,9 @@ class PodHomeVehicleReadyByTime(PodHomeVehicleEntity, PodHomeVehicleIntentsWrite
 
     @property
     def available(self) -> bool:
-        # Smart-Charging-only - see smart_mode_available() (helpers.py) and DECISIONS.md for why
-        # this is `available`, not entity-registry disable: Charging Mode genuinely toggles live.
-        charger = self._charger_for_vehicle()
-        return super().available and smart_mode_available(
-            charger.delegated_control_status if charger else None
-        )
+        # Smart-Charging-only - see DECISIONS.md for why this is `available`, not entity-registry
+        # disable: Charging Mode genuinely toggles live.
+        return super().available and self._smart_mode_available
 
     @property
     def native_value(self) -> datetime.time | None:
@@ -98,15 +95,15 @@ class PodHomeBoostDurationTime(PodHomeEntity, RestoreEntity, TimeEntity):
     """One-shot input for the "Boost for duration" button (button.py) - not derived from the
     API, since there's no "configured boost duration" field to read back; this is purely a
     parameter the button reads at press time. Reuses TimeEntity's hh:mm picker to represent a
-    *duration* (H hours M minutes), not a wall-clock time - per the user directly, HA has no
-    dedicated duration entity domain.
+    *duration* (H hours M minutes), not a wall-clock time - HA has no dedicated duration entity
+    domain.
 
     Deliberately unset (None) until explicitly given a value - no default, matching the app's
     own boost-duration prompt rather than assuming one. Persists across restarts via
     RestoreEntity (so a pending value survives a restart before it's used), but button.py resets
-    it back to unset via async_reset() after each successful press - per the user directly, this
-    represents "execute this duration" rather than a sticky preference to remember between
-    boosts. Registers itself on the coordinator (see PodHomeDataUpdateCoordinator.
+    it back to unset via async_reset() after each successful press - this represents "execute
+    this duration" rather than a sticky preference to remember between boosts. Registers itself
+    on the coordinator (see PodHomeDataUpdateCoordinator.
     boost_duration_entities) so button.py can call async_reset() directly - pod_home owns both
     entities, so a direct call is the right tool here, not a generic cross-integration service
     (HA's time.set_value requires a real time value, can't clear one)."""
@@ -127,7 +124,7 @@ class PodHomeBoostDurationTime(PodHomeEntity, RestoreEntity, TimeEntity):
     def available(self) -> bool:
         # Same cable-unplugged gate as the boost buttons themselves (button.py) - there's
         # nothing to prepare a boost duration for with no cable connected.
-        return super().available and not is_momentarily_unplugged(self.charger.charging_state)
+        return super().available and self._cable_connected
 
     @property
     def native_value(self) -> datetime.time | None:

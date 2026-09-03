@@ -12,7 +12,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .entity import PodHomeVehicleEntity, async_setup_dynamic_vehicles
-from .helpers import smart_mode_available
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -55,11 +54,8 @@ class PodHomeVehicleTargetChargeNumber(PodHomeVehicleEntity, NumberEntity):
 
     @property
     def available(self) -> bool:
-        # Smart-Charging-only - see smart_mode_available() (helpers.py) and DECISIONS.md.
-        charger = self._charger_for_vehicle()
-        return super().available and smart_mode_available(
-            charger.delegated_control_status if charger else None
-        )
+        # Smart-Charging-only - see DECISIONS.md.
+        return super().available and self._smart_mode_available
 
     @property
     def native_value(self) -> int | None:

@@ -1,9 +1,9 @@
 """Button platform for pod_home - boost ("Charge Now") triggers.
 
 WRITE ENDPOINT with a real physical effect on the charger (see CLAUDE.md's "Write endpoints"
-section). Built to match the app's own two boost options (Full charge / Set duration) plus a
-cancel action, per the user directly - all three confirmed working live (see DECISIONS.md/
-PLAN.md). Do not press these outside of the user explicitly doing so live, knowing what it'll do.
+section). Matches the app's own two boost options (Full charge / Set duration) plus a cancel
+action - live-verification status for all three tracked in DECISIONS.md/PLAN.md. Do not press
+these outside of the user explicitly doing so live, knowing what it'll do.
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .entity import PodHomeEntity, async_setup_dynamic_chargers
-from .helpers import is_momentarily_unplugged, parse_time_of_day
+from .helpers import parse_time_of_day
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -66,11 +66,10 @@ _FULL_CHARGE_DURATION = datetime.timedelta(hours=12)
 class PodHomeBoostFullChargeButton(PodHomeEntity, ButtonEntity):
     """Triggers a boost matching the app's "Full charge" option - a flat 12-hour override, NOT
     an indefinite/"Always On" one. `endAt: null` looked valid per the account's public OpenAPI
-    schema (ChargeOverrideRequestDTO's own description), but confirmed live to both be rejected
-    by the server (403) and to not match the app's real behavior anyway - triggering "Full
-    charge" from the app itself showed an end time exactly 12 hours out, not indefinite. The
-    schema documenting a value as accepted doesn't guarantee the server actually honours it -
-    see DECISIONS.md."""
+    schema (ChargeOverrideRequestDTO's own description), but is both rejected by the server (403)
+    and doesn't match the app's real behavior anyway - triggering "Full charge" from the app
+    itself shows an end time exactly 12 hours out, not indefinite. The schema documenting a value
+    as accepted doesn't guarantee the server actually honours it - see DECISIONS.md."""
 
     _attr_translation_key = "boost_full_charge"
     _attr_name = "Full charge"
@@ -83,9 +82,8 @@ class PodHomeBoostFullChargeButton(PodHomeEntity, ButtonEntity):
     @property
     def available(self) -> bool:
         # The app itself won't start a boost with the cable unplugged - matched here rather
-        # than left to fail live against the API. super().available's charger-not-None check
-        # short-circuits before this touches self.charger, same pattern as Cancel boost below.
-        return super().available and not is_momentarily_unplugged(self.charger.charging_state)
+        # than left to fail live against the API.
+        return super().available and self._cable_connected
 
     async def async_press(self) -> None:
         if not self.charger:
@@ -100,8 +98,8 @@ class PodHomeBoostFullChargeButton(PodHomeEntity, ButtonEntity):
 class PodHomeBoostDurationButton(PodHomeEntity, ButtonEntity):
     """Triggers a boost for the duration set on Boost duration (time.py), read at press time -
     matching the app's "Set duration" option. Boost duration is a one-shot input, not a sticky
-    preference - per the user directly, resets back to unset after a successful press (not on
-    failure, so a rejected attempt can be retried without re-entering the value)."""
+    preference - resets back to unset after a successful press (not on failure, so a rejected
+    attempt can be retried without re-entering the value)."""
 
     _attr_translation_key = "boost_duration_button"
     _attr_name = "Boost for duration"
@@ -114,7 +112,7 @@ class PodHomeBoostDurationButton(PodHomeEntity, ButtonEntity):
     @property
     def available(self) -> bool:
         # The app itself won't start a boost with the cable unplugged - see Full charge above.
-        return super().available and not is_momentarily_unplugged(self.charger.charging_state)
+        return super().available and self._cable_connected
 
     async def async_press(self) -> None:
         if not self.charger:

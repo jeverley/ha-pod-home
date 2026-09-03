@@ -287,9 +287,10 @@ async def test_firmware_and_tariffs_not_refetched_within_staleness_window(
     assert api.async_tariffs.call_count == 1
     assert api.async_manual_schedules.call_count == 1
     assert api.async_delegated_control.call_count == 1
-    # But per-charger data fetched every poll (preferences, charge_overrides, connectivity) did
-    # get called again.
+    # But per-charger data fetched every poll (preferences, charge_overrides, connectivity,
+    # remote_lock) did get called again.
     assert api.async_smart_charging_preferences.call_count == 2
+    assert api.async_get_remote_lock_status.call_count == 2
 
 
 async def test_accumulate_total_energy_sums_finalized_charges_once_each(
@@ -491,10 +492,11 @@ async def test_vehicle_parsed_from_smart_charging_chargers_and_vehicles(
 
 async def test_remote_lock_status_parsed(hass: HomeAssistant) -> None:
     """offMode: null is a genuine, confirmed-live response shape (unsupported charger model, or
-    unset) - a successful fetch, not treated as missing data. Two separate coordinators, not two
-    polls of the same one - offMode is cached on FIRMWARE_TARIFF_REFRESH_INTERVAL like firmware/
-    tariffs, so a second poll wouldn't re-fetch it (see
-    test_firmware_and_tariffs_not_refetched_within_staleness_window)."""
+    unset) - a successful fetch, not treated as missing data. Two separate coordinators here
+    purely for a clean before/after comparison; unlike firmware/tariffs, remote_lock is fetched
+    every poll, not staleness-cached (see test_firmware_and_tariffs_not_refetched_within_
+    staleness_window's assertion on async_get_remote_lock_status.call_count) - a lock/unlock
+    write should be reflected the moment the next poll runs."""
     api = _stub_api()
     api.async_list_chargers.return_value = [_charger_raw()]
     api.async_get_remote_lock_status.return_value = {"offMode": None}

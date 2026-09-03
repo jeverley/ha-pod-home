@@ -53,10 +53,7 @@ class PodHomeChargingStrategySelect(PodHomeEntity, SelectEntity):
 
     @property
     def available(self) -> bool:
-        charger = self.charger
-        return super().available and charge_priority_available(
-            charger.tariff_windows if charger else None
-        )
+        return super().available and charge_priority_available(self.charger.tariff_windows)
 
     @property
     def current_option(self) -> str | None:

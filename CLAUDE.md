@@ -195,8 +195,8 @@ the authoritative place `pytest tests/` is verified**, not this dev machine (Win
   run instead. `async_get_clientsession` is mocked in the config-flow tests regardless of
   platform - architecturally correct either way, not a Windows workaround. **Still not covered**:
   `async_setup_entry`'s real first refresh (config flow tests mock it; coordinator tests bypass
-  it), the mode/tariff-gating reconciliation functions in entity.py, and dynamic-device creation -
-  see QUALITY_SCALE.md for the honest remaining list.
+  it), and dynamic-device creation, including `async_setup_dynamic_chargers`'s `predicate`-gated
+  creation path - see QUALITY_SCALE.md for the honest remaining list.
 
 Unit-tested (mocked API responses, real `hass` fixture) is not the same claim as **live-verified**
 against a real Home Assistant instance and a real account - the two are tracked separately in

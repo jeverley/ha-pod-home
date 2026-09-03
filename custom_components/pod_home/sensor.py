@@ -55,7 +55,6 @@ from .helpers import (
     resolve_timezone,
     schedule_mode,
     select_last_charge,
-    smart_mode_available,
 )
 
 if TYPE_CHECKING:
@@ -587,11 +586,8 @@ class PodHomeVehicleExpectedChargeSensor(PodHomeVehicleEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        # Smart-Charging-only - see smart_mode_available() (helpers.py) and DECISIONS.md.
-        charger = self._charger_for_vehicle()
-        return super().available and smart_mode_available(
-            charger.delegated_control_status if charger else None
-        )
+        # Smart-Charging-only - see DECISIONS.md.
+        return super().available and self._smart_mode_available
 
     @property
     def native_value(self) -> int | None:

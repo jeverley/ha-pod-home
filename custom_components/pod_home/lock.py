@@ -53,10 +53,10 @@ async def async_setup_entry(
 
 class PodHomeRemoteLock(PodHomeEntity, LockEntity):
     """Remote Lock - prevents a new charging session from starting until unlocked. Per the app
-    guide, lock/unlock is only possible while the charger is online and unplugged; this isn't
-    separately enforced here (mirrored via `available` for online, but not unplugged - unlike
-    Boost, the app guide doesn't describe an app-side pre-check for this, so a plugged-in
-    lock/unlock attempt is left to the API's own response rather than guessed at)."""
+    guide, lock/unlock is only possible while the charger is online and unplugged; neither is
+    enforced client-side here (no `available` override - unlike Boost, the app guide doesn't
+    describe an app-side pre-check for this), so an offline or plugged-in lock/unlock attempt is
+    left to the API's own response rather than guessed at."""
 
     _attr_translation_key = "remote_lock"
     _attr_name = "Remote lock"

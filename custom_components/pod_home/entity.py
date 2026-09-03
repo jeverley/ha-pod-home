@@ -11,7 +11,12 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import ATTRIBUTION, DAY_OF_WEEK_OPTIONS, DOMAIN, MANUFACTURER
 from .coordinator import PodHomeCharge, PodHomeCharger, PodHomeDataUpdateCoordinator, PodHomeVehicle
-from .helpers import humanize_model_style, select_last_charge
+from .helpers import (
+    humanize_model_style,
+    is_momentarily_unplugged,
+    select_last_charge,
+    smart_mode_available,
+)
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -43,6 +48,13 @@ class PodHomeEntity(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
     @property
     def available(self) -> bool:
         return super().available and self.charger is not None
+
+    @property
+    def _cable_connected(self) -> bool:
+        """Shared by every entity/action that only makes sense with a cable plugged in (the
+        boost buttons, Boost duration) - only meaningful once `available` above has already
+        confirmed a charger exists."""
+        return not is_momentarily_unplugged(self.charger.charging_state)
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -95,6 +107,15 @@ class PodHomeVehicleEntity(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
     @property
     def available(self) -> bool:
         return super().available and self.vehicle is not None
+
+    @property
+    def _smart_mode_available(self) -> bool:
+        """Shared by every Smart-Charging-gated vehicle entity (Ready By, Target Charge,
+        Expected Charge) - resolves the linked charger once here rather than each caller
+        re-deriving it, and is only meaningful once `available` above has already confirmed a
+        linked vehicle/charger exists."""
+        charger = self._charger_for_vehicle()
+        return charger is not None and smart_mode_available(charger.delegated_control_status)
 
     @property
     def device_info(self) -> DeviceInfo:
