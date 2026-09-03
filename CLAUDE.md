@@ -16,8 +16,10 @@ there (this repo's own commit-message conventions still apply per-commit on the 
 the whole feature, matching how `master`'s own history already reads (each commit there is one
 coherent chapter, not a blow-by-blow). No GitHub PR - local squash-merge only, since this is a
 solo-maintained repo and CI already runs on every push to `master`. Delete the branch after
-merging. Don't commit directly to `master` for anything beyond a genuinely one-line, self-
-contained change (a doc typo, a single CI-config tweak).
+merging - `git branch -D <branch>`, not `-d`: a squash-merge's commit is a new SHA, not an
+ancestor of the branch tip, so git always sees a squashed branch as "not fully merged". Don't
+commit directly to `master` for anything beyond a genuinely one-line, self-contained change (a
+doc typo, a single CI-config tweak).
 
 ## Quality scale
 
