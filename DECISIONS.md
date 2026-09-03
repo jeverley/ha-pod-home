@@ -2796,3 +2796,42 @@ PLAN.md) as **NOT YET TESTED against a real account, and may permanently stay th
 constraint isn't "haven't gotten round to it yet" like the others were, it's "this account's
 hardware cannot exercise this code path at all." Built and code-reviewed to the same standard as
 everything else, with the read path's `offMode: null` shape confirmed live either way.
+
+## Remote Lock gated disabled-by-default on unsupported hardware; scratch/ probe scripts fixed for a Windows aiodns regression
+
+Per the user directly: Remote Lock shouldn't be enabled by default on a charger that doesn't
+support it - it would just sit there permanently reading `unknown` on every Solo 3 install,
+which is worse UX than not showing it at all. Added a third gating axis alongside the existing
+Charging-Mode (`_MODE_GATED_ENTITIES`) and tariff-shape (`_TARIFF_GATED_ENTITIES`) mechanisms in
+`entity.py`: `_SUPPORT_GATED_ENTITIES`/`async_sync_support_gated_entities`, wired into
+`__init__.py` the same way (initial sync + `coordinator.async_add_listener`).
+
+The gating rule is deliberately asymmetric to the other two: mode/tariff gating treats "haven't
+resolved a value yet" as "leave alone, don't guess" (see `async_sync_mode_gated_entities`'s own
+comment). Support-gating treats it as "disable" instead - `remote_lock_off_mode` has only ever
+been observed `null` on a charger CONFIRMED not to support Remote Lock (a Solo 3 - see the
+"Remote Lock built" entry above), never confirmed null-but-supported on a Solo 3S. Until an
+account with 3S hardware can settle that ambiguity, defaulting to disabled whenever a real bool
+has never been seen is the safer read: a false negative (hidden until the first real toggle from
+the app) is cheaper than cluttering every unsupported install with a permanently-unknown entity.
+Once a real value IS observed, it's cached on the coordinator (staleness-cached like
+firmware/tariffs, not re-fetched every poll) and the entity stays enabled from then on.
+
+Added `tests/test_entity_gating.py` covering the new function (disabled when never-seen, enabled
+once a real value lands, a user's own manual disable left alone) - the pre-existing mode/tariff
+gating functions still have no test coverage of their own (unchanged, still an open gap - see
+QUALITY_SCALE.md).
+
+Separately, while re-testing this live the user hit `scratch/probe_all.py` failing outright with
+`RuntimeError: aiodns needs a SelectorEventLoop on Windows`. Root-caused: not a regression from
+this session's work on `lock.py` - `pip install -r requirements_test.txt` (done for the
+test-coverage phase, see the "160 tests" entry) pulls in `pytest-homeassistant-custom-component`
+→ `homeassistant`, which pins `aiodns==3.2.0` **unconditionally** (unlike aiohttp's own optional
+`aiodns` extra, platform-gated to linux/darwin). Once `aiodns` is present in the shared Python
+environment at all, `aiohttp.ClientSession()` picks it as the default resolver regardless of
+platform, and `aiodns` requires a `SelectorEventLoop` on Windows (`asyncio.run()` defaults to
+`ProactorEventLoop` there since 3.8) - https://github.com/saghul/aiodns/issues/86. Fixed in all
+five `scratch/*.py` probe scripts (`probe_all.py`, `smoke_test_api.py`,
+`check_interval_probe.py`, `boost_watcher_probe.py`, `vehicle_sync_probe.py`) by forcing
+`asyncio.WindowsSelectorEventLoopPolicy()` before `asyncio.run(main())` on `sys.platform ==
+"win32"`. Local-only fix (scratch/ is gitignored), not committed.

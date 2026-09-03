@@ -72,16 +72,19 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
   error paths, staleness-cadence caching, `_accumulate_total_energy`, sticky-state persistence via
   `Store`, adaptive polling, and api3 charge matching; every entity platform now has its own test
   file (`test_sensor.py`/`test_binary_sensor.py`/`test_number.py`/`test_select.py`/`test_time.py`/
-  `test_calendar.py`/`test_button.py`/`test_update.py`) covering entities with genuine logic
-  (derived values, conditional availability/attributes, unit/currency handling, write-endpoint
-  calls and their error paths) - a pure field-passthrough sensor gets one assertion, not
-  exhaustive coverage of every trivial property. 159 tests total. **Still open, honestly**: this
-  isn't formal 95%-line-coverage-tool-measured - no `pytest-cov` run has actually confirmed the
-  percentage; a handful of `PodHomeVehicleReadyByTime`/dynamic-device-creation/mode-and-tariff-
-  gating-reconciliation (`async_sync_mode_gated_entities`/`async_sync_tariff_gated_entities` in
-  entity.py) paths remain untested; and `config_flow.py`'s `async_setup_entry` integration (the
-  coordinator's real first refresh, not mocked) still isn't exercised end-to-end. Good enough to
-  call this deferred item substantially done, not literally 100%.
+  `test_calendar.py`/`test_button.py`/`test_update.py`/`test_lock.py`) covering entities with
+  genuine logic (derived values, conditional availability/attributes, unit/currency handling,
+  write-endpoint calls and their error paths) - a pure field-passthrough sensor gets one
+  assertion, not exhaustive coverage of every trivial property. `tests/test_entity_gating.py`
+  covers the newest gating axis (`async_sync_support_gated_entities`). 170+ tests total. **Still
+  open, honestly**: this isn't formal 95%-line-coverage-tool-measured - no `pytest-cov` run has
+  actually confirmed the percentage; a handful of `PodHomeVehicleReadyByTime`/dynamic-device-
+  creation paths remain untested; the two OLDER gating-reconciliation functions
+  (`async_sync_mode_gated_entities`/`async_sync_tariff_gated_entities` in entity.py, unlike the
+  newer `async_sync_support_gated_entities`) still have no test coverage; and
+  `config_flow.py`'s `async_setup_entry` integration (the coordinator's real first refresh, not
+  mocked) still isn't exercised end-to-end. Good enough to call this deferred item substantially
+  done, not literally 100%.
 
 ## Also addressed this phase, beyond the original four
 

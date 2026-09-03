@@ -157,7 +157,10 @@ reliably installable) release. Until then, the two copies can silently drift —
   unsupported state rather than assuming it; a 501 from the write endpoint (per the OpenAPI
   schema, for unsupported charger models) is caught and surfaced as a clean error. Unlike every
   other write entity here, this one may permanently stay flagged "NOT YET TESTED against a real
-  account" - see DECISIONS.md.
+  account" - see DECISIONS.md. **Disabled by default on unsupported hardware** - a third entity-
+  registry gating axis (`async_sync_support_gated_entities`, entity.py) alongside the existing
+  Charging-Mode and tariff-shape gates, enabling it only once a charger has ever reported a real
+  locked/unlocked value.
 - **Packaging - done**: `hacs.json`, LICENSE, `.github/workflows/validate.yml` (`hacs/action` +
   `hassfest`), README.md rewritten as end-user documentation. Installable today via HACS as a
   custom repository (Integrations → ⋮ → Custom repositories). `validate.yml`'s `hacs` job used
