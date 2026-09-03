@@ -54,7 +54,7 @@ Each table's **Category** column is the same grouping Home Assistant's own devic
 | Month energy           | Sensors       | Sensor         | Finalized charges only, resets each calendar month |
 | Month cost             | Sensors       | Sensor         | Finalized charges only, resets each calendar month |
 | Total energy           | Sensors       | Sensor         | Live-inclusive running total since this install started tracking - see "Energy Dashboard" below |
-| Electricity rate       | Sensors       | Sensor         | Current tariff rate, computed from your configured tariff windows - Smart Charging only |
+| Electricity rate       | Sensors       | Sensor         | Current tariff rate, computed from your configured tariff windows - shows `unavailable` outside Smart Charging |
 | Boost end time         | Sensors       | Sensor         | When the active boost ends, if any |
 | Cable status           | Sensors       | Binary sensor  | On when a cable is physically connected |
 | Firmware               | Controls      | Update         | See "Known limitations" for what the version number does and doesn't tell you |
@@ -63,7 +63,7 @@ Each table's **Category** column is the same grouping Home Assistant's own devic
 | Full charge            | Controls      | Button         | Boost ("Charge Now") to 100%, matching the app |
 | Boost for duration     | Controls      | Button         | Boost for the duration set above, matching the app |
 | Cancel boost           | Controls      | Button         | Only available while a boost is active |
-| Remote lock            | Controls      | Lock           | Solo 3S only. Disabled by default until this charger has reported a real locked/unlocked value at least once - stays disabled indefinitely on a model that doesn't support it (confirmed live via `offMode: null`), including the account this integration is developed against |
+| Remote lock            | Controls      | Lock           | Solo 3S only. Entity isn't created at all until this charger confirms support (added dynamically once detected, no restart needed) - never appears on a model that doesn't support it (confirmed live via `offMode: null`), including the account this integration is developed against |
 | Charge priority        | Configuration | Select         | Smart Charging only, disabled by default outside it |
 | Charging state         | Diagnostic    | Sensor         | Raw wire value, disabled by default |
 | Charging mode          | Diagnostic    | Sensor         | Smart / Basic |
@@ -76,12 +76,12 @@ Each table's **Category** column is the same grouping Home Assistant's own devic
 | Battery                 | Sensors       | Sensor        | Vehicle's reported battery level, via Enode |
 | Estimated range         | Sensors       | Sensor        | Vehicle's estimated range, derived from battery level (not live telemetry) |
 | Odometer                | Sensors       | Sensor        | Vehicle's odometer reading, via Enode |
-| Expected charge         | Sensors       | Sensor        | Smart Charging's live prediction for the % it'll actually reach by Ready by - can diverge from Target charge if a constraint (e.g. Charge priority) prevents hitting it. Smart Charging only |
+| Expected charge         | Sensors       | Sensor        | Smart Charging's live prediction for the % it'll actually reach by Ready by - can diverge from Target charge if a constraint (e.g. Charge priority) prevents hitting it. Shows `unavailable` outside Smart Charging |
 | Charge rate             | Sensors       | Sensor        | Vehicle's charge rate - null once charging stops |
 | Charge time remaining   | Sensors       | Sensor        | Estimated time remaining, if reported by the vehicle |
 | Charging                | Sensors       | Binary sensor | On while the vehicle itself reports charging, independent of the charger's own state |
-| Ready by                | Configuration | Time          | Smart Charging only, disabled by default outside it |
-| Target charge           | Configuration | Number        | Smart Charging only, disabled by default outside it |
+| Ready by                | Configuration | Time          | Shows `unavailable` outside Smart Charging |
+| Target charge           | Configuration | Number        | Shows `unavailable` outside Smart Charging |
 | Power delivery state    | Diagnostic    | Sensor        | Raw wire value from the vehicle's own charge state, disabled by default |
 | Max current             | Diagnostic    | Sensor        | Raw wire value, disabled by default - always null on this account so far |
 
@@ -123,11 +123,11 @@ doesn't add a mode-switch control):
   single-charger account.
 - **Remote lock is untested against a real Solo 3S** - it's a Solo 3S-only feature (per Pod
   Point's own app guide) and the account this integration is developed against has a Solo 3,
-  which reports `offMode: null` rather than a real locked/unlocked value. Disabled by default
-  until your charger reports a real value at least once (stays disabled indefinitely on a model
-  that doesn't support it), so on unsupported hardware you won't see it at all unless you
-  explicitly enable it - it'll then read `unknown`. Built code-reviewed-only for that reason - if
-  you have a Solo 3S and enable it, feedback on whether it works as expected is genuinely useful.
+  which reports `offMode: null` rather than a real locked/unlocked value. The entity is only
+  ever created once your charger confirms support, so it simply won't appear at all on
+  unsupported hardware - not a case of finding it and enabling it. Built code-reviewed-only for
+  that reason - if you have a Solo 3S, feedback on whether the entity appears and works as
+  expected is genuinely useful.
 - Not yet packaged for HACS's default repository (no releases/tags yet) - install as a custom
   repository (see above) for now.
 

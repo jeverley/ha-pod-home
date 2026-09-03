@@ -11,6 +11,14 @@ Solo 3S-only. The account this integration has been live-tested against has a So
 can't support it at all (confirmed live: GET /remote-lock/{ppid} returns `{"offMode": null}` for
 it) - so unlike every other write entity in this integration, this one may never be live-verified
 on this account. Built anyway per the user's explicit request, understanding that constraint.
+
+The entity itself is only ever CREATED for a charger once it's confirmed to support Remote Lock
+(`remote_lock_off_mode is not None`) - not created-then-disabled. This is deliberately different
+from the mode/tariff-gated entities elsewhere in this integration (see entity.py): hardware
+support is a permanent, one-time fact about a specific physical charger, never a live-fluctuating
+one like Charging Mode or tariff shape, so there's no ongoing "re-disable" risk to guard against
+and no benefit to a disabled-but-visible entity sitting in every unsupported install's registry
+forever. See DECISIONS.md.
 """
 from __future__ import annotations
 
@@ -35,7 +43,11 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: PodHomeConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     async_setup_dynamic_chargers(
-        entry, entry.runtime_data, async_add_entities, [PodHomeRemoteLock]
+        entry,
+        entry.runtime_data,
+        async_add_entities,
+        [PodHomeRemoteLock],
+        predicate=lambda charger: charger.remote_lock_off_mode is not None,
     )
 
 

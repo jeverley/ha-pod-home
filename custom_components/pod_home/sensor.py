@@ -55,6 +55,7 @@ from .helpers import (
     resolve_timezone,
     schedule_mode,
     select_last_charge,
+    smart_mode_available,
 )
 
 if TYPE_CHECKING:
@@ -396,12 +397,15 @@ class PodHomeElectricityRateSensor(PodHomeEntity, SensorEntity):
     _attr_translation_key = "electricity_rate"
     _attr_name = "Electricity rate"
     _attr_state_class = SensorStateClass.MEASUREMENT
-    # Smart-Charging-only (see _MODE_GATED_ENTITIES in entity.py) - disabled by default.
-    _attr_entity_registry_enabled_default = False
 
     @property
     def unique_id(self) -> str:
         return f"{DOMAIN}_{self.ppid}_electricity_rate"
+
+    @property
+    def available(self) -> bool:
+        # Smart-Charging-only - see smart_mode_available() (helpers.py) and DECISIONS.md.
+        return super().available and smart_mode_available(self.charger.delegated_control_status)
 
     @property
     def native_value(self) -> float | None:
@@ -578,12 +582,18 @@ class PodHomeVehicleExpectedChargeSensor(PodHomeVehicleEntity, SensorEntity):
     _attr_name = "Expected charge"
     _attr_device_class = SensorDeviceClass.BATTERY
     _attr_native_unit_of_measurement = PERCENTAGE
-    # Smart-Charging-only (see _MODE_GATED_ENTITIES in entity.py) - disabled by default.
-    _attr_entity_registry_enabled_default = False
 
     @property
     def unique_id(self) -> str:
         return f"{DOMAIN}_{self.vehicle_id}_expected_charge"
+
+    @property
+    def available(self) -> bool:
+        # Smart-Charging-only - see smart_mode_available() (helpers.py) and DECISIONS.md.
+        charger = self._charger_for_vehicle()
+        return super().available and smart_mode_available(
+            charger.delegated_control_status if charger else None
+        )
 
     @property
     def native_value(self) -> int | None:

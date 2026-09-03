@@ -152,6 +152,20 @@ def test_schedule_mode(status, expected):
 
 
 @pytest.mark.parametrize(
+    "status,expected",
+    [
+        (const.DELEGATED_CONTROL_ACTIVE, True),
+        (const.DELEGATED_CONTROL_INACTIVE, False),
+        ("PENDING", True),  # unresolved - not guessed unavailable
+        ("UNKNOWN", True),
+        (None, True),
+    ],
+)
+def test_smart_mode_available(status, expected):
+    assert helpers.smart_mode_available(status) == expected
+
+
+@pytest.mark.parametrize(
     "raw,expected",
     [
         ("14:30:00", datetime.time(14, 30, 0)),

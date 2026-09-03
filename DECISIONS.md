@@ -2866,3 +2866,66 @@ manually re-enabling them while gated off is a much less common interaction than
 README asks Solo 3S owners to attempt). Fixed once, in the shared function, benefiting all three
 gates. Covered by a new regression test in `tests/test_entity_gating.py`
 (`test_a_manual_enable_of_our_own_disable_survives_the_next_sync`).
+
+## Redesigned entity gating: `available` for Charging-Mode (live/reversible), no-creation for Remote Lock (permanent hardware fact)
+
+Follow-up to the manual-re-enable bug fix above, after further discussion (including researching
+HA's own quality-scale docs and a community forum thread on dynamic entity enabling - see below).
+Landed on a genuinely different mechanism for each of the two axes previously both handled by
+entity-registry disable/enable, rather than keeping the general fix as the final answer for both:
+
+**Charging-Mode gating (Ready By, Target Charge, Expected Charge, Electricity Rate) moved to
+`available`.** These four entities are no longer entity-registry-gated at all -
+`async_sync_mode_gated_entities` and `_MODE_GATED_ENTITIES` are removed from entity.py, and each
+entity's static `_attr_entity_registry_enabled_default = False` is removed too. Instead each has
+its own `available` override calling `smart_mode_available()` (new, helpers.py - offline
+pure-function testable, mirrors `schedule_mode()`'s own "None means don't guess" handling for an
+unresolved status). The entities are now always visible, showing `unavailable` while Charging
+Mode is Basic. Justified two ways: (1) HA's entity-unavailable quality-scale rule technically
+means "can't fetch data," not "not applicable in current config" - but Charging Mode is a live,
+frequently-reversible setting the user changes from the app at any time, and `unavailable`
+carries an accurate "temporarily not offered, may resolve" connotation for something that
+genuinely does resolve on its own the moment Smart Charging is re-enabled - unlike Remote Lock
+below. (2) A HA community thread (community.home-assistant.io/t/dynamically-enable-entities,
+one of the few pieces of real precedent found for this kind of runtime gating - HA core itself
+has almost none, see below) specifically recommends `available` over registry disable/enable for
+exactly this shape of problem, citing the fact that a user's registry choice, once made, is meant
+to be theirs from then on - which is precisely the bug the previous entry in this file just fixed.
+
+**Remote Lock moved to no-creation-until-confirmed-supported**, the opposite direction - the
+entity is no longer created-then-disabled at all. `async_setup_dynamic_chargers` (entity.py)
+gained an optional `predicate` parameter; lock.py now only creates `PodHomeRemoteLock` for a ppid
+once `remote_lock_off_mode is not None`, re-evaluated on every coordinator update via the same
+`known_ppids`-style dedup as the no-predicate case (not a one-shot decision at first-seen-ppid
+time), so a transient fetch failure on a charger's very first poll just delays creation to a
+later successful poll rather than permanently skipping it - the exact fragility concern raised
+earlier against creation-gating, resolved by re-checking every poll instead of only once. This
+is deliberately NOT `available` either: hardware support is a one-time, permanent fact about a
+specific physical charger (never toggles back and forth the way Charging Mode does), so there's
+no ongoing "might come back" state worth representing with a live property - once true, it's
+true forever, and the honest representation of "your hardware doesn't have this" is simply not
+listing the entity, not showing a permanently-`unavailable` one. The registry-gating alternative
+(what the entity used to do) was ruled out for the same reason `unavailable` was for this specific
+case: a Solo 3 owner would see either a permanently-`unavailable` or a permanently-disabled
+Remote Lock entity forever, and `unavailable` specifically carries a "something's wrong, worth
+investigating" connotation across the HA ecosystem (there's a whole tier of community
+notification blueprints built on `is_state('unavailable')` as a health signal) that would be
+actively misleading for a fact that isn't a problem and will never resolve.
+
+**Precedent check, for the record**: searched `home-assistant/core` directly (`gh api
+search/code`) for `async_update_entity(...disabled_by=...)` outside the registry/entity_platform
+internals - every real hit (`airvisual`, `rainbird`, `wolflink`, `nextdns`) turned out to be
+one-time migration code (unique_id renames, config-subentry moves), not an ongoing per-poll
+capability check. Neither of pod_home's two mechanisms here has strong direct core precedent;
+both are reasoned from HA's stated principles (the entity-unavailable rule, the
+entity-disabled-by-default rule, the community thread) rather than copied from an existing
+integration doing the same thing.
+
+**Test changes**: `tests/test_entity_gating.py` was rewritten - the support-gating tests
+(`async_sync_support_gated_entities`, now removed) were replaced with equivalent coverage of the
+same shared-bug-fix pattern applied to tariff-gating (`async_sync_tariff_gated_entities`, the one
+remaining registry-gated axis), keeping the manual-re-enable regression test relevant.
+`tests/test_time.py`/`test_number.py`/`test_sensor.py` gained `available`-in-Basic-mode cases for
+the four moved entities. `tests/test_lock.py` still covers `is_locked`; dynamic *creation* itself
+(the `predicate` mechanism) has no dedicated test - same acknowledged gap as
+`async_setup_dynamic_chargers`'s no-predicate path already had (see QUALITY_SCALE.md).

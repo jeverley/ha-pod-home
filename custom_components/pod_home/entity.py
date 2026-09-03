@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from homeassistant.core import HomeAssistant, callback
@@ -11,9 +12,9 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import ATTRIBUTION, DAY_OF_WEEK_OPTIONS, DOMAIN, MANUFACTURER, SCHEDULE_MODE_SMART_CHARGING
+from .const import ATTRIBUTION, DAY_OF_WEEK_OPTIONS, DOMAIN, MANUFACTURER
 from .coordinator import PodHomeCharge, PodHomeCharger, PodHomeDataUpdateCoordinator, PodHomeVehicle
-from .helpers import humanize_model_style, is_single_rate_tariff, schedule_mode, select_last_charge
+from .helpers import humanize_model_style, is_single_rate_tariff, select_last_charge
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -156,13 +157,28 @@ def async_setup_dynamic_chargers(
     coordinator: PodHomeDataUpdateCoordinator,
     async_add_entities: AddEntitiesCallback,
     entity_classes: list[type[PodHomeEntity]],
+    predicate: Callable[[PodHomeCharger], bool] | None = None,
 ) -> None:
     """Create `entity_classes` for every ppid currently known, and keep creating them for any
-    new ppid that appears in a later coordinator update, without requiring an HA restart."""
+    new ppid that appears in a later coordinator update, without requiring an HA restart.
+
+    `predicate`, if given, additionally gates WHICH known chargers get these entities - e.g. only
+    ones that have confirmed hardware support for a capability (see lock.py's Remote Lock, the
+    only current user). A ppid that doesn't pass yet is simply never given the entity this poll,
+    not permanently skipped - `_async_add_new_chargers` re-evaluates every coordinator update via
+    the same `known_ppids` dedup as the no-predicate case, so a ppid that starts failing the
+    predicate (a transient fetch hiccup on its first poll, say) still gets the entity the moment
+    a later poll passes it. This is deliberately NOT the same mechanism as entity-registry
+    disable/enable (_async_apply_disabled_state below) - a capability that's permanently absent
+    should mean the entity never exists at all, not exist-but-disabled forever; see DECISIONS.md
+    for why Remote Lock moved off registry-gating to this instead."""
     known_ppids: set[str] = set()
 
     def _async_add_new_chargers() -> None:
-        new_ppids = set(coordinator.data) - known_ppids
+        eligible_ppids = set(coordinator.data)
+        if predicate is not None:
+            eligible_ppids = {ppid for ppid in eligible_ppids if predicate(coordinator.data[ppid])}
+        new_ppids = eligible_ppids - known_ppids
         if not new_ppids:
             return
         known_ppids.update(new_ppids)
@@ -205,63 +221,6 @@ def async_setup_dynamic_vehicles(
     entry.async_on_unload(coordinator.async_add_listener(_async_add_new_vehicles))
 
 
-# Entities that only make sense in Smart Charging mode. (platform_domain, unique_id_suffix,
-# scope) - required_mode is always Smart Charging here, so it's not stored per-entry; add a
-# required_mode column if a Basic-only entity is ever added.
-_MODE_GATED_ENTITIES: list[tuple[str, str, str]] = [
-    ("time", "_ready_by", "vehicle"),
-    ("number", "_target_charge", "vehicle"),
-    ("sensor", "_expected_charge", "vehicle"),
-    ("sensor", "_electricity_rate", "charger"),
-]
-
-
-@callback
-def async_sync_mode_gated_entities(
-    hass: HomeAssistant, coordinator: PodHomeDataUpdateCoordinator
-) -> None:
-    """Enable/disable (via the entity registry, not deletion or `available`) each entity in
-    _MODE_GATED_ENTITIES to match its charger's/vehicle's current Charging Mode. Entities stay
-    registered either way. Called once after initial platform setup and again on every
-    coordinator update, since mode can change any time from the app.
-
-    Vehicle-scoped entities are resolved using the FIRST charger each vehicle is linked to in
-    coordinator.data iteration order - must match PodHomeVehicleEntity._charger_for_vehicle()'s
-    own resolution, or mode-gating could disagree with which charger's mode the vehicle-scoped
-    entity actually reads."""
-    registry = er.async_get(hass)
-    # None = this vehicle's first-linked charger's mode is unresolved this poll - recorded
-    # separately from "skip" so a vehicle's gating always tracks the SAME charger
-    # _charger_for_vehicle() would resolve to (first match, unconditionally), never falling
-    # through to a later charger just because the first one's mode happened to be unresolved.
-    vehicle_wants_enabled: dict[str, bool | None] = {}
-    for ppid, charger in coordinator.data.items():
-        mode = schedule_mode(charger.delegated_control_status)
-        if mode is None:
-            # Unrecognized/unknown status - leave this charger's own entities alone, but still
-            # fall through below to record it for its vehicle if it's the first match.
-            wants_enabled = None
-        else:
-            wants_enabled = mode == SCHEDULE_MODE_SMART_CHARGING
-            for platform_domain, suffix, scope in _MODE_GATED_ENTITIES:
-                if scope == "charger":
-                    _async_apply_disabled_state(
-                        coordinator, registry, platform_domain, f"{ppid}{suffix}", wants_enabled
-                    )
-        vehicle_id = charger.vehicle.id if charger.vehicle else None
-        if vehicle_id and vehicle_id not in vehicle_wants_enabled:
-            vehicle_wants_enabled[vehicle_id] = wants_enabled
-
-    for vehicle_id, wants_enabled in vehicle_wants_enabled.items():
-        if wants_enabled is None:
-            continue  # first-linked charger's mode unresolved - leave existing state alone
-        for platform_domain, suffix, scope in _MODE_GATED_ENTITIES:
-            if scope != "charger":
-                _async_apply_disabled_state(
-                    coordinator, registry, platform_domain, f"{vehicle_id}{suffix}", wants_enabled
-                )
-
-
 def _async_apply_disabled_state(
     coordinator: PodHomeDataUpdateCoordinator,
     registry: er.EntityRegistry,
@@ -275,7 +234,7 @@ def _async_apply_disabled_state(
         # Expected in the common case (e.g. no vehicle linked yet); also what a stale manifest
         # suffix looks like, so kept at debug rather than silent.
         _LOGGER.debug(
-            "No registered entity for %s.%s (unique_id=%s) - skipping mode-gate reconciliation",
+            "No registered entity for %s.%s (unique_id=%s) - skipping gate reconciliation",
             platform_domain,
             DOMAIN,
             unique_id,
@@ -318,9 +277,10 @@ _TARIFF_GATED_ENTITIES: list[tuple[str, str]] = [
 def async_sync_tariff_gated_entities(
     hass: HomeAssistant, coordinator: PodHomeDataUpdateCoordinator
 ) -> None:
-    """Enable/disable (same mechanism as async_sync_mode_gated_entities) each entity in
-    _TARIFF_GATED_ENTITIES to match its charger's tariff shape. A charger whose tariff isn't
-    known yet is left alone rather than guessed either way."""
+    """Enable/disable (via the entity registry, not `available` - see DECISIONS.md for why
+    tariff-shape gating stays on this mechanism while Charging-Mode gating moved off it) each
+    entity in _TARIFF_GATED_ENTITIES to match its charger's tariff shape. A charger whose tariff
+    isn't known yet is left alone rather than guessed either way."""
     registry = er.async_get(hass)
     for ppid, charger in coordinator.data.items():
         is_single_rate = is_single_rate_tariff(charger.tariff_windows)
@@ -328,37 +288,6 @@ def async_sync_tariff_gated_entities(
             continue
         wants_enabled = not is_single_rate
         for platform_domain, suffix in _TARIFF_GATED_ENTITIES:
-            _async_apply_disabled_state(
-                coordinator, registry, platform_domain, f"{ppid}{suffix}", wants_enabled
-            )
-
-
-# Entities gated on whether THIS charger's hardware actually supports the feature at all - not
-# Charging Mode or tariff shape, a per-model capability. Only Remote Lock so far.
-_SUPPORT_GATED_ENTITIES: list[tuple[str, str]] = [
-    ("lock", "_remote_lock"),
-]
-
-
-@callback
-def async_sync_support_gated_entities(
-    hass: HomeAssistant, coordinator: PodHomeDataUpdateCoordinator
-) -> None:
-    """Enable/disable (same mechanism as async_sync_mode_gated_entities) each entity in
-    _SUPPORT_GATED_ENTITIES, based on whether its charger has ever reported a real value for the
-    underlying capability. Unlike mode/tariff gating, "unresolved" (never seen a real value) is
-    treated as "disable", not "leave alone" - `remote_lock_off_mode` has only ever been observed
-    `None` on a charger model confirmed NOT to support Remote Lock at all (a Solo 3 - see
-    DECISIONS.md), never confirmed null-but-supported on a Solo 3S. Until an account with 3S
-    hardware can confirm that distinction, staying disabled whenever a real bool has never been
-    seen is the safer default - hiding it until the first real toggle beats cluttering every
-    unsupported install with a permanently `unknown` entity. Once a real value IS seen, it's
-    cached on the coordinator (see coordinator.py) and stays enabled from then on, even across a
-    later poll where the fetch is skipped (staleness caching, not re-fetched every poll)."""
-    registry = er.async_get(hass)
-    for ppid, charger in coordinator.data.items():
-        wants_enabled = charger.remote_lock_off_mode is not None
-        for platform_domain, suffix in _SUPPORT_GATED_ENTITIES:
             _async_apply_disabled_state(
                 coordinator, registry, platform_domain, f"{ppid}{suffix}", wants_enabled
             )

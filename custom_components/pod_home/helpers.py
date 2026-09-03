@@ -127,6 +127,18 @@ def schedule_mode(delegated_control_status: str | None) -> str | None:
     return None
 
 
+def smart_mode_available(delegated_control_status: str | None) -> bool:
+    """Whether a Smart-Charging-only entity (Ready By, Target Charge, Expected Charge,
+    Electricity Rate) should report itself available - unlike Remote Lock's hardware-support
+    gating (a permanent, one-time fact - see lock.py), Charging Mode genuinely toggles at any
+    time from the app, so this is `available`/`unavailable`, not entity-registry disable: the
+    functionality really is temporarily unavailable, not a capability this account will never
+    have. An unresolved/unrecognized status is treated as available rather than guessed
+    unavailable, matching schedule_mode()'s own "don't guess" handling."""
+    mode = schedule_mode(delegated_control_status)
+    return mode is None or mode == SCHEDULE_MODE_SMART_CHARGING
+
+
 def parse_time_of_day(time_str: str | None) -> datetime.time | None:
     """Parse a plain "HH:MM:SS" local-time string, or None if missing/unparseable."""
     if not time_str:

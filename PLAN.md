@@ -142,7 +142,8 @@ reliably installable) release. Until then, the two copies can silently drift —
   DECISIONS.md). Not mode-gated - confirmed via the app that it's always viewable/changeable
   regardless of Charging Mode (corrected after an initial wrong assumption - see DECISIONS.md).
   Also built: mode-conditional entities (Ready By/Target Charge/Expected Charge/Electricity Rate
-  disabled via the entity registry outside Smart Charging mode) and a unified `Schedule` calendar
+  report `unavailable` outside Smart Charging mode, via each entity's own `available` - not
+  entity-registry gating, see DECISIONS.md for why that moved) and a unified `Schedule` calendar
   (`calendar.py`, mirrors the `Schedule` sensor - one entity adapting to whichever mode is
   active, not two mode-specific ones). See DECISIONS.md for all three.
 - **`charge-overrides` (boost) - built and confirmed working live** (`button.py`: Boost full
@@ -157,10 +158,12 @@ reliably installable) release. Until then, the two copies can silently drift —
   unsupported state rather than assuming it; a 501 from the write endpoint (per the OpenAPI
   schema, for unsupported charger models) is caught and surfaced as a clean error. Unlike every
   other write entity here, this one may permanently stay flagged "NOT YET TESTED against a real
-  account" - see DECISIONS.md. **Disabled by default on unsupported hardware** - a third entity-
-  registry gating axis (`async_sync_support_gated_entities`, entity.py) alongside the existing
-  Charging-Mode and tariff-shape gates, enabling it only once a charger has ever reported a real
-  locked/unlocked value.
+  account" - see DECISIONS.md. **Entity not created at all on unsupported hardware** - not the
+  entity-registry disable/enable mechanism used elsewhere, since hardware support is a permanent,
+  one-time fact rather than something that fluctuates; `async_setup_dynamic_chargers`'s new
+  `predicate` parameter (entity.py) only creates it once a charger has ever reported a real
+  locked/unlocked value, re-checked every poll so a transient first-poll failure just delays
+  creation rather than skipping it forever. See DECISIONS.md.
 - **Packaging - done**: `hacs.json`, LICENSE, `.github/workflows/validate.yml` (`hacs/action` +
   `hassfest`), README.md rewritten as end-user documentation. Installable today via HACS as a
   custom repository (Integrations → ⋮ → Custom repositories). `validate.yml`'s `hacs` job used

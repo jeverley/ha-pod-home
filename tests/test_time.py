@@ -54,6 +54,24 @@ async def test_ready_by_set_value_without_known_kwh_raises(hass: HomeAssistant) 
         await entity.async_set_value(datetime.time(8, 0, 0))
 
 
+async def test_ready_by_available_only_in_smart_charging_mode(hass: HomeAssistant) -> None:
+    vehicle = make_vehicle(id="v1")
+    coordinator = make_coordinator(
+        hass, {PPID: make_charger(vehicle=vehicle, delegated_control_status="ACTIVE")}
+    )
+    entity = time_platform.PodHomeVehicleReadyByTime(coordinator, "v1")
+    assert entity.available is True
+
+    coordinator.data = {
+        PPID: make_charger(vehicle=vehicle, delegated_control_status="INACTIVE")
+    }
+    assert entity.available is False
+
+    # Unrecognized/unresolved status isn't guessed away - stays available.
+    coordinator.data = {PPID: make_charger(vehicle=vehicle, delegated_control_status="PENDING")}
+    assert entity.available is True
+
+
 async def test_boost_duration_defaults_unset(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(hass, {PPID: make_charger()})
     entity = time_platform.PodHomeBoostDurationTime(coordinator, PPID)
