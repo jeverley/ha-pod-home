@@ -2633,3 +2633,99 @@ binary_sensor.py), not guessed, e.g. Charge rate's "null once charging stops", M
 "always null on this account so far", Cable status's "on when a cable is physically connected".
 Verified the full 32-entity list against `strings.json` again after the rewrite - exact match,
 no entities dropped or duplicated by the restructure.
+
+## tests/test_coordinator.py - first slice of coordinator test coverage
+
+Per the user ("test coverage"), following the recommendation from the "next steps" review: the
+biggest remaining QUALITY_SCALE.md gap is the coordinator/entities having zero direct test
+coverage. This is a first slice, not the full pass - `coordinator.py` is ~1400 lines with many
+independent staleness/gating branches (per-endpoint cadence tiers, charging-aware fetch
+gating, etc.); covering all of it would be its own multi-session effort.
+
+**Scope chosen**: `_async_fetch_data`/`_async_update_data` exercised directly against a fully
+mocked `PodHomeApiClient` (`unittest.mock.create_autospec`, so a renamed/removed client method
+fails the test loudly rather than silently mocking a typo'd name), bypassing `async_setup_entry`
+entirely - keeps focus on the coordinator's own parsing/staleness/error-handling logic in
+isolation, since config-entry setup is already covered by `tests/test_config_flow.py`. 9 cases:
+happy-path parsing in Basic mode (every `PodHomeCharger` field populated correctly from a
+realistic response shape, and confirms `smart-schedules/active` is *not* called - meaningless
+outside Smart Charging); Smart mode fetching and parsing `smart_schedule_windows`; empty
+`/chargers` on a first poll (returns `{}`) vs. a subsequent poll (keeps the previous `self.data`
+rather than wiping it - a real behavior worth locking down, not just an incidental effect);
+`PodHomeAuthError` translating to `ConfigEntryAuthFailed`; a connection-level failure (status 0)
+retrying `CONNECTION_RETRY_ATTEMPTS` times before raising `UpdateFailed` vs. a genuine HTTP error
+(status 500) raising immediately without retry; and boost end time parsing from
+`charge-overrides`, including a deleted override correctly not counting as a current boost.
+
+**Not covered by this slice** (real gaps, left open rather than silently claimed done): the many
+staleness-cadence branches (firmware/tariffs/manual-schedules refresh timing, the
+charging-aware vehicle/charges fetch tiers), `_accumulate_total_energy`'s watermark/dedup logic,
+sticky Status timestamp persistence via `Store`, api3 charge matching, and the adaptive poll
+interval adjustment. Also still fully open: every entity platform's own classes (sensor.py,
+binary_sensor.py, etc.) have zero direct coverage - `helpers.py`'s pure functions they lean on
+are covered (`tests/test_helpers.py`), but the entity classes themselves aren't.
+
+## test-coverage substantially completed - remaining coordinator gaps + all 8 entity platforms
+
+Per the user directly: "keep going for all tests," after the first coordinator slice above.
+Worked through the rest of `coordinator.py`'s gaps, then every entity platform, one file/commit
+at a time, each verified green on CI before moving to the next (this project's established
+Windows-can't-run-the-HA-suite-locally workflow - see the earlier "Merged into one unified
+`tests/` suite" entry). Ends at 159 tests total, up from 96 at the start of this pass.
+
+**`tests/_fixtures.py`** - a new shared module of factory functions for the real coordinator.py
+dataclasses (`make_charger`/`make_vehicle`/`make_charge`/etc., all with sensible defaults) plus
+`make_coordinator()` (a coordinator with a `create_autospec`'d, otherwise-unused API client and
+`.data` preset directly - for entity tests that only read already-fetched data, distinct from
+`tests/test_coordinator.py`'s own `_stub_api()` pattern for testing the fetch/parse logic
+itself). Real dataclasses, not `SimpleNamespace` (unlike `tests/test_helpers.py`, which can't
+import `coordinator.py` at all) - type-accurate, won't silently drift from a renamed field.
+
+**Coordinator gaps closed**: staleness-cadence caching (confirmed a `_stale()`-gated field is
+NOT re-fetched within its interval - but only once genuinely stamped by a real, parseable
+response; the coordinator deliberately never caches an empty/unparseable one, a real behaviour a
+first draft of this test got wrong and CI caught - see below); `_accumulate_total_energy`'s
+once-each summing and open-session skip; sticky state's actual round-trip through the real
+`Store` (not just its own instance state - a second `MockConfigEntry` would get a different
+random `entry_id` and so a different Store path, not really testing persistence; clearing the
+same coordinator's in-memory dicts and reloading is what actually proves it); adaptive polling
+speeding up/slowing down; api3 charge matching by pod_id including the unmatched-pod-id warning
+path.
+
+**Entity platforms** - one test file per platform, focused on entities with genuine logic (a
+sensor that's a pure passthrough of one field gets one assertion, not exhaustive property
+coverage): sensor.py (Status icon mapping, Last charge current-vs-latest selection, Total
+energy's live-session top-up without double-counting, Electricity rate's current-window
+selection including a wrapping tariff and the cheapest-rate flag, Rewards balance's
+unavailable-until-first-fetch gating); binary_sensor.py (Cable status's ambiguous/None case);
+number.py and select.py and time.py (each settable entity's write path: rounding, fanning across
+all 7 days for Ready By, the maxPrice round-trip for Charge Priority, and each one's
+error-raised-without-required-data path); calendar.py (Smart vs. Basic mode branching, an
+unrecognized mode producing no events); update.py (installed/latest version pairing); button.py
+(the cable-unplugged availability gate shared by both boost-start buttons, Full charge's flat 12h
+`end_at`, Boost for duration reading the registered time value and resetting it afterward via the
+coordinator-held reference - not a generic service call, see the earlier "no default, resets to
+unset" entry - and both clean-error paths added for the live 400 bug fix).
+
+**Two real bugs in the tests themselves, both caught by CI, not by local review**:
+1. A staleness test assumed an empty-dict mock response would still count as "fetched" - it
+   doesn't (deliberately, per the coordinator's own comment: a bad/unexpected response should be
+   retried next poll, not cached as if it were real data). Fixed the test's fixtures to be
+   genuinely parseable, not the code.
+2. `select_last_charge()`'s same-session-vs-different-session distinction is keyed on
+   `started_at` - a fixture that left `current`/`latest` sharing the same default `started_at`
+   was unintentionally testing the "same session, latest already finalized" branch instead of
+   "two different sessions." Gave them distinct `started_at` values.
+3. Entities constructed directly for a test (not added through a real platform) never get
+   `self.hass` assigned - only mattered for `PodHomeBoostDurationButton`, the one entity that
+   actually reads `self.hass` (via the entity-registry lookup in `_read_boost_duration`). Fixed
+   by setting `entity.hass = hass` manually before pressing.
+
+**Left honestly open, not silently claimed done** (see QUALITY_SCALE.md's `test-coverage` entry
+for the current full list): no `pytest-cov` run has actually measured a percentage against the
+95% target; `async_setup_entry`'s real first refresh isn't exercised end-to-end (config-flow
+tests mock it, coordinator tests bypass it entirely); `async_sync_mode_gated_entities`/
+`async_sync_tariff_gated_entities` (entity.py) have no test coverage; dynamic-device creation is
+still code-reviewed-only. Unit test coverage is also a genuinely different claim from live
+verification against a real account - CLAUDE.md now states that distinction explicitly, so
+neither gets silently conflated with the other going forward.
