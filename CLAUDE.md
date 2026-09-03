@@ -8,6 +8,17 @@ integration uses. A clean rewrite, not a patch to that older integration.
 Status/roadmap live in [`PLAN.md`](PLAN.md). Check that before assuming what phase of work this
 is in.
 
+## Git workflow
+
+Work on a feature branch, not directly on `master` - `git checkout -b <branch>`, commit normally
+there (this repo's own commit-message conventions still apply per-commit on the branch), then
+`git checkout master && git merge --squash <branch>` and commit once with a message describing
+the whole feature, matching how `master`'s own history already reads (each commit there is one
+coherent chapter, not a blow-by-blow). No GitHub PR - local squash-merge only, since this is a
+solo-maintained repo and CI already runs on every push to `master`. Delete the branch after
+merging. Don't commit directly to `master` for anything beyond a genuinely one-line, self-
+contained change (a doc typo, a single CI-config tweak).
+
 ## Quality scale
 
 **Target tier: platinum**, not passive compliance tracking. [`QUALITY_SCALE.md`](QUALITY_SCALE.md)
