@@ -153,12 +153,20 @@ reliably installable) release. Until then, the two copies can silently drift —
 - **`remote-lock`**: still completely untouched - no read or write entities built. **Deliberately
   deprioritized, not just deferred** - per the user directly, their own charger doesn't support
   it, so there's no way to test it live even if built. Revisit only if that changes.
-- **Packaging - done for now**: `hacs.json`, LICENSE, `.github/workflows/validate.yml`
-  (`hacs/action` + `hassfest`), README.md rewritten as end-user documentation. Installable today
-  via HACS as a custom repository (Integrations → ⋮ → Custom repositories). `validate.yml`'s
-  `hacs` job still fails - confirmed via `gh run view` that GitHub topics are genuinely set
-  correctly, but HACS's validator can't read topics/manifest content on a **private** repo at
-  all, so `hacsjson`/`integration_manifest`/`topics` all fail regardless of content. Going public
-  is the only fix, and that's the user's call - repo is staying private for now. Not yet on
-  HACS's default repository list and no tagged release yet either - both still premature while
-  the integration is actively changing shape.
+- **Packaging - done**: `hacs.json`, LICENSE, `.github/workflows/validate.yml` (`hacs/action` +
+  `hassfest`), README.md rewritten as end-user documentation. Installable today via HACS as a
+  custom repository (Integrations → ⋮ → Custom repositories). `validate.yml`'s `hacs` job used
+  to fail because HACS's validator can't read topics/manifest content on a private repo at all -
+  the repo went public on 2026-09-02 (the user's call, confirmed live) and the `hacs` job passes
+  now (confirmed via `gh run view`). Not yet on HACS's default repository list and no tagged
+  release yet - both still open, no longer blocked by anything but the decision to cut one.
+- **Test coverage - substantially closed**: 160 tests (`pytest tests/`, real
+  `pytest-homeassistant-custom-component` harness) across the coordinator and all 8 entity
+  platforms, plus offline `tests/test_helpers.py`. See QUALITY_SCALE.md's `test-coverage` entry
+  for the honest remaining-gaps list (no measured `pytest-cov` percentage, `async_setup_entry`'s
+  real first refresh, entity.py's mode/tariff-gating reconciliation functions, dynamic-device
+  creation - all still untested). Test mocks cross-checked against real captured
+  `scratch/output/*.json` responses locally (never copied into tracked files) - see DECISIONS.md.
+- **CI cadence**: both workflows (`test.yml`, `validate.yml`) now run on push to master, every
+  PR, manual dispatch, and weekly (Sundays 00:00 UTC) - the weekly run catches HA-core/HACS
+  dependency drift between active work sessions, not just on push/PR.
