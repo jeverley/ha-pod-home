@@ -29,6 +29,17 @@ next commit. Batch related work on one branch and squash-merge it as a single pu
 `master`'s own history already reads one coherent chapter per commit - don't push-per-step out of
 habit just because each individual step compiles and passes lint.
 
+**The branch is where validation happens, not `master`.** The whole point of the feature-branch
+step is that `master` only ever receives functionality that's already been confirmed working -
+not merely "compiles and CI is green," the same "unit-tested is a different claim from
+live-verified" distinction this file already draws elsewhere (see Verification below). Finishing
+the implementation is not itself the signal to squash-merge: ask before merging to `master`
+whenever the change is more than a trivial/mechanical one, and treat "the user has actually tried
+it and confirmed it's right" as the real gate, not CI passing. Don't commit at all without being
+asked to, either - completing a task is not implicitly a request to commit and push it. If other
+work is already sitting uncommitted in the tree when a squash-merge comes up, ask whether it
+should be bundled into the same commit rather than silently leaving it out.
+
 ## Quality scale
 
 **Target tier: platinum**, not passive compliance tracking. [`QUALITY_SCALE.md`](QUALITY_SCALE.md)

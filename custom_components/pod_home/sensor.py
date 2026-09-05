@@ -106,13 +106,15 @@ async def async_setup_entry(
 
 class PodHomeChargingStateSensor(PodHomeEntity, SensorEntity):
     """Raw chargingState passthrough (e.g. Available/Charging), unfiltered. Diagnostic sibling
-    to Status (helpers.charger_status()), which derives a smaller, user-meaningful value."""
+    to Status (helpers.charger_status()), which derives a smaller, user-meaningful value.
+    Disabled by default."""
 
     _attr_translation_key = "charging_state"
     _attr_name = "Charging state"
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = CHARGING_STATE_OPTIONS
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     @property
     def unique_id(self) -> str:
