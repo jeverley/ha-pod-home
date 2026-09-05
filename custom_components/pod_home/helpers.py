@@ -9,8 +9,10 @@ from typing import TYPE_CHECKING, TypeVar
 from zoneinfo import ZoneInfo
 
 from .const import (
+    CHARGE_PRIORITY_ALWAYS_ON,
     CHARGE_PRIORITY_COMPLETE_CHARGE,
     CHARGE_PRIORITY_LOWEST_COST,
+    CHARGE_PRIORITY_SCHEDULE,
     CHARGER_STATUS_AVAILABLE,
     CHARGER_STATUS_CHARGING,
     CHARGER_STATUS_FAULT,
@@ -308,6 +310,15 @@ def max_price_for_charging_priority(
     if label == CHARGE_PRIORITY_COMPLETE_CHARGE:
         return max(prices)
     return None
+
+
+def charge_priority_label_basic(always_on_active: bool) -> str:
+    """Charge Priority's Basic Charging read side - the same select as Smart Charging's
+    charging_priority_label() above, different mode, different underlying mechanism: "Always on"
+    means an indefinite (no endAt) charge-overrides entry is currently active, "Schedule" means
+    it isn't (see PodHomeCharger.always_on_active, coordinator.py, and DECISIONS.md for how
+    that's detected - deliberately distinct from a real Boost, which always has an endAt)."""
+    return CHARGE_PRIORITY_ALWAYS_ON if always_on_active else CHARGE_PRIORITY_SCHEDULE
 
 
 def expand_manual_schedule_events(

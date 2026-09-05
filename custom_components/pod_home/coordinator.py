@@ -297,6 +297,12 @@ class PodHomeCharger:
     # locked, False unlocked, None when unset or the charger model doesn't support Remote Lock
     # at all - see lock.py, DECISIONS.md.
     remote_lock_off_mode: bool | None
+    # Basic Charging's "Always on" mode - a non-deleted GET /chargers/{ppid}/charge-overrides
+    # entry with no endAt at all (not the same as a Boost, which always has one - see
+    # _is_always_on_active() below and DECISIONS.md). Drives Charge Priority's Basic-mode read
+    # side (charge_priority_label_basic(), helpers.py) - deliberately NOT folded into
+    # boost_end_at, a real boost and Always on are different mechanisms sharing one API.
+    always_on_active: bool
 
 
 def _parse_dt(value: str | None) -> datetime.datetime | None:
@@ -320,7 +326,9 @@ def _current_boost_end_at(
     """The active boost's end time, if any, from GET /chargers/{ppid}/charge-overrides. Entries
     are returned newest-first, but that ordering isn't trusted here; "current" is whichever
     non-deleted, not-yet-ended entry has the latest requestedAt. A deleted entry (deletedAt set)
-    or one whose endAt has already passed is not a current boost."""
+    or one whose endAt has already passed is not a current boost - nor is an entry with no endAt
+    at all: that's Basic Charging's "Always on" mode, a different mechanism sharing this same
+    API, not a boost the user can cancel here - see _is_always_on_active() and DECISIONS.md."""
     best: tuple[datetime.datetime, datetime.datetime] | None = None
     for raw_entry in charge_overrides_raw:
         entry = _safe_dict(raw_entry)
@@ -333,6 +341,21 @@ def _current_boost_end_at(
         if best is None or requested_at > best[0]:
             best = (requested_at, end_at)
     return best[1] if best else None
+
+
+def _is_always_on_active(charge_overrides_raw: list) -> bool:
+    """Whether Basic Charging's "Always on" mode is currently active - a non-deleted
+    charge-overrides entry with no endAt at all, distinct from a real boost (which always
+    carries an endAt) - see DECISIONS.md. The app doesn't allow boosting while Always on is
+    active, so Boost and Always on are mutually exclusive and at most one entry should ever
+    match this - but every non-deleted, endAt-less entry is treated the same regardless."""
+    for raw_entry in charge_overrides_raw:
+        entry = _safe_dict(raw_entry)
+        if entry.get("deletedAt") is not None:
+            continue
+        if entry.get("endAt") is None:
+            return True
+    return False
 
 
 class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharger]]):
@@ -400,6 +423,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # max_price above. Only overwritten on a genuine list response, so a transient fetch
         # failure doesn't flap an in-progress boost to None.
         self._boost_end_at_by_ppid: dict[str, datetime.datetime | None] = {}
+        # Basic Charging's "Always on" mode - parsed from the same charge_overrides_raw as
+        # boost_end_at above, same every-poll/genuine-list-response-only update rule.
+        self._always_on_active_by_ppid: dict[str, bool] = {}
         # No separate staleness tracking - piggybacks on the tariffs fetch/cache below, since
         # it's parsed from that same already-fetched response, not a second API call.
         self._smart_charging_supported_by_ppid: dict[str, bool | None] = {}
@@ -969,6 +995,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             # than flapping to None on a transient error.
             if isinstance(charge_overrides_raw, list):
                 self._boost_end_at_by_ppid[ppid] = _current_boost_end_at(charge_overrides_raw, now)
+                self._always_on_active_by_ppid[ppid] = _is_always_on_active(charge_overrides_raw)
             # remote_lock_raw is {"offMode": bool | None} - a genuine `null` (unset, or this
             # charger model doesn't support Remote Lock at all) is still a successful fetch, not
             # left unset.
@@ -1167,6 +1194,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                 boost_end_at=self._boost_end_at_by_ppid.get(ppid),
                 smart_charging_supported=self._smart_charging_supported_by_ppid.get(ppid),
                 remote_lock_off_mode=self._remote_lock_off_mode_by_ppid.get(ppid),
+                always_on_active=self._always_on_active_by_ppid.get(ppid, False),
             )
 
         # Coalesced, not one write per poll - the sticky dicts can change up to once a minute.

@@ -82,7 +82,7 @@
     "select": {
       "charging_strategy": {
         "name": "Charge priority",
-        "state": { "lowest_cost": "Lowest cost", "complete_charge": "Complete charge" }
+        "state": { "lowest_cost": "Lowest cost", "complete_charge": "Complete charge", "schedule": "Schedule", "always_on": "Always on" }
       }
     },
     "calendar": {

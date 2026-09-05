@@ -136,13 +136,19 @@ reliably installable) release. Until then, the two copies can silently drift —
   rather than recomputed (also corrected - see DECISIONS.md). **Both endpoints confirmed working
   live** - the user has tested Target Charge and Ready By writes against the real account and
   confirmed they land correctly.
-- **Charge Priority select - built** (`select.py`) and **confirmed working live** - an initial
-  write theory (`chargingStrategy`) turned out to have no observed effect on a real write test;
-  fixed to write `maxPrice` directly instead, then reconfirmed live ("That works now." - see
-  DECISIONS.md). Not mode-gated - confirmed via the app that it's always viewable/changeable
-  regardless of Charging Mode (corrected after an initial wrong assumption - see DECISIONS.md).
-  Tariff-gated via `available` instead: unavailable only on a confirmed single-rate tariff, where
-  there's no real cost-vs-completion choice to make. Also built: mode-conditional entities (Ready
+- **Charge Priority select - built** (`select.py`) and **confirmed working live in Smart
+  Charging** - an initial write theory (`chargingStrategy`) turned out to have no observed effect
+  on a real write test; fixed to write `maxPrice` directly instead, then reconfirmed live ("That
+  works now." - see DECISIONS.md). Smart Charging: tariff-gated via `available` - unavailable
+  only on a confirmed single-rate tariff, where there's no real cost-vs-completion choice to
+  make. **Redesigned to also cover Basic Charging** (Schedule/Always on, matching the app's own
+  wording per mode, options list itself switches based on Charging Mode) after confirming live
+  that Basic Charging's "Always on" mode is a `charge-overrides` entry with no `endAt` - a
+  different mechanism from a real Boost (which always has one), not a manual-schedules concept
+  at all (see DECISIONS.md for the full investigation). Basic Charging is read-only for now - the
+  write shape for toggling Always on has never been confirmed live. Moved off `EntityCategory.
+  CONFIG` entirely (a primary control, not tucked under Configuration) per the user directly.
+  Also built: mode-conditional entities (Ready
   By/Target Charge/Expected Charge report `unavailable` outside Smart Charging mode, via each
   entity's own `available`) and a unified `Schedule` calendar (`calendar.py`, mirrors the
   `Schedule` sensor - one entity adapting to whichever mode is active, not two mode-specific

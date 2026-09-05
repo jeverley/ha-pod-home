@@ -250,6 +250,36 @@ async def test_deleted_charge_override_not_current_boost(hass: HomeAssistant) ->
     assert result[PPID].boost_end_at is None
 
 
+async def test_always_on_active_from_endat_less_charge_override(hass: HomeAssistant) -> None:
+    """An indefinite override (no endAt at all) is Basic Charging's "Always on" mode, not a
+    boost - confirmed live (see DECISIONS.md), distinct from test_boost_end_at_parsed_from_
+    charge_overrides above, which always carries a real endAt."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_get_charge_overrides.return_value = [
+        {"requestedAt": "2026-01-01T00:00:00Z"}
+    ]
+
+    coordinator = _make_coordinator(hass, api)
+    result = await coordinator._async_fetch_data()
+
+    assert result[PPID].always_on_active is True
+    assert result[PPID].boost_end_at is None  # not treated as a cancellable boost
+
+
+async def test_deleted_endat_less_override_is_not_always_on(hass: HomeAssistant) -> None:
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_get_charge_overrides.return_value = [
+        {"requestedAt": "2026-01-01T00:00:00Z", "deletedAt": "2026-01-01T00:05:00Z"}
+    ]
+
+    coordinator = _make_coordinator(hass, api)
+    result = await coordinator._async_fetch_data()
+
+    assert result[PPID].always_on_active is False
+
+
 async def test_firmware_and_tariffs_not_refetched_within_staleness_window(
     hass: HomeAssistant,
 ) -> None:

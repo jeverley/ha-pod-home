@@ -64,7 +64,7 @@ Each table's **Category** column is the same grouping Home Assistant's own devic
 | Boost for duration     | Controls      | Button         | Boost for the duration set above, matching the app |
 | Cancel boost           | Controls      | Button         | Only available while a boost is active |
 | Remote lock            | Controls      | Lock           | Solo 3S only. Entity isn't created at all until this charger confirms support (added dynamically once detected, no restart needed) - never appears on a model that doesn't support it (confirmed live via `offMode: null`), including the account this integration is developed against |
-| Charge priority        | Configuration | Select         | Not mode-gated - shows `unavailable` only on a single-rate tariff, where there's no cost-vs-completion choice to make |
+| Charge priority        | Controls      | Select         | Options depend on Charging Mode: Smart Charging offers Lowest cost/Complete charge (unavailable only on a confirmed single-rate tariff); Basic Charging offers Schedule/Always on (read-only for now - see "Known limitations") |
 | Charging state         | Diagnostic    | Sensor         | Raw wire value, disabled by default |
 | Charging mode          | Diagnostic    | Sensor         | Smart / Basic |
 | Connectivity           | Diagnostic    | Binary sensor  | On when the charger is reachable via Pod Point's cloud |
@@ -105,14 +105,22 @@ doesn't add a mode-switch control):
 
 - **Smart Charging** - schedule-optimized charging to a target %, by a target time, aware of your
   tariff. Ready by/Target charge/Expected charge only apply here, and show `unavailable` outside
-  this mode. Charge priority and Electricity rate aren't mode-gated - they depend on your tariff
-  shape, not which mode is active, so they can still be relevant while on Basic Charging. Works
-  on a single-rate or two-rate tariff - Pod Point coordinates directly with your supplier to
-  charge during low-demand periods even on a single-rate tariff, this does not force a switch to
-  Basic Charging.
-- **Basic Charging** - the charger follows its own fixed manual schedule instead. Selecting a
-  tariff with more than two rate windows reverts the account to Basic Charging automatically -
-  that's Pod Point's own behaviour, not something this integration decides.
+  this mode. Electricity rate isn't mode-gated at all - it depends on your tariff shape, not
+  which mode is active, so it's relevant on Basic Charging too. Works on a single-rate or
+  two-rate tariff - Pod Point coordinates directly with your supplier to charge during
+  low-demand periods even on a single-rate tariff, this does not force a switch to Basic
+  Charging.
+- **Basic Charging** - the charger follows its own fixed manual schedule instead, unless Always
+  on is selected (see Charge priority below). Selecting a tariff with more than two rate windows
+  reverts the account to Basic Charging automatically - that's Pod Point's own behaviour, not
+  something this integration decides.
+
+**Charge priority** exists in both modes but means something different in each, matching the
+app's own wording exactly: Smart Charging offers **Lowest cost** (only charge during the
+cheapest tariff window) / **Complete charge** (stretch into peak hours if needed to hit your
+target); Basic Charging offers **Schedule** (only charge during your set schedule) / **Always
+on** (charge whenever plugged in, ignoring the schedule). Both pairs represent the same
+underlying choice - stick to the cost/schedule plan, or prioritise actually charging over it.
 
 ## Known limitations
 
@@ -130,8 +138,13 @@ doesn't add a mode-switch control):
   unsupported hardware - not a case of finding it and enabling it. Built code-reviewed-only for
   that reason - if you have a Solo 3S, feedback on whether the entity appears and works as
   expected is genuinely useful.
-- Not yet packaged for HACS's default repository (no releases/tags yet) - install as a custom
-  repository (see above) for now.
+- **Charge priority is read-only in Basic Charging** - reading Schedule/Always on is confirmed
+  live, but the write shape for toggling Always on has never been confirmed (an explicit
+  `endAt: null` from this integration's own Boost button was rejected by the server; the app's
+  own request is evidently shaped differently). Selecting an option in Basic mode raises a clear
+  error for now rather than guessing - use the Pod Home app to change it until this is confirmed.
+- Not yet on HACS's default repository list - install as a custom repository (see above) for
+  now. Tagged releases do exist (see the repo's Releases page), currently all pre-releases.
 
 ## More detail
 

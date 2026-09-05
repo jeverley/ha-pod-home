@@ -9,7 +9,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 import custom_components.pod_home.select as select
-from custom_components.pod_home.const import CHARGE_PRIORITY_COMPLETE_CHARGE, CHARGE_PRIORITY_LOWEST_COST
+from custom_components.pod_home.const import (
+    CHARGE_PRIORITY_ALWAYS_ON,
+    CHARGE_PRIORITY_COMPLETE_CHARGE,
+    CHARGE_PRIORITY_LOWEST_COST,
+    CHARGE_PRIORITY_SCHEDULE,
+)
 from tests._fixtures import make_charger, make_coordinator, make_tariff_window
 
 PPID = "PSL-000001"
@@ -60,3 +65,46 @@ async def test_available_unless_tariff_confirmed_single_rate(hass: HomeAssistant
     # Not yet known - defaults available, not guessed unavailable.
     coordinator.data = {PPID: make_charger(tariff_windows=None)}
     assert entity.available is True
+
+
+async def test_options_switch_between_modes(hass: HomeAssistant) -> None:
+    coordinator = make_coordinator(hass, {PPID: make_charger(delegated_control_status="ACTIVE")})
+    entity = select.PodHomeChargingStrategySelect(coordinator, PPID)
+    assert entity.options == [CHARGE_PRIORITY_LOWEST_COST, CHARGE_PRIORITY_COMPLETE_CHARGE]
+
+    coordinator.data = {PPID: make_charger(delegated_control_status="INACTIVE")}
+    assert entity.options == [CHARGE_PRIORITY_SCHEDULE, CHARGE_PRIORITY_ALWAYS_ON]
+
+
+async def test_basic_mode_current_option_from_always_on_active(hass: HomeAssistant) -> None:
+    coordinator = make_coordinator(
+        hass,
+        {PPID: make_charger(delegated_control_status="INACTIVE", always_on_active=False)},
+    )
+    entity = select.PodHomeChargingStrategySelect(coordinator, PPID)
+    assert entity.current_option == CHARGE_PRIORITY_SCHEDULE
+
+    coordinator.data = {
+        PPID: make_charger(delegated_control_status="INACTIVE", always_on_active=True)
+    }
+    assert entity.current_option == CHARGE_PRIORITY_ALWAYS_ON
+
+
+async def test_basic_mode_available_regardless_of_tariff_shape(hass: HomeAssistant) -> None:
+    single_rate = [make_tariff_window(price=0.15), make_tariff_window(price=0.15)]
+    coordinator = make_coordinator(
+        hass,
+        {PPID: make_charger(delegated_control_status="INACTIVE", tariff_windows=single_rate)},
+    )
+    entity = select.PodHomeChargingStrategySelect(coordinator, PPID)
+    assert entity.available is True
+
+
+async def test_basic_mode_select_option_raises(hass: HomeAssistant) -> None:
+    coordinator = make_coordinator(
+        hass, {PPID: make_charger(delegated_control_status="INACTIVE")}
+    )
+    entity = select.PodHomeChargingStrategySelect(coordinator, PPID)
+    with pytest.raises(HomeAssistantError):
+        await entity.async_select_option(CHARGE_PRIORITY_ALWAYS_ON)
+    coordinator.api.async_set_charge_priority_max_price.assert_not_called()

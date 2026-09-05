@@ -356,6 +356,11 @@ def test_charge_priority_available_true_when_unknown(windows):
     assert helpers.charge_priority_available(windows) is True
 
 
+def test_charge_priority_label_basic():
+    assert helpers.charge_priority_label_basic(False) == const.CHARGE_PRIORITY_SCHEDULE
+    assert helpers.charge_priority_label_basic(True) == const.CHARGE_PRIORITY_ALWAYS_ON
+
+
 def test_charging_priority_label_lowest_and_highest():
     windows = [_tariff_window(0.10), _tariff_window(0.30)]
     assert helpers.charging_priority_label(0.10, windows) == const.CHARGE_PRIORITY_LOWEST_COST

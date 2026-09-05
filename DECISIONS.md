@@ -3014,3 +3014,71 @@ real, confirmed bugs plus several cleanup items - all fixed:
    this session already retired twice (see the entity-gating redesign entries above). This also
    removed the redundant double charger-resolution the review flagged (each override no longer
    eagerly re-resolves the charger before the `and` short-circuit already guarantees it).
+
+## Charge Priority unified across Smart/Basic modes; "Always on" identified as a charge-overrides mechanism
+
+Started from the user noticing the app shows completely different UI for Basic vs Smart Charging
+- you lose access to Lowest cost/Complete charge in Basic mode, and instead get a Schedule/Always
+on toggle. Initial instinct (mine) was that these are unrelated settings and shouldn't share an
+entity - reconsidered after the user's reframing: both pairs represent the same underlying
+choice ("respect the schedule/cost plan" vs "prioritise charging over it"), just implemented via
+different mechanisms per mode. That framing holds up: Smart's Lowest cost / Basic's Schedule both
+mean "only within the optimised/allowed window, even if that means not fully charging"; Smart's
+Complete charge / Basic's Always on both mean "prioritise getting charge into the car over the
+plan." Decided (the user's explicit call, after considering a generic-label alternative) to keep
+the app's own per-mode wording rather than unify the labels themselves - `PodHomeChargingStrategySelect.options`
+now returns a different pair depending on Charging Mode, not a fixed list.
+
+**Identifying "Always on"'s actual mechanism** took a few wrong turns, each closed off by a live
+probe rather than assumed:
+1. First hypothesis: Always On flips every `manual-schedules` window's `isActive` to `false`
+   (the app's own wording, "saved schedules are paused," pointed here, and the wire format
+   already has a per-window `isActive` flag for exactly this). **Refuted** - a live capture while
+   Always On was active showed all 7 windows still `isActive: true`, byte-identical to a normal
+   capture. `manual-schedules` is untouched by Always On entirely.
+2. Second hypothesis, from noticing the OpenAPI schema's only other use of "Always On" is
+   `charge-overrides`' indefinite-override wording: Always On is a standing `charge-overrides`
+   entry. **Confirmed** - a live capture showed the account's most recent override entry has
+   neither an `endAt` key nor a `deletedAt` key, while every other (finished) entry in the
+   history has at least `deletedAt`. This is genuinely a different mechanism from Boost sharing
+   one API surface, not a schedule concept at all.
+
+**A real, if minor, discrepancy surfaced along the way**: this integration's own Boost button
+sends an explicit `endAt: null` when attempting an indefinite override, and that's confirmed
+rejected (403) - yet the account clearly has a real, server-accepted indefinite override active
+via the app's own Always On toggle. The difference is almost certainly that the app's request
+*omits* `endAt` entirely rather than sending it as literal `null` - unconfirmed, but the
+distinction between "field omitted" and "field explicitly null" is a real, known source of this
+kind of REST API discrepancy, and matches the evidence available.
+
+**A near-miss on a real bug, caught by the user before it happened**: on discovering the no-endAt
+entry, the first instinct was that `_current_boost_end_at()` (coordinator.py) had a bug -
+skipping entries with no `endAt` - and that this should be "fixed" to treat them as an
+indefinitely-running boost. The user corrected this immediately: an Always-On override is NOT a
+boost the user can cancel, and the app itself doesn't allow boosting while Always On is active -
+they're mutually exclusive, separate mechanisms sharing one list, not one thing with two states.
+`_current_boost_end_at()`'s existing behaviour (ignore no-`endAt` entries) was already correct;
+the actual gap was the ABSENCE of any detection for the Always-On case, not a bug in the boost
+detection. Added `_is_always_on_active()` (coordinator.py) as a genuinely separate function/field
+(`PodHomeCharger.always_on_active`) rather than folding it into `boost_end_at`.
+
+**Confirmed live, from the user directly**: you cannot press Boost while Always On is active (the
+app itself prevents it). Boost's own `available` doesn't currently check for this - a real,
+now-confirmed gap versus the app's actual behaviour, left open for a follow-up rather than fixed
+in this same pass (scope discipline - this pass was about Charge Priority, not Boost).
+
+**Design landed on**:
+- `select.py`'s `PodHomeChargingStrategySelect` gains a dynamic `options` property (Smart:
+  `CHARGE_PRIORITY_SMART_OPTIONS`, Basic: `CHARGE_PRIORITY_BASIC_OPTIONS` - const.py), a
+  mode-branching `current_option` (Smart: existing `charging_priority_label()`; Basic: new
+  `charge_priority_label_basic()`, helpers.py, reading `always_on_active`), and a mode-branching
+  `available` (Smart: tariff-gated as before; Basic: always available - Schedule vs Always on
+  doesn't depend on tariff shape at all).
+- **Basic mode is read-only.** `async_select_option` raises a clear `HomeAssistantError` in Basic
+  mode rather than guessing at the unconfirmed write shape - matches this repo's own discipline
+  for write endpoints (confirm live before shipping, not "looks right, ship it").
+- `EntityCategory.CONFIG` dropped entirely (the user's explicit request) - Charge Priority is now
+  a primary/control entity, not tucked under the device's Configuration section.
+- `PodHomeCharger.always_on_active: bool` - a new coordinator field, parsed from the same
+  `charge_overrides_raw` as `boost_end_at`, same every-poll/genuine-list-only update rule, but a
+  deliberately separate function/field rather than reusing `boost_end_at`'s.
