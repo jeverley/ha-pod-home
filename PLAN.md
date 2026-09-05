@@ -117,13 +117,13 @@ reliably installable) release. Until then, the two copies can silently drift —
   that log. **Still genuinely unconfirmed**: `_warn_once`'s warn-once/debug-on-repeat/
   info-on-recovery behavior for one of those non-fatal endpoints specifically.
 - **Cable Status: done** - verified live, fixed, `chargingState`-derived now.
-- **Charge Mode select (Basic ⇄ Smart Charging switch) - deliberately still not built.**
-  `delegatedControl.status` is read and surfaced (Charging Mode sensor); the write endpoint is
+- **Charging Scheme switch (Basic ⇄ Smart Charging) - deliberately still not built.**
+  `delegatedControl.status` is read and surfaced (Charging Scheme sensor); the write endpoint is
   confirmed via the account's public OpenAPI schema (`PATCH /smart-charging/delegated-controls/
   {ppid}`, body `{ status: "ACTIVE" | "INACTIVE" }`) but not called. Not just the usual
-  write-endpoint discipline this time - the user has said mode switching is deliberately done
-  from the app, not HA, so this select isn't planned at all going forward, not merely deferred.
-  Don't confuse this with the *new* Charge Priority select below, a different entity for a
+  write-endpoint discipline this time - the user has said scheme switching is deliberately done
+  from the app, not HA, so no entity for it is planned at all going forward, not merely deferred.
+  Don't confuse this with the *new* Charge Mode select below, a different entity for a
   different field (`chargingStrategy`, not `delegatedControl.status`).
 - **Ready By / Target Charge as settable number/time entities - built** (`number.py`, `time.py`),
   replacing the earlier read-only sensors. Target Charge: `PATCH /smart-charging/delegated-
@@ -136,24 +136,30 @@ reliably installable) release. Until then, the two copies can silently drift —
   rather than recomputed (also corrected - see DECISIONS.md). **Both endpoints confirmed working
   live** - the user has tested Target Charge and Ready By writes against the real account and
   confirmed they land correctly.
-- **Charge Priority select - built** (`select.py`) and **confirmed working live in Smart
+- **Charge Mode select - built** (`select.py`) and **confirmed working live in Smart
   Charging** - an initial write theory (`chargingStrategy`) turned out to have no observed effect
   on a real write test; fixed to write `maxPrice` directly instead, then reconfirmed live ("That
   works now." - see DECISIONS.md). Smart Charging: tariff-gated via `available` - unavailable
   only on a confirmed single-rate tariff, where there's no real cost-vs-completion choice to
   make. **Redesigned to also cover Basic Charging** (Schedule/Always on, matching the app's own
-  wording per mode, options list itself switches based on Charging Mode) after confirming live
-  that Basic Charging's "Always on" mode is a `charge-overrides` entry with no `endAt` - a
+  wording per scheme, options list itself switches based on Charging Scheme) after confirming
+  live that Basic Charging's "Always on" mode is a `charge-overrides` entry with no `endAt` - a
   different mechanism from a real Boost (which always has one), not a manual-schedules concept
-  at all (see DECISIONS.md for the full investigation). Basic Charging is read-only for now - the
-  write shape for toggling Always on has never been confirmed live. Moved off `EntityCategory.
+  at all (see DECISIONS.md for the full investigation). **Basic Charging is now settable too,
+  confirmed working live**: selecting Always on POSTs a `charge-overrides` body with only
+  `requestedAt` (no `endAt` key at all, not even `null` - the schema-documented explicit-null
+  shape is rejected, 403); selecting Schedule DELETEs the active override the same way Cancel
+  boost does, confirmed to clear an Always On override correctly. See DECISIONS.md for the full
+  live-probe sequence. Moved off `EntityCategory.
   CONFIG` entirely (a primary control, not tucked under Configuration) per the user directly.
-  Also built: mode-conditional entities (Ready
-  By/Target Charge/Expected Charge report `unavailable` outside Smart Charging mode, via each
+  Also built: scheme-conditional entities (Ready
+  By/Target Charge/Expected Charge report `unavailable` outside Smart Charging, via each
   entity's own `available`) and a unified `Schedule` calendar (`calendar.py`, mirrors the
-  `Schedule` sensor - one entity adapting to whichever mode is active, not two mode-specific
-  ones). Electricity Rate is neither mode- nor tariff-gated - it's a plain tariff-derived value,
-  applicable regardless of mode. See DECISIONS.md for the full reasoning behind all of this.
+  `Schedule` sensor - one entity adapting to whichever scheme is active, not two scheme-specific
+  ones). Electricity Rate is neither scheme- nor tariff-gated - it's a plain tariff-derived value,
+  applicable regardless of scheme. Entity itself later renamed Charge Priority → Charge Mode, and
+  the Smart/Basic sensor renamed Charging Mode → Charging Scheme, to free up "mode" for this
+  select and avoid colliding with the never-built scheme switch above (see DECISIONS.md).
 - **`charge-overrides` (boost) - built and confirmed working live** (`button.py`: Boost full
   charge/Boost for duration/Cancel boost; `time.py`: Boost duration, a local-only hh:mm input,
   see DECISIONS.md). Matches the app's own two boost options plus a cancel action, per the user

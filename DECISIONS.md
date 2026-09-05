@@ -3082,3 +3082,67 @@ in this same pass (scope discipline - this pass was about Charge Priority, not B
 - `PodHomeCharger.always_on_active: bool` - a new coordinator field, parsed from the same
   `charge_overrides_raw` as `boost_end_at`, same every-poll/genuine-list-only update rule, but a
   deliberately separate function/field rather than reusing `boost_end_at`'s.
+
+## Charge Priority renamed to Charge Mode; Charging Mode sensor renamed to Charging Scheme
+
+User's own words: "I think charge mode is better than priority" for the Smart/Basic-spanning
+select. "Charge Mode" was already in use elsewhere, though: PLAN.md documents a deliberately
+never-built Basic⇄Smart Charging *switch* (`delegatedControl.status` write) that had been called
+"Charge Mode select" - the user has separately said scheme switching stays app-only, so that
+entity will never exist, but the name collision in the docs still needed resolving. Renamed the
+existing Smart/Basic debug sensor (`PodHomeChargingModeSensor`, `charging_mode`) to **Charging
+Scheme** (`PodHomeChargingSchemeSensor`, `charging_scheme`) to clear the name, and renamed the
+former Charge Priority select (`PodHomeChargingStrategySelect`, `charging_strategy`) to **Charge
+Mode** (`PodHomeChargeModeSelect`, `charge_mode`). Breaking change accepted deliberately - the
+user is the only account on this integration, so entity-ID/history churn from the
+`unique_id`/`translation_key` change costs nothing real.
+
+Scope: entity name, `_attr_translation_key`, `unique_id` suffix, and class name for both
+entities, plus `strings.json`/`translations/en.json`, README.md, and the two entities' own
+docstrings/error-message text. Deliberately NOT renamed: the internal `CHARGE_PRIORITY_*`
+constants and `helpers.py` function names (`charging_priority_label()`,
+`max_price_for_charging_priority()`, `charge_priority_label_basic()`, `charge_priority_available()`)
+or the `podpoint_mobile_api` client method `async_set_charge_priority_max_price()` - these are
+internal implementation names, not user-facing, and the client method in particular describes the
+API-level concept (`chargingStrategy`/`maxPrice`) rather than the HA entity's display name, so
+relabeling it would misrepresent what it does rather than clarify it. "Charging Mode"/"Charge
+Priority" as prose terms were swept to "Charging Scheme"/"Charge Mode" throughout README.md,
+PLAN.md, QUALITY_SCALE.md, and CLAUDE.md's own entity-states-and-translations rule, since they
+describe the same two concepts the renamed entities represent. DECISIONS.md's own prior entries
+are left as-is throughout (append-only).
+
+## Always On write path confirmed live: omit `endAt`, don't null it
+
+Follow-up to the "Charge Priority unified across Smart/Basic modes" entry above, which left
+Basic Charging's write path unconfirmed. `scratch/podpoint_openapi.json`'s
+`ChargeOverrideRequestDTO` schema for `POST /chargers/{ppid}/charge-overrides` says of `endAt`:
+"Omit or pass null for an indefinite (Always On) override" - treating the two as equivalent. They
+are not. `async_create_charge_override()`'s existing docstring already recorded that an explicit
+`"endAt": null` gets rejected live (403). Every genuine Always On entry ever captured
+(`scratch/output/charge_overrides_always_on_*.json`, `scratch/probe_always_on.py`) has no `endAt`
+key at all - not a null one - which suggested the server only accepts *omission*, not an explicit
+null, despite the schema treating them as interchangeable.
+
+Confirmed live via a new write probe (`scratch/probe_always_on_write.py`, real physical effect,
+run by the user with typed confirmation before each write): `POST /chargers/{ppid}/
+charge-overrides` with body `{"requestedAt": "<now>"}` - genuinely no `endAt` key in the JSON,
+not `_async_post`'d as `null` - returned 200 and created an entry with no `endAt`/`deletedAt`
+keys at all (id `77402619`), i.e. a real indefinite Always On override. `DELETE /chargers/{ppid}/
+charge-overrides` immediately after gave that same entry a real `deletedAt` timestamp, confirming
+the same DELETE call Cancel boost already uses also clears an Always On override correctly - the
+mutual-exclusivity assumption from the prior entry (at most one active override) holds up under
+an actual write/read/write/read cycle, not just live-observed historical data.
+
+**Design landed on**: a new client method, `async_set_always_on(ppid, requested_at)`
+(`podpoint_mobile_api/client.py`, both copies), deliberately separate from
+`async_create_charge_override()` rather than special-casing `end_at=None` there - that existing
+method always serializes `endAt` into the JSON body (as `null` when no `end_at` given), which is
+exactly the already-rejected shape, so reusing it would need the same omit-vs-null distinction
+duplicated at the call site instead of encapsulated once. `select.py`'s `PodHomeChargeModeSelect.
+async_select_option()` now writes for real in Basic Charging: Always on calls
+`async_set_always_on()` (skipped if already active, matching the mutual-exclusivity invariant -
+no reason to re-POST an already-standing override); Schedule calls
+`async_delete_charge_override()`, but only when `always_on_active` is currently true - calling
+DELETE with nothing active was never tested and is deliberately avoided rather than assumed safe.
+An unrecognized option string still raises `HomeAssistantError`, matching every other write
+entity's guard pattern in this repo.

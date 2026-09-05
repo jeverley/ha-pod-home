@@ -154,14 +154,14 @@ DAY_OF_WEEK_OPTIONS = [
     "SUNDAY",
 ]
 
-# Charge Priority select's display labels - the same entity, same underlying "respect the
-# schedule/cost plan vs prioritise charging over it" choice in both Charging Modes, but matching
-# the app's own wording exactly per mode rather than a shared generic label (per the user's
+# Charge Mode select's display labels - the same entity, same underlying "respect the
+# schedule/cost plan vs prioritise charging over it" choice in both Charging Schemes, but matching
+# the app's own wording exactly per scheme rather than a shared generic label (per the user's
 # explicit decision - see DECISIONS.md). Smart Charging: read/write both go through maxPrice, not
 # SmartChargingPreferencesDTO.chargingStrategy - see charging_priority_label()/
-# max_price_for_charging_priority() in helpers.py. Basic Charging: read-only for now - see
-# charge_priority_label_basic() in helpers.py and select.py's docstring for why. snake_case
-# translation keys, not display text.
+# max_price_for_charging_priority() in helpers.py. Basic Charging: charge-overrides-based - see
+# charge_priority_label_basic() in helpers.py and select.py's docstring for the confirmed write
+# shape. snake_case translation keys, not display text.
 CHARGE_PRIORITY_LOWEST_COST = "lowest_cost"
 CHARGE_PRIORITY_COMPLETE_CHARGE = "complete_charge"
 CHARGE_PRIORITY_SCHEDULE = "schedule"

@@ -24,8 +24,8 @@ import const  # noqa: E402 - path insert must happen first
 # translated enum entity is added, matching CLAUDE.md's "Entity states and translations" rule.
 _CHECKS = [
     (("entity", "sensor", "status", "state"), const.CHARGER_STATUS_OPTIONS),
-    (("entity", "sensor", "charging_mode", "state"), const.SCHEDULE_MODE_OPTIONS),
-    (("entity", "select", "charging_strategy", "state"), const.CHARGE_PRIORITY_OPTIONS),
+    (("entity", "sensor", "charging_scheme", "state"), const.SCHEDULE_MODE_OPTIONS),
+    (("entity", "select", "charge_mode", "state"), const.CHARGE_PRIORITY_OPTIONS),
 ]
 
 

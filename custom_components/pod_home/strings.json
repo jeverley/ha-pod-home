@@ -28,8 +28,8 @@
   "entity": {
     "sensor": {
       "charging_state": { "name": "Charging state" },
-      "charging_mode": {
-        "name": "Charging mode",
+      "charging_scheme": {
+        "name": "Charging scheme",
         "state": { "smart": "Smart", "basic": "Basic" }
       },
       "status": {
@@ -80,8 +80,8 @@
       "boost_duration": { "name": "Boost duration" }
     },
     "select": {
-      "charging_strategy": {
-        "name": "Charge priority",
+      "charge_mode": {
+        "name": "Charge mode",
         "state": { "lowest_cost": "Lowest cost", "complete_charge": "Complete charge", "schedule": "Schedule", "always_on": "Always on" }
       }
     },

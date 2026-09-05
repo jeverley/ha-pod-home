@@ -35,7 +35,7 @@ async def test_charging_state_sensor_known_and_unrecognized(hass: HomeAssistant)
     assert entity.extra_state_attributes == {"raw_charging_state": "SomethingNew"}
 
 
-async def test_charging_mode_sensor(hass: HomeAssistant) -> None:
+async def test_charging_scheme_sensor(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(
         hass,
         {
@@ -46,7 +46,7 @@ async def test_charging_mode_sensor(hass: HomeAssistant) -> None:
             )
         },
     )
-    entity = sensor.PodHomeChargingModeSensor(coordinator, PPID)
+    entity = sensor.PodHomeChargingSchemeSensor(coordinator, PPID)
     assert entity.native_value == "smart"
     assert entity.extra_state_attributes == {
         "raw_delegated_control_status": "ACTIVE",

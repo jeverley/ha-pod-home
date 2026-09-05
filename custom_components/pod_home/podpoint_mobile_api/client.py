@@ -1,6 +1,6 @@
 """Async client for mobile-api.pod-point.com. Mostly read-only.
-async_create_charge_override(), async_delete_charge_override(), async_set_remote_lock(),
-async_set_vehicle_intents(), async_set_vehicle_charge_limit(), and
+async_create_charge_override(), async_set_always_on(), async_delete_charge_override(),
+async_set_remote_lock(), async_set_vehicle_intents(), async_set_vehicle_charge_limit(), and
 async_set_charge_priority_max_price() are writes with real effects on a vehicle/charger -
 callers must treat them with the same explicit-authorization discipline as any other write path.
 """
@@ -241,8 +241,9 @@ class PodHomeApiClient:
         """POST /chargers/{ppid}/charge-overrides - triggers a boost ("Charge Now"). Body shape
         confirmed via the account's public OpenAPI schema (ChargeOverrideRequestDTO):
         `requestedAt` required, `endAt` nullable. The schema describes `endAt: null` as meaning
-        an indefinite ("Always On") override, but confirmed live this account's server rejects
-        that (403) - schema-documented doesn't mean server-accepted. Callers should pass a real
+        an indefinite ("Always On") override, but confirmed live this account's server rejects an
+        explicit `endAt: null` (403) - the indefinite shape actually requires OMITTING the key
+        entirely, see async_set_always_on() below. Callers here should always pass a real
         `end_at`; see PodHomeBoostFullChargeButton (pod_home's button.py) for what "full charge"
         actually resolves to live. WRITE ENDPOINT with a real physical effect on the charger -
         see CLAUDE.md."""
@@ -254,9 +255,23 @@ class PodHomeApiClient:
             },
         )
 
+    async def async_set_always_on(self, ppid: str, requested_at: datetime.datetime) -> None:
+        """POST /chargers/{ppid}/charge-overrides - switches Basic Charging to Always On
+        (indefinite charging, ignoring the schedule). CONFIRMED LIVE: the body must OMIT `endAt`
+        entirely - not send it, not even as `null` - to get an indefinite override; an explicit
+        `endAt: null` is rejected (403) despite the OpenAPI schema describing "omit or pass null"
+        as equivalent (see DECISIONS.md). Deliberately a separate method from
+        async_create_charge_override() rather than an `end_at=None` call, since that method
+        always sends the (rejected) explicit-null shape. WRITE ENDPOINT with a real physical
+        effect on the charger - see CLAUDE.md."""
+        await self._async_post(
+            f"/chargers/{ppid}/charge-overrides", {"requestedAt": requested_at.isoformat()}
+        )
+
     async def async_delete_charge_override(self, ppid: str) -> None:
-        """DELETE /chargers/{ppid}/charge-overrides - cancels the active boost. WRITE ENDPOINT
-        with a real physical effect on the charger - see CLAUDE.md."""
+        """DELETE /chargers/{ppid}/charge-overrides - cancels the active boost, or (confirmed
+        live) an active Always On override. WRITE ENDPOINT with a real physical effect on the
+        charger - see CLAUDE.md."""
         await self._async_delete(f"/chargers/{ppid}/charge-overrides")
 
     async def async_get_remote_lock_status(self, ppid: str) -> dict:

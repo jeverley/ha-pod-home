@@ -49,7 +49,7 @@ second doc grow alongside it (see DECISIONS.md for the PLATINUM_COMPARISON.md me
 
 - **docs-installation-parameters, docs-known-limitations** — ✅ README.md rewritten as end-user
   documentation: HACS custom-repository/manual installation, setup, a full entity list, Energy
-  Dashboard/Charging Mode notes, a "Known limitations" section covering boost latency, the
+  Dashboard/Charging Scheme notes, a "Known limitations" section covering boost latency, the
   Firmware version-string caveat, and Remote Lock being untested against real Solo 3S hardware.
 - **HACS packaging** — ✅ `hacs.json` added (minimal: name + render_readme), `.github/workflows/
   validate.yml` added (`hacs/action` + `hassfest`, matching HACS's own default-repo validation).

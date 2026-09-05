@@ -36,8 +36,8 @@ Enode, if your account has one) becomes a second device.
 Three device types are created: one **charger** device per Pod Point charger on the account, one
 **car** device only if a vehicle is linked via Enode, and a single account-level **Pod Point**
 device (one per config entry) for entities that aren't tied to a specific charger. Entity
-availability and which ones are enabled by default depend on your account's Charging Mode (Smart
-Charging vs. Basic Charging, set from the app) and tariff - see "Charging Mode" below.
+availability and which ones are enabled by default depend on your account's Charging Scheme (Smart
+Charging vs. Basic Charging, set from the app) and tariff - see "Charging Scheme" below.
 
 Each table's **Category** column is the same grouping Home Assistant's own device page uses:
 **Sensors** and **Controls** are its two default (uncategorized) groups, split by entity domain;
@@ -64,9 +64,9 @@ Each table's **Category** column is the same grouping Home Assistant's own devic
 | Boost for duration     | Controls      | Button         | Boost for the duration set above, matching the app |
 | Cancel boost           | Controls      | Button         | Only available while a boost is active |
 | Remote lock            | Controls      | Lock           | Solo 3S only. Entity isn't created at all until this charger confirms support (added dynamically once detected, no restart needed) - never appears on a model that doesn't support it (confirmed live via `offMode: null`), including the account this integration is developed against |
-| Charge priority        | Controls      | Select         | Options depend on Charging Mode: Smart Charging offers Lowest cost/Complete charge (unavailable only on a confirmed single-rate tariff); Basic Charging offers Schedule/Always on (read-only for now - see "Known limitations") |
+| Charge mode            | Controls      | Select         | Options depend on Charging Scheme: Smart Charging offers Lowest cost/Complete charge (unavailable only on a confirmed single-rate tariff); Basic Charging offers Schedule/Always on |
 | Charging state         | Diagnostic    | Sensor         | Raw wire value, disabled by default |
-| Charging mode          | Diagnostic    | Sensor         | Smart / Basic |
+| Charging scheme        | Diagnostic    | Sensor         | Smart / Basic |
 | Connectivity           | Diagnostic    | Binary sensor  | On when the charger is reachable via Pod Point's cloud |
 
 ### Car device (only if a vehicle is linked via Enode)
@@ -76,7 +76,7 @@ Each table's **Category** column is the same grouping Home Assistant's own devic
 | Battery                 | Sensors       | Sensor        | Vehicle's reported battery level, via Enode |
 | Estimated range         | Sensors       | Sensor        | Vehicle's estimated range, derived from battery level (not live telemetry) |
 | Odometer                | Sensors       | Sensor        | Vehicle's odometer reading, via Enode |
-| Expected charge         | Sensors       | Sensor        | Smart Charging's live prediction for the % it'll actually reach by Ready by - can diverge from Target charge if a constraint (e.g. Charge priority) prevents hitting it. Shows `unavailable` outside Smart Charging |
+| Expected charge         | Sensors       | Sensor        | Smart Charging's live prediction for the % it'll actually reach by Ready by - can diverge from Target charge if a constraint (e.g. Charge mode) prevents hitting it. Shows `unavailable` outside Smart Charging |
 | Charge rate             | Sensors       | Sensor        | Vehicle's charge rate - null once charging stops |
 | Charge time remaining   | Sensors       | Sensor        | Estimated time remaining, if reported by the vehicle |
 | Charging                | Sensors       | Binary sensor | On while the vehicle itself reports charging, independent of the charger's own state |
@@ -98,24 +98,24 @@ Add **Total energy** to Settings → Dashboards → Energy - it's a live-inclusi
 finalizes. **Don't** add Last charge energy/cost there - those are per-session snapshots, not
 a monotonic running total, and will break the dashboard's math.
 
-### Charging Mode
+### Charging Scheme
 
-Pod Point chargers run in one of two modes, switched from the Pod Home app (this integration
-doesn't add a mode-switch control):
+Pod Point chargers run in one of two schemes, switched from the Pod Home app (this integration
+doesn't add a scheme-switch control):
 
 - **Smart Charging** - schedule-optimized charging to a target %, by a target time, aware of your
   tariff. Ready by/Target charge/Expected charge only apply here, and show `unavailable` outside
-  this mode. Electricity rate isn't mode-gated at all - it depends on your tariff shape, not
-  which mode is active, so it's relevant on Basic Charging too. Works on a single-rate or
+  this scheme. Electricity rate isn't scheme-gated at all - it depends on your tariff shape, not
+  which scheme is active, so it's relevant on Basic Charging too. Works on a single-rate or
   two-rate tariff - Pod Point coordinates directly with your supplier to charge during
   low-demand periods even on a single-rate tariff, this does not force a switch to Basic
   Charging.
 - **Basic Charging** - the charger follows its own fixed manual schedule instead, unless Always
-  on is selected (see Charge priority below). Selecting a tariff with more than two rate windows
+  on is selected (see Charge mode below). Selecting a tariff with more than two rate windows
   reverts the account to Basic Charging automatically - that's Pod Point's own behaviour, not
   something this integration decides.
 
-**Charge priority** exists in both modes but means something different in each, matching the
+**Charge mode** exists in both schemes but means something different in each, matching the
 app's own wording exactly: Smart Charging offers **Lowest cost** (only charge during the
 cheapest tariff window) / **Complete charge** (stretch into peak hours if needed to hit your
 target); Basic Charging offers **Schedule** (only charge during your set schedule) / **Always
@@ -138,11 +138,6 @@ underlying choice - stick to the cost/schedule plan, or prioritise actually char
   unsupported hardware - not a case of finding it and enabling it. Built code-reviewed-only for
   that reason - if you have a Solo 3S, feedback on whether the entity appears and works as
   expected is genuinely useful.
-- **Charge priority is read-only in Basic Charging** - reading Schedule/Always on is confirmed
-  live, but the write shape for toggling Always on has never been confirmed (an explicit
-  `endAt: null` from this integration's own Boost button was rejected by the server; the app's
-  own request is evidently shaped differently). Selecting an option in Basic mode raises a clear
-  error for now rather than guessing - use the Pod Home app to change it until this is confirmed.
 - Not yet on HACS's default repository list - install as a custom repository (see above) for
   now. Tagged releases do exist (see the repo's Releases page), currently all pre-releases.
 

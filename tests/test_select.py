@@ -29,7 +29,7 @@ async def test_current_option_reads_from_max_price(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(
         hass, {PPID: make_charger(max_price=0.10, tariff_windows=_windows())}
     )
-    entity = select.PodHomeChargingStrategySelect(coordinator, PPID)
+    entity = select.PodHomeChargeModeSelect(coordinator, PPID)
     assert entity.current_option == CHARGE_PRIORITY_LOWEST_COST
 
 
@@ -38,7 +38,7 @@ async def test_select_option_writes_max_price_and_refreshes(hass: HomeAssistant)
         hass, {PPID: make_charger(max_price=None, tariff_windows=_windows())}
     )
     coordinator.async_request_refresh = AsyncMock()
-    entity = select.PodHomeChargingStrategySelect(coordinator, PPID)
+    entity = select.PodHomeChargeModeSelect(coordinator, PPID)
 
     await entity.async_select_option(CHARGE_PRIORITY_COMPLETE_CHARGE)
 
@@ -48,14 +48,14 @@ async def test_select_option_writes_max_price_and_refreshes(hass: HomeAssistant)
 
 async def test_select_option_without_tariff_data_raises(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(hass, {PPID: make_charger(max_price=None, tariff_windows=None)})
-    entity = select.PodHomeChargingStrategySelect(coordinator, PPID)
+    entity = select.PodHomeChargeModeSelect(coordinator, PPID)
     with pytest.raises(HomeAssistantError):
         await entity.async_select_option(CHARGE_PRIORITY_LOWEST_COST)
 
 
 async def test_available_unless_tariff_confirmed_single_rate(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(hass, {PPID: make_charger(tariff_windows=_windows())})
-    entity = select.PodHomeChargingStrategySelect(coordinator, PPID)
+    entity = select.PodHomeChargeModeSelect(coordinator, PPID)
     assert entity.available is True  # two-rate tariff
 
     single_rate = [make_tariff_window(price=0.15), make_tariff_window(price=0.15)]
@@ -69,7 +69,7 @@ async def test_available_unless_tariff_confirmed_single_rate(hass: HomeAssistant
 
 async def test_options_switch_between_modes(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(hass, {PPID: make_charger(delegated_control_status="ACTIVE")})
-    entity = select.PodHomeChargingStrategySelect(coordinator, PPID)
+    entity = select.PodHomeChargeModeSelect(coordinator, PPID)
     assert entity.options == [CHARGE_PRIORITY_LOWEST_COST, CHARGE_PRIORITY_COMPLETE_CHARGE]
 
     coordinator.data = {PPID: make_charger(delegated_control_status="INACTIVE")}
@@ -81,7 +81,7 @@ async def test_basic_mode_current_option_from_always_on_active(hass: HomeAssista
         hass,
         {PPID: make_charger(delegated_control_status="INACTIVE", always_on_active=False)},
     )
-    entity = select.PodHomeChargingStrategySelect(coordinator, PPID)
+    entity = select.PodHomeChargeModeSelect(coordinator, PPID)
     assert entity.current_option == CHARGE_PRIORITY_SCHEDULE
 
     coordinator.data = {
@@ -96,15 +96,80 @@ async def test_basic_mode_available_regardless_of_tariff_shape(hass: HomeAssista
         hass,
         {PPID: make_charger(delegated_control_status="INACTIVE", tariff_windows=single_rate)},
     )
-    entity = select.PodHomeChargingStrategySelect(coordinator, PPID)
+    entity = select.PodHomeChargeModeSelect(coordinator, PPID)
     assert entity.available is True
 
 
-async def test_basic_mode_select_option_raises(hass: HomeAssistant) -> None:
+async def test_basic_mode_select_always_on_writes_when_not_already_active(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = make_coordinator(
+        hass,
+        {PPID: make_charger(delegated_control_status="INACTIVE", always_on_active=False)},
+    )
+    coordinator.async_request_refresh = AsyncMock()
+    entity = select.PodHomeChargeModeSelect(coordinator, PPID)
+
+    await entity.async_select_option(CHARGE_PRIORITY_ALWAYS_ON)
+
+    coordinator.api.async_set_always_on.assert_called_once()
+    assert coordinator.api.async_set_always_on.call_args.args[0] == PPID
+    coordinator.async_request_refresh.assert_called_once()
+
+
+async def test_basic_mode_select_always_on_skips_write_when_already_active(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = make_coordinator(
+        hass,
+        {PPID: make_charger(delegated_control_status="INACTIVE", always_on_active=True)},
+    )
+    coordinator.async_request_refresh = AsyncMock()
+    entity = select.PodHomeChargeModeSelect(coordinator, PPID)
+
+    await entity.async_select_option(CHARGE_PRIORITY_ALWAYS_ON)
+
+    coordinator.api.async_set_always_on.assert_not_called()
+    coordinator.async_request_refresh.assert_called_once()
+
+
+async def test_basic_mode_select_schedule_deletes_when_always_on_active(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = make_coordinator(
+        hass,
+        {PPID: make_charger(delegated_control_status="INACTIVE", always_on_active=True)},
+    )
+    coordinator.async_request_refresh = AsyncMock()
+    entity = select.PodHomeChargeModeSelect(coordinator, PPID)
+
+    await entity.async_select_option(CHARGE_PRIORITY_SCHEDULE)
+
+    coordinator.api.async_delete_charge_override.assert_called_once_with(PPID)
+    coordinator.async_request_refresh.assert_called_once()
+
+
+async def test_basic_mode_select_schedule_skips_delete_when_not_active(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = make_coordinator(
+        hass,
+        {PPID: make_charger(delegated_control_status="INACTIVE", always_on_active=False)},
+    )
+    coordinator.async_request_refresh = AsyncMock()
+    entity = select.PodHomeChargeModeSelect(coordinator, PPID)
+
+    await entity.async_select_option(CHARGE_PRIORITY_SCHEDULE)
+
+    coordinator.api.async_delete_charge_override.assert_not_called()
+    coordinator.async_request_refresh.assert_called_once()
+
+
+async def test_basic_mode_select_unrecognized_option_raises(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(
         hass, {PPID: make_charger(delegated_control_status="INACTIVE")}
     )
-    entity = select.PodHomeChargingStrategySelect(coordinator, PPID)
+    entity = select.PodHomeChargeModeSelect(coordinator, PPID)
     with pytest.raises(HomeAssistantError):
-        await entity.async_select_option(CHARGE_PRIORITY_ALWAYS_ON)
+        await entity.async_select_option(CHARGE_PRIORITY_LOWEST_COST)
     coordinator.api.async_set_charge_priority_max_price.assert_not_called()

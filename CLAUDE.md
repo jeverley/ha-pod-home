@@ -105,7 +105,7 @@ A `device_class: enum` sensor's (or a `select`'s) raw state must be a stable sna
 the display text in `strings.json`/`translations/en.json`'s per-entity `state` block ([HA's
 i18n convention](https://developers.home-assistant.io/docs/internationalization/core)) - not
 baked into the raw value itself. Applies to this integration's own derived vocabulary (Status,
-Charging Mode, Charge Priority). Exception: raw wire-passthrough debug sensors (Charging state,
+Charging Scheme, Charge Mode). Exception: raw wire-passthrough debug sensors (Charging state,
 Power delivery state) stay untranslated, exactly matching the API's own field values - deliberate,
 not an oversight. Keep `strings.json` and `translations/en.json` byte-identical (`diff` them
 after editing either) - `strings.json` is the dev-time source, `translations/en.json` is what HA

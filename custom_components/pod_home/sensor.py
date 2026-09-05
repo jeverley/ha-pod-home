@@ -72,7 +72,7 @@ async def async_setup_entry(
         async_add_entities,
         [
             PodHomeChargingStateSensor,
-            PodHomeChargingModeSensor,
+            PodHomeChargingSchemeSensor,
             PodHomeStatusSensor,
             PodHomeLastChargeDurationSensor,
             PodHomeLastChargeEnergySensor,
@@ -137,21 +137,21 @@ class PodHomeChargingStateSensor(PodHomeEntity, SensorEntity):
         return {"raw_charging_state": charger.charging_state}
 
 
-class PodHomeChargingModeSensor(PodHomeEntity, SensorEntity):
+class PodHomeChargingSchemeSensor(PodHomeEntity, SensorEntity):
     """Whether Smart Charging or Basic Charging is active, from delegatedControl.status. Shown
     as "Smart"/"Basic" (see schedule_mode() in helpers.py). status_effective_from costs an extra
     call, refreshed on the same 6h cadence as firmware/tariffs. smart_charging_supported reflects
     tariff compatibility (Smart Charging needs a single- or two-rate tariff)."""
 
-    _attr_translation_key = "charging_mode"
-    _attr_name = "Charging mode"
+    _attr_translation_key = "charging_scheme"
+    _attr_name = "Charging scheme"
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = SCHEDULE_MODE_OPTIONS
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def unique_id(self) -> str:
-        return f"{DOMAIN}_{self.ppid}_charging_mode"
+        return f"{DOMAIN}_{self.ppid}_charging_scheme"
 
     @property
     def native_value(self) -> str | None:
