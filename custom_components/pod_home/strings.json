@@ -1,0 +1,124 @@
+{
+  "exceptions": {
+    "api_failed": {
+      "message": "Error communicating with API: {error}"
+    },
+    "auth_failed": {
+      "message": "Authentication failed: {error}"
+    }
+  },
+  "services": {
+    "start_boost": {
+      "name": "Start boost",
+      "description": "Boosts charging on a Pod Home charger, matching the app's Full charge/Set duration boost options.",
+      "fields": {
+        "duration": {
+          "name": "Duration",
+          "description": "How long to boost for. Omit for a full charge (matches the app's Full charge option, a flat 12-hour override)."
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Cancel boost",
+      "description": "Cancels the active boost on a Pod Home charger, if any."
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Pod Home",
+        "description": "Enter the email and password you use to sign in to the Pod Home app.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect to Pod Home",
+        "description": "Your Pod Home sign-in needs to be renewed. Enter your current password.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Sign-in failed. Check your email and password."
+    },
+    "abort": {
+      "already_configured": "This Pod Home account is already configured.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "charging_state": { "name": "Charging state" },
+      "charging_scheme": {
+        "name": "Charging scheme",
+        "state": { "smart": "Smart", "basic": "Basic" }
+      },
+      "status": {
+        "name": "Status",
+        "state": {
+          "charging": "Charging",
+          "paused": "Paused",
+          "available": "Available",
+          "preparing": "Preparing",
+          "finishing": "Finishing",
+          "reserved": "Reserved",
+          "unavailable": "Unavailable",
+          "finished": "Finished",
+          "fault": "Fault"
+        }
+      },
+      "last_charge_duration": { "name": "Last charge duration" },
+      "last_charge_energy": { "name": "Last charge energy" },
+      "last_charge_cost": { "name": "Last charge cost" },
+      "month_energy": { "name": "Month energy" },
+      "month_cost": { "name": "Month cost" },
+      "total_energy": { "name": "Total energy" },
+      "rewards_balance": { "name": "Rewards balance" },
+      "electricity_rate": { "name": "Electricity rate" },
+      "boost_end_time": { "name": "Boost end time" },
+      "vehicle_battery_level": { "name": "Battery" },
+      "vehicle_estimated_range": { "name": "Estimated range" },
+      "vehicle_odometer": { "name": "Odometer" },
+      "vehicle_expected_charge": { "name": "Expected charge" },
+      "vehicle_power_delivery_state": { "name": "Power delivery state" },
+      "vehicle_charge_rate": { "name": "Charge rate" },
+      "vehicle_max_current": { "name": "Max current" },
+      "vehicle_charge_time_remaining": { "name": "Charge time remaining" }
+    },
+    "binary_sensor": {
+      "connectivity": { "name": "Connectivity" },
+      "cable_connected": { "name": "Cable status" },
+      "vehicle_charging": { "name": "Charging" }
+    },
+    "update": {
+      "firmware": { "name": "Firmware" }
+    },
+    "number": {
+      "vehicle_target_charge": { "name": "Target charge" }
+    },
+    "time": {
+      "vehicle_ready_by": { "name": "Ready by" },
+      "boost_duration": { "name": "Boost duration" }
+    },
+    "select": {
+      "charge_mode": {
+        "name": "Charge mode",
+        "state": { "lowest_cost": "Lowest cost", "complete_charge": "Complete charge", "schedule": "Schedule", "always_on": "Always on" }
+      }
+    },
+    "calendar": {
+      "schedule": { "name": "Schedule" }
+    },
+    "button": {
+      "boost_full_charge": { "name": "Full charge" },
+      "boost_duration_button": { "name": "Boost for duration" },
+      "boost_cancel": { "name": "Cancel boost" }
+    },
+    "lock": {
+      "remote_lock": { "name": "Remote lock" }
+    }
+  }
+}

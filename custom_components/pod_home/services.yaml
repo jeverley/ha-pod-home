@@ -1,0 +1,17 @@
+start_boost:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device: {}
+    duration:
+      example: "01:30:00"
+      selector:
+        duration: {}
+
+cancel_boost:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device: {}
