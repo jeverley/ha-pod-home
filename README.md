@@ -155,8 +155,4 @@ first:
 
 ## More detail
 
-- [`QUALITY_SCALE.md`](QUALITY_SCALE.md) - status against Home Assistant's Integration Quality
-  Scale, target tier platinum, plus what's still genuinely open (its `Recommendation` section).
-- [`DECISIONS.md`](DECISIONS.md) - the full reasoning behind every non-obvious design and API
-  choice in this repo.
 - [`CLAUDE.md`](CLAUDE.md) - working conventions for this repo.
