@@ -33,6 +33,8 @@ jobs:
           python-version: "3.12"
       - run: pip install -e podpoint-mobile-api
       - run: python -c "import podpoint_mobile_api"
+      - run: pip install mypy
+      - run: python -m mypy --strict podpoint-mobile-api/src/podpoint_mobile_api/
 
   tests:
     runs-on: ubuntu-latest

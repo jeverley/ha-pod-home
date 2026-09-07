@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from typing import Any
 
 import aiohttp
 
@@ -41,7 +42,7 @@ class PodHomeAuth:
         # Guards against concurrent callers racing to refresh/sign in at once.
         self._token_lock = asyncio.Lock()
 
-    def export_tokens(self) -> dict | None:
+    def export_tokens(self) -> dict[str, Any] | None:
         """Return the current tokens as a plain, JSON-serializable dict, or None if nothing's
         been obtained yet."""
         if self._refresh_token is None or self._expires_at is None:
@@ -52,7 +53,7 @@ class PodHomeAuth:
             "expires_at": self._expires_at.isoformat(),
         }
 
-    def import_tokens(self, data: dict | None) -> None:
+    def import_tokens(self, data: dict[str, Any] | None) -> None:
         """Restore previously-exported tokens. Call once, right after construction, before the
         first async_get_id_token() - lets that first call refresh instead of doing a full
         sign-in. Malformed/partial data is ignored, not an error."""
@@ -78,12 +79,17 @@ class PodHomeAuth:
                         await self._async_refresh()
                         if self._on_token_change:
                             self._on_token_change()
+                        # _async_refresh() always sets a real token or raises - never leaves
+                        # self._id_token None on success.
+                        assert self._id_token is not None
                         return self._id_token
                     except PodHomeAuthError:
                         pass  # refresh token itself may have expired - fall back to sign-in
                 await self._async_sign_in()
                 if self._on_token_change:
                     self._on_token_change()
+            # Same guarantee as above - _async_sign_in() always sets a real token or raises.
+            assert self._id_token is not None
             return self._id_token
 
     def _is_expiring(self) -> bool:
@@ -133,7 +139,7 @@ class PodHomeAuth:
         self._refresh_token = body.get("refresh_token", self._refresh_token)
         self._expires_at = datetime.utcnow() + timedelta(seconds=int(body["expires_in"]))
 
-    def _apply_token_response(self, body: dict) -> None:
+    def _apply_token_response(self, body: dict[str, Any]) -> None:
         self._id_token = body["idToken"]
         self._refresh_token = body.get("refreshToken")
         self._expires_at = datetime.utcnow() + timedelta(
