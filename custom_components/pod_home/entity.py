@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -47,6 +47,15 @@ class PodHomeEntity(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
     @property
     def available(self) -> bool:
         return super().available and self.charger is not None
+
+    @property
+    def _available_charger(self) -> PodHomeCharger | None:
+        """self.charger, already narrowed non-None whenever this class's own `available` (base
+        CoordinatorEntity availability plus a charger existing) holds - lets a subclass that
+        layers extra conditions onto `available` do so in one guard instead of separately
+        re-deriving `charger is not None` itself."""
+        charger = self.charger
+        return charger if super().available and charger is not None else None
 
     @property
     def _cable_connected(self) -> bool:
@@ -138,18 +147,27 @@ class PodHomeAccountEntity(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
     _attr_attribution = ATTRIBUTION
 
     @property
-    def device_info(self) -> DeviceInfo:
+    def config_entry(self) -> "PodHomeConfigEntry":
         # Always constructed with a real config_entry (coordinator.py) - HA's own typing allows
         # None here since a coordinator can in principle exist without one, this one never does.
         assert self.coordinator.config_entry is not None
+        return self.coordinator.config_entry
+
+    @property
+    def device_info(self) -> DeviceInfo:
         return DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            identifiers={(DOMAIN, self.config_entry.entry_id)},
             name="Pod Point",
             manufacturer=MANUFACTURER,
         )
 
 
-class PodHomeOptimisticWriteMixin(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
+_OptimisticT = TypeVar("_OptimisticT")
+
+
+class PodHomeOptimisticWriteMixin(
+    CoordinatorEntity[PodHomeDataUpdateCoordinator], Generic[_OptimisticT]
+):
     """Masks the read-your-own-write race after a successful write: a write's own immediate
     `async_request_refresh()` can race Pod Point's backend actually making the change visible
     (confirmed live), so the just-written value is shown until the SECOND coordinator update
@@ -159,18 +177,20 @@ class PodHomeOptimisticWriteMixin(CoordinatorEntity[PodHomeDataUpdateCoordinator
 
     Inherits CoordinatorEntity for real, not just for typing's sake - every concrete class that
     mixes this in already provides that ancestor via PodHomeEntity/PodHomeVehicleEntity, so this
-    just states plainly what's already guaranteed rather than lying to the type checker."""
+    just states plainly what's already guaranteed rather than lying to the type checker. Generic
+    over the value's real type (bool for lock.py, int for number.py, str for select.py,
+    datetime.time for time.py - each concrete class parametrizes its own, e.g.
+    `PodHomeOptimisticWriteMixin[bool]`), so every consumer reads back a properly-typed value
+    with a plain `is not None` check rather than its own isinstance() narrowing."""
 
-    _optimistic_value: Any = None
+    _optimistic_value: _OptimisticT | None = None
     _optimistic_polls_remaining: int = 0
 
-    def _set_optimistic_value(self, value: Any) -> None:
-        # value's real type varies by consumer (bool for lock.py, int for number.py, str for
-        # select.py, datetime.time for time.py) - each concrete class narrows it back on read.
+    def _set_optimistic_value(self, value: _OptimisticT) -> None:
         self._optimistic_value = value
         self._optimistic_polls_remaining = 2
 
-    def _read_optimistic_value(self) -> Any:
+    def _read_optimistic_value(self) -> _OptimisticT | None:
         return self._optimistic_value
 
     def _handle_coordinator_update(self) -> None:

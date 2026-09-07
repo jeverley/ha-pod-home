@@ -44,7 +44,7 @@ async def async_setup_entry(
     )
 
 
-class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin, PodHomeEntity, SelectEntity):
+class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin[str], PodHomeEntity, SelectEntity):
     """Settable Charge Mode - "respect the schedule/cost plan vs prioritise charging over it",
     on the charger device since preferences are charger-scoped. Smart Charging offers Lowest
     cost/Complete charge (maxPrice-based, see charging_priority_label()/
@@ -83,10 +83,8 @@ class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin, PodHomeEntity, Select
 
     @property
     def available(self) -> bool:
-        if not super().available:
-            return False
-        charger = self.charger
-        if not charger:
+        charger = self._available_charger
+        if charger is None:
             return False
         if self._is_basic_charging(charger):
             # Schedule vs Always on doesn't depend on tariff shape at all, unlike Smart
@@ -97,7 +95,7 @@ class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin, PodHomeEntity, Select
     @property
     def current_option(self) -> str | None:
         optimistic = self._read_optimistic_value()
-        if isinstance(optimistic, str):
+        if optimistic is not None:
             return optimistic
         charger = self.charger
         if not charger:

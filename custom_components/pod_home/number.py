@@ -29,7 +29,9 @@ async def async_setup_entry(
     )
 
 
-class PodHomeVehicleTargetChargeNumber(PodHomeOptimisticWriteMixin, PodHomeVehicleEntity, NumberEntity):
+class PodHomeVehicleTargetChargeNumber(
+    PodHomeOptimisticWriteMixin[int], PodHomeVehicleEntity, NumberEntity
+):
     """Settable Target Charge - the percentage Smart Charging aims to reach by Ready By.
     Same unique_id/translation_key as the earlier read-only sensor it replaces. Confirmed working
     live.
@@ -60,7 +62,7 @@ class PodHomeVehicleTargetChargeNumber(PodHomeOptimisticWriteMixin, PodHomeVehic
     @property
     def native_value(self) -> int | None:
         optimistic = self._read_optimistic_value()
-        if isinstance(optimistic, int):
+        if optimistic is not None:
             return optimistic
         vehicle = self.vehicle
         return vehicle.charge_limit_percent if vehicle else None

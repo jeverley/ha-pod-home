@@ -45,7 +45,9 @@ async def async_setup_entry(
     )
 
 
-class PodHomeVehicleReadyByTime(PodHomeOptimisticWriteMixin, PodHomeVehicleEntity, TimeEntity):
+class PodHomeVehicleReadyByTime(
+    PodHomeOptimisticWriteMixin[datetime.time], PodHomeVehicleEntity, TimeEntity
+):
     """Settable Ready By - the local wall-clock time Smart Charging aims to reach Target Charge
     by. Confirmed working live.
 
@@ -78,7 +80,7 @@ class PodHomeVehicleReadyByTime(PodHomeOptimisticWriteMixin, PodHomeVehicleEntit
     @property
     def native_value(self) -> datetime.time | None:
         optimistic = self._read_optimistic_value()
-        if isinstance(optimistic, datetime.time):
+        if optimistic is not None:
             return optimistic
         vehicle = self.vehicle
         return parse_time_of_day(vehicle.intent_charge_by_time) if vehicle else None

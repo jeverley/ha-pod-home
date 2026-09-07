@@ -424,7 +424,7 @@ async def test_api3_charges_matched_to_ppid_via_pod_id(hass: HomeAssistant) -> N
     coordinator = _make_coordinator(hass, api)
     now = datetime.datetime(2026, 1, 1, 11, 0, tzinfo=datetime.timezone.utc)
     await coordinator._async_refresh_api3_account(now)
-    await coordinator._async_refresh_api3_charges(now)
+    await coordinator._async_refresh_api3_charges(coordinator._api3_user_id, now)
 
     assert coordinator._current_charge_by_ppid[PPID].energy_total == 2.5
     assert coordinator._current_charge_by_ppid[PPID].cost_currency == "GBP"
@@ -451,7 +451,7 @@ async def test_api3_charges_unmatched_pod_id_warns_and_stays_empty(hass: HomeAss
     coordinator = _make_coordinator(hass, api)
     now = datetime.datetime(2026, 1, 1, 12, 0, tzinfo=datetime.timezone.utc)
     await coordinator._async_refresh_api3_account(now)
-    await coordinator._async_refresh_api3_charges(now)
+    await coordinator._async_refresh_api3_charges(coordinator._api3_user_id, now)
 
 
 def _api3_session_stubs(api, *, started_at: datetime.datetime) -> None:

@@ -710,10 +710,7 @@ class PodHomeRewardsBalanceSensor(PodHomeAccountEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        # Always constructed with a real config_entry - see entity.py's PodHomeAccountEntity
-        # device_info for the same assertion and rationale.
-        assert self.coordinator.config_entry is not None
-        return f"{DOMAIN}_{self.coordinator.config_entry.entry_id}_rewards_balance"
+        return f"{DOMAIN}_{self.config_entry.entry_id}_rewards_balance"
 
     @property
     def available(self) -> bool:

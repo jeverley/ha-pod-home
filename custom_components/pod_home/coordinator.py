@@ -7,7 +7,7 @@ import dataclasses
 from dataclasses import dataclass
 import datetime
 import logging
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -18,7 +18,6 @@ from homeassistant.util import dt as dt_util
 # TEMPORARY: vendored copy, see __init__.py's import comment.
 from .podpoint_mobile_api import PodHomeApiClient, PodHomeApiError, PodHomeAuthError
 from .const import (
-    CHARGING_STATE_CABLE_CONNECTED,
     CHARGING_STATE_CHARGING,
     CHARGING_STATE_OPTIONS,
     CHARGING_STATE_SUSPENDED_EV,
@@ -39,8 +38,6 @@ if TYPE_CHECKING:
     from . import PodHomeConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
-
-_T = TypeVar("_T")
 
 # How far back to look for "the most recent charge" each poll.
 RECENT_CHARGES_LOOKBACK = datetime.timedelta(days=14)
@@ -92,14 +89,6 @@ def _safe_dict(value: object) -> dict[str, Any]:
     """Coerce a JSON value to a dict, discarding anything else. Guards nested .get() chains on
     response data that isn't guaranteed to match the expected shape at every level."""
     return value if isinstance(value, dict) else {}
-
-
-def _cable_connected_from_state(charging_state: object) -> bool:
-    """Whether a connectivity poll's raw chargingState implies a cable is connected - an
-    unrecognized/missing value errs toward "connected" (see call site's comment)."""
-    if not isinstance(charging_state, str):
-        return True
-    return CHARGING_STATE_CABLE_CONNECTED.get(charging_state) is not False
 
 
 @dataclass
@@ -730,18 +719,19 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         }
         self._api3_account_fetched_at = now
 
-    async def _async_refresh_api3_charges(self, now: datetime.datetime) -> None:
+    async def _async_refresh_api3_charges(self, api3_user_id: int, now: datetime.datetime) -> None:
         """Refresh the live in-progress charge per ppid, from api3's charges endpoint - filtered
         by _api3_pod_id_by_ppid, since the endpoint returns every one of the account's pods'
         charges together, not scoped to one charger. Non-fatal. Entries come back newest-first,
         so the first open (ends_at is None) entry seen for a given ppid is the current one -
         duration/cost aren't populated live by the API on an open entry (both 0), so duration is
         computed here instead; cost has no reliable way to derive live, so it's left None rather
-        than surfacing the API's misleading 0 as if it were real."""
-        # Only called once the caller has confirmed _api3_user_id is set (see _async_fetch_data).
-        assert self._api3_user_id is not None
+        than surfacing the API's misleading 0 as if it were real.
+
+        `api3_user_id` is passed in already-narrowed by the caller (self._api3_user_id, only
+        called once it's confirmed set) rather than re-read and asserted here."""
         try:
-            charges_resp = await self.api.async_api3_charges(self._api3_user_id)
+            charges_resp = await self.api.async_api3_charges(api3_user_id)
         except PodHomeApiError as exc:
             self._warn_once("api3_charges", f"Couldn't fetch api3 charges (non-fatal): {exc}")
             return
@@ -806,11 +796,13 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             ) from exc
 
     async def _async_with_connection_retry(
-        self, attempt: Callable[[], Coroutine[Any, Any, _T]]
-    ) -> _T:
+        self, attempt: Callable[[], Coroutine[Any, Any, list[dict[str, Any]]]]
+    ) -> list[dict[str, Any]]:
         """Retry `attempt` (a zero-arg async callable performing one API call) up to
         CONNECTION_RETRY_ATTEMPTS times, but only for connection-level failures - see
-        CONNECTION_RETRY_ATTEMPTS' comment above."""
+        CONNECTION_RETRY_ATTEMPTS' comment above. Concretely typed for its one call site
+        (async_list_chargers) rather than generic - revisit if a second caller needs a
+        different return shape."""
         last_exc: PodHomeApiError | None = None
         for attempt_number in range(CONNECTION_RETRY_ATTEMPTS):
             try:
@@ -863,13 +855,12 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                 )
             )
             # connectivity-status-v2 is always dict-shaped on success; _safe_call's {} fallback
-            # on error is a dict too - the isinstance check is only for the type checker's
-            # benefit (_safe_call's return type is shared with list-returning endpoints).
-            connectivity_by_ppid = {
-                ppid: result
-                for ppid, result in zip(ppids, connectivity_results)
-                if isinstance(result, dict)
-            }
+            # on error is a dict too - _safe_call's return type is only a union because it's
+            # shared with list-returning endpoints elsewhere, not because this call can produce
+            # one.
+            connectivity_by_ppid = dict(
+                zip(ppids, cast("list[dict[str, Any]]", connectivity_results))
+            )
 
         account_preferences_stale = (
             self._account_preferences_fetched_at is None
@@ -884,11 +875,11 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         )
         # Cable-connected covers every state meaning a car is physically plugged in, not just
         # Charging - used only to pick the linked-vehicle fetch's cadence tier below, so an
-        # unrecognized chargingState (CHARGING_STATE_CABLE_CONNECTED.get() returning None) errs
-        # toward "treat as connected" (fetch more often), unlike the Cable Status sensor itself,
-        # which surfaces that ambiguity as unknown.
+        # unrecognized chargingState (is_momentarily_unplugged() returning False) errs toward
+        # "treat as connected" (fetch more often), unlike the Cable Status sensor itself, which
+        # surfaces that ambiguity as unknown.
         any_cable_connected_this_poll = any(
-            _cable_connected_from_state(connectivity.get("chargingState"))
+            not is_momentarily_unplugged(connectivity.get("chargingState"))
             for connectivity in connectivity_by_ppid.values()
         )
         # The charger's own chargingState (now this-poll-fresh, above) and the linked vehicle's
@@ -995,19 +986,20 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
 
         # The live in-progress charge - only worth asking for once there's an api3 user_id,
         # then the same charging-aware/slow-fallback gating as /charges above.
-        if self._api3_user_id is not None:
+        api3_user_id = self._api3_user_id
+        if api3_user_id is not None:
             api3_charges_stale = (
                 self._api3_charges_fetched_at is None
                 or now - self._api3_charges_fetched_at >= CHARGE_STATS_REFRESH_INTERVAL
             )
             if any_charging_this_poll or api3_charges_stale:
-                await self._async_refresh_api3_charges(now)
+                await self._async_refresh_api3_charges(api3_user_id, now)
         current_charge_by_ppid = self._current_charge_by_ppid
 
         result: dict[str, PodHomeCharger] = {}
         for raw in chargers_raw:
             ppid = raw.get("ppid")
-            if not ppid:
+            if not isinstance(ppid, str) or not ppid:
                 _LOGGER.warning("Skipping a /chargers entry with no ppid: %r", raw)
                 continue
 

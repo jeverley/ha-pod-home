@@ -45,7 +45,7 @@ async def async_setup_entry(
     )
 
 
-class PodHomeRemoteLock(PodHomeOptimisticWriteMixin, PodHomeEntity, LockEntity):
+class PodHomeRemoteLock(PodHomeOptimisticWriteMixin[bool], PodHomeEntity, LockEntity):
     """Remote Lock - prevents a new charging session from starting until unlocked. Per the app
     guide, lock/unlock is only possible while the charger is online and unplugged; neither is
     enforced client-side here (no `available` override - unlike Boost, the app guide doesn't
@@ -63,7 +63,7 @@ class PodHomeRemoteLock(PodHomeOptimisticWriteMixin, PodHomeEntity, LockEntity):
     @property
     def is_locked(self) -> bool | None:
         optimistic = self._read_optimistic_value()
-        if isinstance(optimistic, bool):
+        if optimistic is not None:
             return optimistic
         charger = self.charger
         return charger.remote_lock_off_mode if charger else None
