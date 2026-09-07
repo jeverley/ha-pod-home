@@ -3,6 +3,8 @@
 # registers the plugin for the whole suite - see CLAUDE.md's Verification section).
 pytest-homeassistant-custom-component
 
-# `mypy --strict podpoint-mobile-api/src/podpoint_mobile_api/` - the standalone package only,
-# not custom_components/pod_home/ (deferred, HA's own typing gaps make it noisy there).
+# Used by two separate `mypy --strict` scopes (own CI job each, see .github/workflows/test.yml):
+# podpoint-mobile-api/src/podpoint_mobile_api/ (the standalone package) and
+# custom_components/pod_home/ (the integration itself, excluding its vendored copy of the
+# package above).
 mypy

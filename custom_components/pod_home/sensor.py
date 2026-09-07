@@ -11,6 +11,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import (
     PERCENTAGE,
+    EntityCategory,
     UnitOfElectricCurrent,
     UnitOfEnergy,
     UnitOfLength,
@@ -18,7 +19,6 @@ from homeassistant.const import (
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
@@ -210,7 +210,10 @@ class PodHomeStatusSensor(PodHomeEntity, SensorEntity):
 
     @property
     def icon(self) -> str:
-        return self._STATUS_ICONS.get(self.native_value, "mdi:ev-station")
+        value = self.native_value
+        if value is None:
+            return "mdi:ev-station"
+        return self._STATUS_ICONS.get(value, "mdi:ev-station")
 
 
 class PodHomeLastChargeDurationSensor(PodHomeEntity, SensorEntity):
@@ -444,7 +447,8 @@ class PodHomeElectricityRateSensor(PodHomeEntity, SensorEntity):
             # A wrapped window belongs to the day it started on: its after-midnight portion
             # (current_time < end) must match against yesterday's day, not today's, or it would
             # also wrongly match during the pre-start hours of its own start day.
-            if self._wraps(window) and current_time < parse_time_of_day(window.end):
+            window_end = parse_time_of_day(window.end)
+            if self._wraps(window) and window_end is not None and current_time < window_end:
                 if yesterday_name in days:
                     return window
             elif today_name in days:
@@ -706,6 +710,9 @@ class PodHomeRewardsBalanceSensor(PodHomeAccountEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
+        # Always constructed with a real config_entry - see entity.py's PodHomeAccountEntity
+        # device_info for the same assertion and rationale.
+        assert self.coordinator.config_entry is not None
         return f"{DOMAIN}_{self.coordinator.config_entry.entry_id}_rewards_balance"
 
     @property

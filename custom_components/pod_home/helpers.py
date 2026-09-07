@@ -158,6 +158,8 @@ def parse_time_of_day(time_str: str | None) -> datetime.time | None:
 
 def is_momentarily_unplugged(charging_state: str | None) -> bool:
     """Whether chargingState currently implies no cable connected."""
+    if charging_state is None:
+        return False
     return CHARGING_STATE_CABLE_CONNECTED.get(charging_state) is False
 
 
@@ -233,7 +235,9 @@ def select_last_charge(
     if not current_charge or not latest_charge:
         return current_charge or latest_charge
     same_session = (
-        abs((latest_charge.started_at - current_charge.started_at).total_seconds())
+        current_charge.started_at is not None
+        and latest_charge.started_at is not None
+        and abs((latest_charge.started_at - current_charge.started_at).total_seconds())
         <= _SAME_SESSION_TOLERANCE.total_seconds()
     )
     if same_session and latest_charge.ended_at is not None:
@@ -398,16 +402,16 @@ def _sum_clipped_event_seconds(
             intervals.append((start, end))
     intervals.sort()
     total = datetime.timedelta()
-    merged_start = merged_end = None
+    merged: tuple[datetime.datetime, datetime.datetime] | None = None
     for start, end in intervals:
-        if merged_end is None or start > merged_end:
-            if merged_end is not None:
-                total += merged_end - merged_start
-            merged_start, merged_end = start, end
+        if merged is None or start > merged[1]:
+            if merged is not None:
+                total += merged[1] - merged[0]
+            merged = (start, end)
         else:
-            merged_end = max(merged_end, end)
-    if merged_end is not None:
-        total += merged_end - merged_start
+            merged = (merged[0], max(merged[1], end))
+    if merged is not None:
+        total += merged[1] - merged[0]
     return int(total.total_seconds())
 
 
@@ -431,11 +435,11 @@ def current_charging_seconds(
     `override_started_at` is credited from `session_start` (degrades to the naive estimate,
     never overcounts). Known limitation: only the currently active override is tracked - one
     that ran and ended earlier in the same session leaves no trace."""
+    if session_start is None:
+        return None
     if schedule_events is None and not override_active:
         return None
     events = list(schedule_events) if schedule_events is not None else []
     if override_active:
         events.append((override_started_at or session_start, now, "Override"))
-    if session_start is None:
-        return None
     return _sum_clipped_event_seconds(events, session_start, now)

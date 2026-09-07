@@ -16,7 +16,7 @@ elsewhere, so there's no benefit to a disabled-but-visible entity on every unsup
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.lock import LockEntity
 from homeassistant.core import HomeAssistant
@@ -63,15 +63,15 @@ class PodHomeRemoteLock(PodHomeOptimisticWriteMixin, PodHomeEntity, LockEntity):
     @property
     def is_locked(self) -> bool | None:
         optimistic = self._read_optimistic_value()
-        if optimistic is not None:
+        if isinstance(optimistic, bool):
             return optimistic
         charger = self.charger
         return charger.remote_lock_off_mode if charger else None
 
-    async def async_lock(self, **kwargs) -> None:
+    async def async_lock(self, **kwargs: Any) -> None:
         await self._async_set_locked(True)
 
-    async def async_unlock(self, **kwargs) -> None:
+    async def async_unlock(self, **kwargs: Any) -> None:
         await self._async_set_locked(False)
 
     async def _async_set_locked(self, off_mode: bool) -> None:

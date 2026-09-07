@@ -82,8 +82,12 @@ class PodHomeBoostFullChargeButton(PodHomeEntity, ButtonEntity):
         # The app itself won't start a boost with the cable unplugged - matched here rather
         # than left to fail live against the API. Also unavailable during Always On (Basic
         # Charging) - the app doesn't allow boosting while it's active.
+        charger = self.charger
         return (
-            super().available and self._cable_connected and not self.charger.always_on_active
+            super().available
+            and self._cable_connected
+            and charger is not None
+            and not charger.always_on_active
         )
 
     async def async_press(self) -> None:
@@ -114,8 +118,12 @@ class PodHomeBoostDurationButton(PodHomeEntity, ButtonEntity):
     def available(self) -> bool:
         # The app itself won't start a boost with the cable unplugged, or during Always On -
         # see Full charge above.
+        charger = self.charger
         return (
-            super().available and self._cable_connected and not self.charger.always_on_active
+            super().available
+            and self._cable_connected
+            and charger is not None
+            and not charger.always_on_active
         )
 
     async def async_press(self) -> None:
@@ -158,7 +166,8 @@ class PodHomeCancelBoostButton(PodHomeEntity, ButtonEntity):
         # action entities that don't currently apply (e.g. a media player's "next track"). This
         # already carries the "is a boost active" signal, so the icon stays static rather than
         # duplicating that via a second, redundant dynamic-icon mechanism.
-        return super().available and self.charger.boost_end_at is not None
+        charger = self.charger
+        return super().available and charger is not None and charger.boost_end_at is not None
 
     async def async_press(self) -> None:
         if not self.charger:

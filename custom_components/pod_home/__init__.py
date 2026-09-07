@@ -1,8 +1,10 @@
 """The Pod Home integration."""
 from __future__ import annotations
 
+import datetime
+from collections.abc import Callable
 import logging
-from typing import Callable
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -60,7 +62,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> b
     """Set up Pod Home from a config entry."""
     session = async_get_clientsession(hass)
 
-    auth_store: Store = Store(hass, AUTH_STORAGE_VERSION, auth_store_key(entry.entry_id))
+    auth_store: Store[dict[str, Any]] = Store(
+        hass, AUTH_STORAGE_VERSION, auth_store_key(entry.entry_id)
+    )
     try:
         auth_data = await auth_store.async_load()
     except Exception:  # noqa: BLE001 - a corrupt/unreadable store file must not block setup
@@ -87,12 +91,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> b
         if _cancel_delayed_save is not None:
             _cancel_delayed_save()
 
-        async def _save_if_still_current(_now) -> None:
+        async def _save_if_still_current(_now: datetime.datetime) -> None:
             nonlocal _cancel_delayed_save
             _cancel_delayed_save = None
             if entry.data.get(CONF_PASSWORD) != signed_in_password:
                 return
-            await auth_store.async_save(auth.export_tokens())
+            tokens = auth.export_tokens()
+            # Only called after a successful sign-in/refresh (see _save_auth_tokens' docstring),
+            # which always leaves real tokens set - export_tokens() returning None here would
+            # mean this fired before any token was ever obtained.
+            if tokens is not None:
+                await auth_store.async_save(tokens)
 
         _cancel_delayed_save = async_call_later(hass, AUTH_SAVE_DELAY, _save_if_still_current)
 

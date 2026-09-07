@@ -4,10 +4,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.number import NumberDeviceClass, NumberEntity
-from homeassistant.const import PERCENTAGE
+from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -61,7 +60,7 @@ class PodHomeVehicleTargetChargeNumber(PodHomeOptimisticWriteMixin, PodHomeVehic
     @property
     def native_value(self) -> int | None:
         optimistic = self._read_optimistic_value()
-        if optimistic is not None:
+        if isinstance(optimistic, int):
             return optimistic
         vehicle = self.vehicle
         return vehicle.charge_limit_percent if vehicle else None

@@ -5,18 +5,18 @@ import datetime
 from typing import TYPE_CHECKING
 
 from homeassistant.components.time import TimeEntity
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import DOMAIN
+from .const import DAY_OF_WEEK_OPTIONS, DOMAIN
+from .coordinator import PodHomeDataUpdateCoordinator
 from .entity import (
     PodHomeEntity,
     PodHomeOptimisticWriteMixin,
     PodHomeVehicleEntity,
-    PodHomeVehicleIntentsWriteMixin,
     async_setup_dynamic_chargers,
     async_setup_dynamic_vehicles,
 )
@@ -45,9 +45,7 @@ async def async_setup_entry(
     )
 
 
-class PodHomeVehicleReadyByTime(
-    PodHomeOptimisticWriteMixin, PodHomeVehicleEntity, PodHomeVehicleIntentsWriteMixin, TimeEntity
-):
+class PodHomeVehicleReadyByTime(PodHomeOptimisticWriteMixin, PodHomeVehicleEntity, TimeEntity):
     """Settable Ready By - the local wall-clock time Smart Charging aims to reach Target Charge
     by. Confirmed working live.
 
@@ -55,11 +53,12 @@ class PodHomeVehicleReadyByTime(
     local string), not the old sensor's ready_by (currentIntent.readyByTime, which can lag a
     just-written change and carries a date).
 
-    Writes go through the shared per-day intents endpoint, whose entries also require
-    chargeKWh even though this entity doesn't change it - echoes back the last-read
-    vehicle.intent_charge_kwh rather than recomputing one, and refuses to write (raises) if
-    that value isn't known yet. PodHomeOptimisticWriteMixin masks native_value's
-    read-your-own-write race."""
+    Writes go through the shared per-day intents endpoint (PUT .../intents, requiring both
+    chargeByTime and chargeKWh on every entry, fanned identically across all 7 days - see
+    DAY_OF_WEEK_OPTIONS in const.py), whose entries also require chargeKWh even though this
+    entity doesn't change it - echoes back the last-read vehicle.intent_charge_kwh rather than
+    recomputing one, and refuses to write (raises) if that value isn't known yet.
+    PodHomeOptimisticWriteMixin masks native_value's read-your-own-write race."""
 
     _attr_translation_key = "vehicle_ready_by"
     _attr_name = "Ready by"
@@ -79,24 +78,37 @@ class PodHomeVehicleReadyByTime(
     @property
     def native_value(self) -> datetime.time | None:
         optimistic = self._read_optimistic_value()
-        if optimistic is not None:
+        if isinstance(optimistic, datetime.time):
             return optimistic
         vehicle = self.vehicle
         return parse_time_of_day(vehicle.intent_charge_by_time) if vehicle else None
 
     async def async_set_value(self, value: datetime.time) -> None:
         vehicle = self.vehicle
-        if not vehicle:
+        ppid = self.ppid
+        if not vehicle or not ppid:
             raise HomeAssistantError("No linked vehicle to set Ready By for")
         if vehicle.intent_charge_kwh is None:
             raise HomeAssistantError(
                 "Current chargeKWh isn't known yet - required for this write (see docstring)"
             )
-        await self._async_write_intents(
-            charge_by_time=value.strftime("%H:%M:%S"),
-            charge_kwh=vehicle.intent_charge_kwh,
-            optimistic_native_value=value,
-        )
+        charge_by_time = value.strftime("%H:%M:%S")
+        intent_details = [
+            {
+                "dayOfWeek": day,
+                "chargeByTime": charge_by_time,
+                "chargeKWh": round(vehicle.intent_charge_kwh, 2),
+            }
+            for day in DAY_OF_WEEK_OPTIONS
+        ]
+        await self.coordinator.api.async_set_vehicle_intents(ppid, vehicle.id, intent_details)
+        # Read-back for this write is the staleness-tiered vehicles fetch, not fetched every
+        # poll like preferences/charge_overrides/remote_lock elsewhere - force it so the
+        # refresh below actually has a chance to confirm the write, not just skip it as
+        # not-yet-stale.
+        self.coordinator.request_vehicles_fetch()
+        self._set_optimistic_value(value)
+        await self.coordinator.async_request_refresh()
 
 
 class PodHomeBoostDurationTime(PodHomeEntity, RestoreEntity, TimeEntity):
@@ -116,7 +128,7 @@ class PodHomeBoostDurationTime(PodHomeEntity, RestoreEntity, TimeEntity):
     _attr_name = "Boost duration"
     _attr_icon = "mdi:timer-cog-outline"
 
-    def __init__(self, coordinator, ppid: str) -> None:
+    def __init__(self, coordinator: PodHomeDataUpdateCoordinator, ppid: str) -> None:
         super().__init__(coordinator, ppid)
         self._value: datetime.time | None = None
 

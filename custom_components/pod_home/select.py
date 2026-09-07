@@ -17,6 +17,7 @@ from .const import (
     DOMAIN,
     SCHEDULE_MODE_BASIC_CHARGING,
 )
+from .coordinator import PodHomeCharger
 from .entity import PodHomeEntity, PodHomeOptimisticWriteMixin, async_setup_dynamic_chargers
 from .helpers import (
     charge_priority_available,
@@ -66,7 +67,7 @@ class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin, PodHomeEntity, Select
     def unique_id(self) -> str:
         return f"{DOMAIN}_{self.ppid}_charge_mode"
 
-    def _is_basic_charging(self, charger) -> bool:
+    def _is_basic_charging(self, charger: PodHomeCharger | None) -> bool:
         """Shared by every property/method below so schedule_mode() isn't re-derived
         independently in each one - mirrors _smart_mode_available's pattern (entity.py)."""
         return (
@@ -85,6 +86,8 @@ class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin, PodHomeEntity, Select
         if not super().available:
             return False
         charger = self.charger
+        if not charger:
+            return False
         if self._is_basic_charging(charger):
             # Schedule vs Always on doesn't depend on tariff shape at all, unlike Smart
             # Charging's cost-vs-completion choice below.
@@ -94,7 +97,7 @@ class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin, PodHomeEntity, Select
     @property
     def current_option(self) -> str | None:
         optimistic = self._read_optimistic_value()
-        if optimistic is not None:
+        if isinstance(optimistic, str):
             return optimistic
         charger = self.charger
         if not charger:

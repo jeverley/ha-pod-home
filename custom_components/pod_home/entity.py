@@ -1,16 +1,14 @@
 """Base entity for the Pod Home integration."""
 from __future__ import annotations
 
-import datetime
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import ATTRIBUTION, DAY_OF_WEEK_OPTIONS, DOMAIN, MANUFACTURER
+from .const import ATTRIBUTION, DOMAIN, MANUFACTURER
 from .coordinator import PodHomeCharge, PodHomeCharger, PodHomeDataUpdateCoordinator, PodHomeVehicle
 from .helpers import (
     humanize_model_style,
@@ -55,7 +53,8 @@ class PodHomeEntity(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
         """Shared by every entity/action that only makes sense with a cable plugged in (the
         boost buttons, Boost duration) - only meaningful once `available` above has already
         confirmed a charger exists."""
-        return not is_momentarily_unplugged(self.charger.charging_state)
+        charger = self.charger
+        return not is_momentarily_unplugged(charger.charging_state if charger else None)
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -140,6 +139,9 @@ class PodHomeAccountEntity(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
 
     @property
     def device_info(self) -> DeviceInfo:
+        # Always constructed with a real config_entry (coordinator.py) - HA's own typing allows
+        # None here since a coordinator can in principle exist without one, this one never does.
+        assert self.coordinator.config_entry is not None
         return DeviceInfo(
             identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
             name="Pod Point",
@@ -147,62 +149,36 @@ class PodHomeAccountEntity(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
         )
 
 
-class PodHomeVehicleIntentsWriteMixin:
-    """Write helper for the Ready By time entity (time.py). Confirmed working live.
-
-    PUT .../intents requires both chargeByTime and chargeKWh on every entry, fanned identically
-    across all 7 days (see DAY_OF_WEEK_OPTIONS in const.py)."""
-
-    async def _async_write_intents(
-        self,
-        *,
-        charge_by_time: str,
-        charge_kwh: float,
-        optimistic_native_value: datetime.time,
-    ) -> None:
-        vehicle = self.vehicle  # type: ignore[attr-defined]
-        ppid = self.ppid  # type: ignore[attr-defined]
-        if not vehicle or not ppid:
-            raise HomeAssistantError("No linked vehicle to write Ready By for")
-        intent_details = [
-            {"dayOfWeek": day, "chargeByTime": charge_by_time, "chargeKWh": round(charge_kwh, 2)}
-            for day in DAY_OF_WEEK_OPTIONS
-        ]
-        await self.coordinator.api.async_set_vehicle_intents(  # type: ignore[attr-defined]
-            ppid, vehicle.id, intent_details
-        )
-        # Read-back for this write is the staleness-tiered vehicles fetch, not fetched every
-        # poll like preferences/charge_overrides/remote_lock elsewhere - force it so the
-        # refresh below actually has a chance to confirm the write, not just skip it as
-        # not-yet-stale.
-        self.coordinator.request_vehicles_fetch()  # type: ignore[attr-defined]
-        self._set_optimistic_value(optimistic_native_value)  # type: ignore[attr-defined]
-        await self.coordinator.async_request_refresh()  # type: ignore[attr-defined]
-
-
-class PodHomeOptimisticWriteMixin:
+class PodHomeOptimisticWriteMixin(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
     """Masks the read-your-own-write race after a successful write: a write's own immediate
     `async_request_refresh()` can race Pod Point's backend actually making the change visible
     (confirmed live), so the just-written value is shown until the SECOND coordinator update
     after it, not the first (which is that same racy refresh, still in flight when this fires)
     or a fixed delay. The poll after that is trusted either way, whether it confirms the write
-    or reveals something else actually happened."""
+    or reveals something else actually happened.
 
-    def _set_optimistic_value(self, value) -> None:
+    Inherits CoordinatorEntity for real, not just for typing's sake - every concrete class that
+    mixes this in already provides that ancestor via PodHomeEntity/PodHomeVehicleEntity, so this
+    just states plainly what's already guaranteed rather than lying to the type checker."""
+
+    _optimistic_value: Any = None
+    _optimistic_polls_remaining: int = 0
+
+    def _set_optimistic_value(self, value: Any) -> None:
+        # value's real type varies by consumer (bool for lock.py, int for number.py, str for
+        # select.py, datetime.time for time.py) - each concrete class narrows it back on read.
         self._optimistic_value = value
         self._optimistic_polls_remaining = 2
 
-    def _read_optimistic_value(self):
-        return getattr(self, "_optimistic_value", None)
+    def _read_optimistic_value(self) -> Any:
+        return self._optimistic_value
 
     def _handle_coordinator_update(self) -> None:
-        remaining = getattr(self, "_optimistic_polls_remaining", 0)
-        if remaining > 0:
-            remaining -= 1
-            self._optimistic_polls_remaining = remaining
-            if remaining == 0:
+        if self._optimistic_polls_remaining > 0:
+            self._optimistic_polls_remaining -= 1
+            if self._optimistic_polls_remaining == 0:
                 self._optimistic_value = None
-        super()._handle_coordinator_update()  # type: ignore[misc]
+        super()._handle_coordinator_update()
 
 
 def async_setup_dynamic_chargers(

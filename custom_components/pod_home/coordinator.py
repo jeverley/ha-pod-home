@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable, Coroutine, Iterator
 import dataclasses
 from dataclasses import dataclass
 import datetime
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -38,6 +39,8 @@ if TYPE_CHECKING:
     from . import PodHomeConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 # How far back to look for "the most recent charge" each poll.
 RECENT_CHARGES_LOOKBACK = datetime.timedelta(days=14)
@@ -85,10 +88,18 @@ STICKY_STATE_STORAGE_VERSION = 1
 STICKY_STATE_SAVE_DELAY = 10  # seconds
 
 
-def _safe_dict(value) -> dict:
+def _safe_dict(value: object) -> dict[str, Any]:
     """Coerce a JSON value to a dict, discarding anything else. Guards nested .get() chains on
     response data that isn't guaranteed to match the expected shape at every level."""
     return value if isinstance(value, dict) else {}
+
+
+def _cable_connected_from_state(charging_state: object) -> bool:
+    """Whether a connectivity poll's raw chargingState implies a cable is connected - an
+    unrecognized/missing value errs toward "connected" (see call site's comment)."""
+    if not isinstance(charging_state, str):
+        return True
+    return CHARGING_STATE_CABLE_CONNECTED.get(charging_state) is not False
 
 
 @dataclass
@@ -324,7 +335,7 @@ def _parse_dt(value: str | None) -> datetime.datetime | None:
 
 
 def _parse_charge_overrides(
-    charge_overrides_raw: list, now: datetime.datetime
+    charge_overrides_raw: list[Any], now: datetime.datetime
 ) -> tuple[datetime.datetime | None, bool, datetime.datetime | None]:
     """Single pass over GET /chargers/{ppid}/charge-overrides, returning
     `(boost_end_at, always_on_active, override_started_at)` - a boost and Always On are mutually
@@ -444,7 +455,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self._smart_charging_supported_by_ppid: dict[str, bool | None] = {}
         # Month-to-date charge-statistics - fetched every poll while that charger was charging as
         # of the previous poll, otherwise on CHARGE_STATS_REFRESH_INTERVAL.
-        self._month_stats_by_ppid: dict[str, tuple[float | None, float | None]] = {}
+        self._month_stats_by_ppid: dict[str, tuple[float | None, int | None]] = {}
         self._month_stats_fetched_at: dict[str, datetime.datetime] = {}
         # /charges (latest_charge) is one account-wide call, not per-ppid, so its own staleness
         # is tracked as a single timestamp rather than a dict - fetched every poll while ANY
@@ -485,14 +496,14 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self._charge_finished_at_by_ppid: dict[str, datetime.datetime] = {}
         # Scoped per config entry (not per-domain) so a second Pod Home account gets its own file
         # rather than colliding.
-        self._sticky_store: Store = Store(
+        self._sticky_store: Store[dict[str, Any]] = Store(
             hass, STICKY_STATE_STORAGE_VERSION, f"{DOMAIN}_{config_entry.entry_id}_status"
         )
         # Separate Store (and separate load/save try/except below) from the sticky Charger
         # Status signals above, deliberately not sharing one file - a corrupt/unreadable status
         # file is low-stakes (self-heals within a poll or two), but the same failure wiping this
         # Total Energy running total would silently drop accumulated history.
-        self._total_energy_store: Store = Store(
+        self._total_energy_store: Store[dict[str, Any]] = Store(
             hass, STICKY_STATE_STORAGE_VERSION, f"{DOMAIN}_{config_entry.entry_id}_total_energy"
         )
         # Live PodHomeBoostDurationTime instances, keyed by ppid (time.py registers/deregisters
@@ -537,7 +548,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self._total_energy_kwh_by_ppid = self._parse_number_dict(total_data.get("total_energy_kwh"))
 
     @staticmethod
-    def _parse_number_dict(raw) -> dict[str, float]:
+    def _parse_number_dict(raw: object) -> dict[str, float]:
         if not isinstance(raw, dict):
             return {}
         result: dict[str, float] = {}
@@ -547,7 +558,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         return result
 
     @staticmethod
-    def _parse_sticky_dict(raw) -> dict[str, datetime.datetime]:
+    def _parse_sticky_dict(raw: object) -> dict[str, datetime.datetime]:
         if not isinstance(raw, dict):
             return {}
         result: dict[str, datetime.datetime] = {}
@@ -557,7 +568,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                 result[ppid] = parsed
         return result
 
-    def _sticky_state_for_storage(self) -> dict:
+    def _sticky_state_for_storage(self) -> dict[str, Any]:
         return {
             "charging_started_at": {
                 p: dt.isoformat() for p, dt in self._charging_started_at_by_ppid.items()
@@ -570,7 +581,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             },
         }
 
-    def _total_energy_state_for_storage(self) -> dict:
+    def _total_energy_state_for_storage(self) -> dict[str, Any]:
         return {
             "total_watermark": {
                 p: dt.isoformat() for p, dt in self._total_watermark_by_ppid.items()
@@ -602,7 +613,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
     ) -> bool:
         return now - fetched_at.get(ppid, _NEVER_FETCHED) >= interval
 
-    async def _safe_call(self, key: str, message: str, coro) -> dict | list:
+    async def _safe_call(
+        self, key: str, message: str, coro: Coroutine[Any, Any, dict[str, Any] | list[Any]]
+    ) -> dict[str, Any] | list[Any]:
         """Await `coro`; on PodHomeApiError, log (deduped) and return {} instead of raising.
         Most endpoints here return a dict; a couple (e.g. GET /chargers/{ppid}/firmware) return
         a bare list instead - `result or {}` only coerces a falsy result, a genuine list result
@@ -617,7 +630,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             self._warn_once(key, f"{message}: {exc}")
             return {}
 
-    async def _fetch_smart_schedule(self, ppid: str) -> dict:
+    async def _fetch_smart_schedule(self, ppid: str) -> dict[str, Any]:
         """Like _safe_call, but a 404 with one of these error codes is an expected, common state,
         not a real problem - logged at debug, not warning. Any other failure still goes through
         the normal _warn_once path.
@@ -725,6 +738,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         duration/cost aren't populated live by the API on an open entry (both 0), so duration is
         computed here instead; cost has no reliable way to derive live, so it's left None rather
         than surfacing the API's misleading 0 as if it were real."""
+        # Only called once the caller has confirmed _api3_user_id is set (see _async_fetch_data).
+        assert self._api3_user_id is not None
         try:
             charges_resp = await self.api.async_api3_charges(self._api3_user_id)
         except PodHomeApiError as exc:
@@ -736,24 +751,25 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         pod_id_to_ppid = {pod_id: ppid for ppid, pod_id in self._api3_pod_id_by_ppid.items()}
         current_by_ppid: dict[str, PodHomeCharge] = {}
         open_entry_seen = False
-        unmatched_pod_ids: set = set()
+        unmatched_pod_ids: set[Any] = set()
         for entry in (charges_resp or {}).get("charges") or []:
             if entry.get("ends_at") is not None:
                 continue  # finished - mobile-api's own /charges (latest_charge) covers this
             open_entry_seen = True
             raw_pod_id = (entry.get("pod") or {}).get("id")
-            ppid = pod_id_to_ppid.get(raw_pod_id)
+            ppid = pod_id_to_ppid.get(raw_pod_id) if raw_pod_id is not None else None
             if not ppid:
                 unmatched_pod_ids.add(raw_pod_id)
                 continue  # unknown pod - see the warning below if this happens for every entry
             if ppid in current_by_ppid:
                 continue  # this ppid's current charge was already found
             started_at = _parse_dt(entry.get("starts_at"))
-            if started_at is None:
+            entry_id = entry.get("id")
+            if started_at is None or entry_id is None:
                 continue
             billing = entry.get("billing_event") or {}
             current_by_ppid[ppid] = PodHomeCharge(
-                id=str(entry["id"]) if entry.get("id") is not None else None,
+                id=str(entry_id),
                 started_at=started_at,
                 ended_at=None,
                 duration=int((now - started_at).total_seconds()),
@@ -789,7 +805,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                 translation_placeholders={"error": str(exc)},
             ) from exc
 
-    async def _async_with_connection_retry(self, attempt):
+    async def _async_with_connection_retry(
+        self, attempt: Callable[[], Coroutine[Any, Any, _T]]
+    ) -> _T:
         """Retry `attempt` (a zero-arg async callable performing one API call) up to
         CONNECTION_RETRY_ATTEMPTS times, but only for connection-level failures - see
         CONNECTION_RETRY_ATTEMPTS' comment above."""
@@ -803,6 +821,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                 last_exc = exc
                 if attempt_number < CONNECTION_RETRY_ATTEMPTS - 1:
                     await asyncio.sleep(CONNECTION_RETRY_DELAY_SECONDS)
+        # Reached only once the loop above has exhausted CONNECTION_RETRY_ATTEMPTS (always >= 1)
+        # iterations, each of which either returns or sets last_exc before continuing.
+        assert last_exc is not None
         raise last_exc
 
     async def _async_fetch_data(self) -> dict[str, PodHomeCharger]:
@@ -824,8 +845,12 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # cadence tiers below, so a charging-state transition promotes those tiers THIS poll
         # rather than the poll after. Missing-ppid entries are silently skipped here; the
         # per-charger loop below still logs its own warning for them once.
-        ppids = [raw.get("ppid") for raw in chargers_raw if raw.get("ppid")]
-        connectivity_by_ppid: dict[str, dict] = {}
+        ppids: list[str] = []
+        for raw in chargers_raw:
+            raw_ppid = raw.get("ppid")
+            if isinstance(raw_ppid, str) and raw_ppid:
+                ppids.append(raw_ppid)
+        connectivity_by_ppid: dict[str, dict[str, Any]] = {}
         if ppids:
             connectivity_results = await asyncio.gather(
                 *(
@@ -837,7 +862,14 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                     for ppid in ppids
                 )
             )
-            connectivity_by_ppid = dict(zip(ppids, connectivity_results))
+            # connectivity-status-v2 is always dict-shaped on success; _safe_call's {} fallback
+            # on error is a dict too - the isinstance check is only for the type checker's
+            # benefit (_safe_call's return type is shared with list-returning endpoints).
+            connectivity_by_ppid = {
+                ppid: result
+                for ppid, result in zip(ppids, connectivity_results)
+                if isinstance(result, dict)
+            }
 
         account_preferences_stale = (
             self._account_preferences_fetched_at is None
@@ -856,7 +888,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # toward "treat as connected" (fetch more often), unlike the Cable Status sensor itself,
         # which surfaces that ambiguity as unknown.
         any_cable_connected_this_poll = any(
-            CHARGING_STATE_CABLE_CONNECTED.get(connectivity.get("chargingState")) is not False
+            _cable_connected_from_state(connectivity.get("chargingState"))
             for connectivity in connectivity_by_ppid.values()
         )
         # The charger's own chargingState (now this-poll-fresh, above) and the linked vehicle's
@@ -1089,7 +1121,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             # Fetched every poll while this charger was charging as of the previous poll,
             # otherwise on the slower CHARGE_STATS_REFRESH_INTERVAL cadence.
             was_charging_last_poll = (
-                self.data.get(ppid).charging_state if self.data and ppid in self.data else None
+                self.data[ppid].charging_state if self.data and ppid in self.data else None
             ) == CHARGING_STATE_CHARGING
             if was_charging_last_poll or self._stale(
                 self._month_stats_fetched_at, ppid, now, CHARGE_STATS_REFRESH_INTERVAL
@@ -1346,7 +1378,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             self.update_interval = new_interval
 
     @staticmethod
-    def _charge_entries_by_ppid(charges_raw: dict):
+    def _charge_entries_by_ppid(
+        charges_raw: dict[str, Any],
+    ) -> Iterator[tuple[str, dict[str, Any], dict[str, Any]]]:
         """Yield (ppid, entry, charger) for every /charges entry that resolves to a known
         charger. Call sites materialize this once (`list(...)`) and pass the result to both
         _latest_charge_per_ppid() and _accumulate_total_energy() rather than each re-iterating
@@ -1360,13 +1394,16 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             yield ppid, entry, charger
 
     @staticmethod
-    def _latest_charge_per_ppid(charge_entries: list) -> dict[str, PodHomeCharge]:
+    def _latest_charge_per_ppid(
+        charge_entries: list[tuple[str, dict[str, Any], dict[str, Any]]],
+    ) -> dict[str, PodHomeCharge]:
         latest: dict[str, PodHomeCharge] = {}
         latest_started: dict[str, datetime.datetime] = {}
 
         for ppid, entry, charger in charge_entries:
             started_at = _parse_dt(entry.get("startedAt"))
-            if started_at is None:
+            entry_id = entry.get("id")
+            if started_at is None or entry_id is None:
                 continue
 
             if ppid in latest_started and started_at <= latest_started[ppid]:
@@ -1375,7 +1412,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             cost = entry.get("cost") or {}
             latest_started[ppid] = started_at
             latest[ppid] = PodHomeCharge(
-                id=entry.get("id"),
+                id=str(entry_id),
                 started_at=started_at,
                 ended_at=_parse_dt(entry.get("endedAt")),
                 duration=entry.get("duration"),
@@ -1388,7 +1425,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
 
         return latest
 
-    def _accumulate_total_energy(self, charge_entries: list) -> None:
+    def _accumulate_total_energy(
+        self, charge_entries: list[tuple[str, dict[str, Any], dict[str, Any]]]
+    ) -> None:
         """Incrementally add newly-finalized charges to the persisted running total, per ppid -
         reuses the already-parsed charge_entries _latest_charge_per_ppid() also consumes, not a
         second pass. Only entries with endedAt set (finalized) count, so a session's energy is
@@ -1401,7 +1440,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         seen_ids additionally guards two entries in the SAME batch sharing an endedAt, which
         the watermark snapshot alone wouldn't catch."""
         watermarks_before = dict(self._total_watermark_by_ppid)
-        seen_ids: set = set()
+        seen_ids: set[Any] = set()
 
         for ppid, entry, _charger in charge_entries:
             ended_at = _parse_dt(entry.get("endedAt"))
@@ -1429,7 +1468,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                 self._total_watermark_by_ppid[ppid] = ended_at
 
     @staticmethod
-    def _parse_firmware(firmware_raw) -> PodHomeFirmware | None:
+    def _parse_firmware(firmware_raw: object) -> PodHomeFirmware | None:
         """firmware_raw is a bare list from GET /chargers/{ppid}/firmware - unlike the legacy
         api3/v5/units/{unitId}/firmware endpoint this replaced, it's not `data`-wrapped."""
         entries = firmware_raw if isinstance(firmware_raw, list) else []
@@ -1447,38 +1486,41 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         )
 
     @staticmethod
-    def _parse_smart_charging_supported(tariffs_raw) -> bool | None:
+    def _parse_smart_charging_supported(tariffs_raw: object) -> bool | None:
         """Same source as _parse_tariff_windows (data[0]), parsed separately since the two are
         conceptually distinct (a list of windows vs. a single capability flag)."""
-        entries = (tariffs_raw or {}).get("data") or []
+        entries = _safe_dict(tariffs_raw).get("data") or []
         if not entries or not isinstance(entries, list):
             return None
         return _safe_dict(entries[0]).get("smartChargingSupported")
 
     @staticmethod
-    def _parse_tariff_windows(tariffs_raw) -> list[PodHomeTariffWindow] | None:
-        entries = (tariffs_raw or {}).get("data") or []
+    def _parse_tariff_windows(tariffs_raw: object) -> list[PodHomeTariffWindow] | None:
+        entries = _safe_dict(tariffs_raw).get("data") or []
         if not entries or not isinstance(entries, list):
             return None
         entry = _safe_dict(entries[0])
         windows_raw = entry.get("tariffInfo") or []
         if not isinstance(windows_raw, list):
             return None
-        windows = [
-            PodHomeTariffWindow(
-                days=w.get("days") or [],
-                start=w.get("start"),
-                end=w.get("end"),
-                price=w.get("price"),
+        windows = []
+        for raw_window in windows_raw:
+            w = _safe_dict(raw_window)
+            start, end = w.get("start"), w.get("end")
+            if not w or start is None or end is None:
+                continue  # a window needs both bounds to mean anything
+            windows.append(
+                PodHomeTariffWindow(
+                    days=w.get("days") or [], start=start, end=end, price=w.get("price")
+                )
             )
-            for w in (_safe_dict(raw_window) for raw_window in windows_raw)
-            if w
-        ]
         return windows or None
 
     @staticmethod
-    def _parse_manual_schedules(manual_schedules_raw) -> list[PodHomeManualScheduleWindow] | None:
-        entries = (manual_schedules_raw or {}).get("data") or []
+    def _parse_manual_schedules(
+        manual_schedules_raw: object,
+    ) -> list[PodHomeManualScheduleWindow] | None:
+        entries = _safe_dict(manual_schedules_raw).get("data") or []
         if not isinstance(entries, list):
             return None
         windows = [
@@ -1496,8 +1538,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         return windows or None
 
     @staticmethod
-    def _parse_smart_schedule(smart_schedule_raw) -> list[PodHomeSmartScheduleWindow] | None:
-        entries = (smart_schedule_raw or {}).get("schedule") or []
+    def _parse_smart_schedule(smart_schedule_raw: object) -> list[PodHomeSmartScheduleWindow] | None:
+        entries = _safe_dict(smart_schedule_raw).get("schedule") or []
         if not isinstance(entries, list):
             return None
         windows = [
@@ -1514,7 +1556,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         return windows or None
 
     @staticmethod
-    def _vehicle_per_ppid(vehicles_raw) -> dict[str, PodHomeVehicle]:
+    def _vehicle_per_ppid(vehicles_raw: object) -> dict[str, PodHomeVehicle]:
         """vehicles_raw is normally a list (one entry per charger with linked vehicles);
         _safe_call's generic dict fallback on error becomes {} here, handled by the isinstance
         check. Every element is coerced via _safe_dict too, since a malformed list element must

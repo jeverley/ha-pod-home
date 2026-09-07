@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       - run: pip install pyflakes
       - run: |
           python -m py_compile custom_components/pod_home/*.py \
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       - run: pip install -e podpoint-mobile-api
       - run: python -c "import podpoint_mobile_api"
       - run: pip install mypy
@@ -42,8 +42,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       - run: pip install -r requirements_test.txt
       # python -m pytest, not bare `pytest` - only the former puts the repo root (and so
       # custom_components/) on sys.path. One unified session - see tests/conftest.py.
       - run: python -m pytest tests/ -v
+
+  pod-home-mypy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      # requirements_test.txt pulls in homeassistant itself (via
+      # pytest-homeassistant-custom-component), needed to resolve homeassistant.* imports; mypy
+      # is already listed there too.
+      - run: pip install -r requirements_test.txt
+      - run: python -m mypy --strict custom_components/pod_home/ --exclude 'podpoint_mobile_api/'
