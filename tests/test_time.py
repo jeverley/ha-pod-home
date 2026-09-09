@@ -44,6 +44,7 @@ async def test_ready_by_set_value_writes_intents_with_echoed_kwh(hass: HomeAssis
     assert len(call_details) == 7  # fanned across all 7 days
     assert all(d["chargeByTime"] == "08:00:00" and d["chargeKWh"] == 42.34 for d in call_details)
     coordinator.async_request_refresh.assert_called_once()
+    assert coordinator._last_write_at is not None
 
 
 async def test_ready_by_set_value_forces_vehicle_fetch(hass: HomeAssistant) -> None:

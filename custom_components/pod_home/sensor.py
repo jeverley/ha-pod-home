@@ -219,10 +219,9 @@ class PodHomeStatusSensor(PodHomeEntity, SensorEntity):
 class PodHomeLastChargeDurationSensor(PodHomeEntity, SensorEntity):
     """Duration of the most recent charge session - live (current_charge) if in progress, else
     the last finished one (latest_charge). While live, this is refined cumulative charging time
-    where possible (see current_charging_seconds(), helpers.py), not naive time-since-plug-in -
-    in either Charging Scheme, using whichever schedule/override data is available this poll.
-    Native unit stays seconds for full recorder precision; suggested_unit_of_measurement only
-    changes the default display to hours."""
+    where possible (see current_charging_seconds(), helpers.py), in either Charging Scheme, using
+    whichever schedule/override data is available this poll. Native unit stays seconds for full
+    recorder precision; suggested_unit_of_measurement only changes the default display to hours."""
 
     _attr_translation_key = "last_charge_duration"
     _attr_name = "Last charge duration"
@@ -243,8 +242,7 @@ class PodHomeLastChargeDurationSensor(PodHomeEntity, SensorEntity):
 
 class PodHomeLastChargeEnergySensor(PodHomeEntity, SensorEntity):
     """Energy delivered in the most recent charge session - live if in progress (current_charge),
-    else the last finished one (latest_charge). A session snapshot, not dashboard-safe - use
-    Month Energy for the Energy Dashboard instead."""
+    else the last finished one (latest_charge). A session snapshot, not dashboard-safe."""
 
     _attr_translation_key = "last_charge_energy"
     _attr_name = "Last charge energy"
@@ -263,11 +261,8 @@ class PodHomeLastChargeEnergySensor(PodHomeEntity, SensorEntity):
 
 
 class PodHomeLastChargeCostSensor(PodHomeEntity, SensorEntity):
-    """Cost of the most recent charge session. Unlike Duration/Energy, NOT live: cost is unknown
-    while a session is in progress (current_charge.cost_amount is always 0 there, so it's left
-    None rather than shown misleadingly), populating once mobile-api reports the session finished
-    (latest_charge, via select_last_charge()). A session snapshot, not dashboard-safe - use Month
-    Cost for the Energy Dashboard instead."""
+    """None while a session is in progress; populates once mobile-api reports it finished
+    (latest_charge, via select_last_charge()). A session snapshot, not dashboard-safe."""
 
     _attr_translation_key = "last_charge_cost"
     _attr_name = "Last charge cost"
@@ -293,9 +288,9 @@ class PodHomeLastChargeCostSensor(PodHomeEntity, SensorEntity):
 
 class PodHomeMonthEnergySensor(PodHomeEntity, SensorEntity):
     """Energy delivered so far this calendar month (charger's local time), finalized charges
-    only - matches the app. Deliberately excludes current_charge's live total: a session
-    spanning the month boundary can't be split between months, so this lags until the session
-    finalizes, same as the app. See Total Energy below for a live-inclusive running total."""
+    only - matches the app. Excludes current_charge's live total: a session spanning the month
+    boundary can't be split between months, so this lags until the session finalizes, same as
+    the app."""
 
     _attr_translation_key = "month_energy"
     _attr_name = "Month energy"
@@ -354,19 +349,16 @@ class PodHomeMonthCostSensor(PodHomeEntity, SensorEntity):
 
 class PodHomeTotalEnergySensor(PodHomeEntity, SensorEntity):
     """Running total energy delivered by this charger since Pod Home started tracking it - a
-    monotonic counter, unlike Month energy above. Not a full account lifetime total; counts from
-    whenever this charger was first seen by this install (total_started_at, exposed below).
-    Unlike Month energy, a live session IS added on top: select_last_charge() (helpers.py) is
-    used rather than a plain "current_charge is not None" check, since current_charge stays open
-    past mobile-api's own endedAt - without that check the session would be double-counted
-    between "mobile-api says finished" and "cable unplugged"."""
+    monotonic counter. Not a full account lifetime total; counts from whenever this charger was
+    first seen by this install (total_started_at, exposed below). Adds the live session's energy
+    only when it hasn't already been finalized, to avoid double-counting."""
 
     _attr_translation_key = "total_energy"
     _attr_name = "Total energy"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_icon = "mdi:lightning-bolt-circle"
+    _attr_icon = "mdi:meter-electric"
 
     @property
     def unique_id(self) -> str:
@@ -396,10 +388,9 @@ class PodHomeTotalEnergySensor(PodHomeEntity, SensorEntity):
 
 
 class PodHomeElectricityRateSensor(PodHomeEntity, SensorEntity):
-    """Current electricity rate, computed from the account's configured tariff windows. NOT
-    mode-gated - the rate is a property of the account's tariff, applicable regardless of
-    whether Smart Charging is currently active (e.g. deciding when to charge manually in Basic
-    mode)."""
+    """Current electricity rate, computed from the account's configured tariff windows. Not
+    mode-gated - the rate is a property of the account's tariff, applicable in either Charging
+    Scheme (e.g. deciding when to charge manually in Basic mode)."""
 
     _attr_translation_key = "electricity_rate"
     _attr_name = "Electricity rate"
@@ -518,12 +509,15 @@ class PodHomeVehicleBatteryLevelSensor(PodHomeVehicleEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
+        vehicle = self.vehicle
+        if not vehicle:
+            return None
+        attributes: dict[str, Any] = {"battery_capacity_kwh": vehicle.battery_capacity_kwh}
         # When Enode last synced this vehicle's data, not when pod_home last polled it - can lag
         # behind by anywhere from ~30s to several minutes.
-        vehicle = self.vehicle
-        if not vehicle or not vehicle.synced_at:
-            return None
-        return {"synced_at": vehicle.synced_at.isoformat()}
+        if vehicle.synced_at:
+            attributes["synced_at"] = vehicle.synced_at.isoformat()
+        return attributes
 
 
 class PodHomeVehicleRangeSensor(PodHomeVehicleEntity, SensorEntity):
@@ -549,7 +543,7 @@ class PodHomeVehicleRangeSensor(PodHomeVehicleEntity, SensorEntity):
 
     @property
     def suggested_unit_of_measurement(self) -> str | None:
-        return UnitOfLength.MILES if self.coordinator.unit_of_distance == "mi" else None
+        return self._suggested_distance_unit
 
 
 class PodHomeVehicleOdometerSensor(PodHomeVehicleEntity, SensorEntity):
@@ -573,7 +567,7 @@ class PodHomeVehicleOdometerSensor(PodHomeVehicleEntity, SensorEntity):
 
     @property
     def suggested_unit_of_measurement(self) -> str | None:
-        return UnitOfLength.MILES if self.coordinator.unit_of_distance == "mi" else None
+        return self._suggested_distance_unit
 
 
 class PodHomeVehicleExpectedChargeSensor(PodHomeVehicleEntity, SensorEntity):
@@ -675,8 +669,9 @@ class PodHomeVehicleMaxCurrentSensor(PodHomeVehicleEntity, SensorEntity):
 
 
 class PodHomeVehicleChargeTimeRemainingSensor(PodHomeVehicleEntity, SensorEntity):
-    """Raw vehicle.chargeState.chargeTimeRemaining. Unit unconfirmed (minutes assumed) - always
-    null on this account to date. Native stays minutes; suggested display unit is hours."""
+    """Raw vehicle.chargeState.chargeTimeRemaining. Unit unconfirmed (minutes assumed).
+    Confirmed live populated during Basic Charging, not just Smart Charging. Native stays
+    minutes; suggested display unit is hours."""
 
     _attr_translation_key = "vehicle_charge_time_remaining"
     _attr_name = "Charge time remaining"
@@ -697,9 +692,8 @@ class PodHomeVehicleChargeTimeRemainingSensor(PodHomeVehicleEntity, SensorEntity
 class PodHomeRewardsBalanceSensor(PodHomeAccountEntity, SensorEntity):
     """Account-wide rewards balance, from GET /reward-wallet. Lives on its own "Pod Point"
     account device, not a charger (see PodHomeAccountEntity, entity.py). Always GBP-denominated,
-    regardless of the account's billing currency - unlike the cost sensors, doesn't use
-    coordinator.currency. balance_miles/balance_points and allowance/payout-threshold figures are
-    exposed as attributes rather than separate entities."""
+    regardless of the account's billing currency. balance_miles/balance_points and
+    allowance/payout-threshold figures are exposed as attributes."""
 
     _attr_translation_key = "rewards_balance"
     _attr_name = "Rewards balance"

@@ -69,6 +69,7 @@ async def test_full_charge_press_sends_flat_12h_end_at(hass: HomeAssistant) -> N
     end_at = call_kwargs.kwargs["end_at"]
     assert end_at - requested_at == datetime.timedelta(hours=12)
     coordinator.async_request_refresh.assert_called_once()
+    assert coordinator._last_write_at is not None
 
 
 # --- Boost for duration ---
@@ -92,6 +93,7 @@ async def test_boost_duration_press_uses_registered_time_value_and_resets(
     end_at = call_kwargs.kwargs["end_at"]
     assert end_at - requested_at == datetime.timedelta(minutes=30)
     coordinator.async_request_refresh.assert_called_once()
+    assert coordinator._last_write_at is not None
     reset_entity.async_reset.assert_called_once()
 
 
@@ -171,3 +173,4 @@ async def test_cancel_boost_press_deletes_and_refreshes(hass: HomeAssistant) -> 
 
     coordinator.api.async_delete_charge_override.assert_called_once_with(PPID)
     coordinator.async_request_refresh.assert_called_once()
+    assert coordinator._last_write_at is not None

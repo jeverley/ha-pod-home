@@ -91,7 +91,8 @@
     "binary_sensor": {
       "connectivity": { "name": "Connectivity" },
       "cable_connected": { "name": "Cable status" },
-      "vehicle_charging": { "name": "Charging" }
+      "vehicle_charging": { "name": "Charging" },
+      "vehicle_plugged_in": { "name": "Plugged in" }
     },
     "update": {
       "firmware": { "name": "Firmware" }

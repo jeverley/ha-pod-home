@@ -105,6 +105,7 @@ def make_vehicle(**overrides) -> PodHomeVehicle:
         is_charging=False,
         odometer_km=12345.0,
         ready_by=None,
+        is_plugged_in=True,
         is_plugged_in_to_this_charger=True,
         charge_limit_percent=80,
         charge_limit_source="user",

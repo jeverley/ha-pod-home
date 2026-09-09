@@ -33,8 +33,9 @@ jobs:
           python-version: "3.14"
       - run: pip install -e podpoint-mobile-api
       - run: python -c "import podpoint_mobile_api"
-      - run: pip install mypy
+      - run: pip install mypy pytest pytest-asyncio
       - run: python -m mypy --strict podpoint-mobile-api/src/podpoint_mobile_api/
+      - run: python -m pytest podpoint-mobile-api/tests/ -v
 
   tests:
     runs-on: ubuntu-latest

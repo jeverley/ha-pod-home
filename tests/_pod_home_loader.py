@@ -1,16 +1,11 @@
 """Loads const.py/helpers.py without Home Assistant installed.
 
 Both modules have zero Home Assistant dependency, but helpers.py's `from .const import ...` is a
-*relative* import, which fails if helpers.py is imported as a bare top-level module (no parent
-package - see test_translation_keys.py's simpler same-directory `sys.path` trick, which only
-works because const.py itself has no relative imports).
-
-Importing the real `custom_components.pod_home` package to get a proper parent isn't an option
-either - its `__init__.py` unconditionally imports `homeassistant`, not installed for this
-offline suite. Instead, a synthetic `pod_home` package is registered in `sys.modules` pointing at
-the real source directory, then const.py/helpers.py are loaded as its submodules via `importlib`
-- this lets helpers.py's relative import resolve normally without ever executing the real
-`pod_home/__init__.py`.
+*relative* import, which needs a real parent package to resolve - `pod_home/__init__.py`
+unconditionally imports `homeassistant`, not installed for this offline suite, so a synthetic
+`pod_home` package is registered in `sys.modules` pointing at the real source directory instead,
+then const.py/helpers.py are loaded as its submodules via `importlib` - this lets helpers.py's
+relative import resolve normally without ever executing the real `pod_home/__init__.py`.
 """
 from __future__ import annotations
 

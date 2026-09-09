@@ -23,8 +23,8 @@ def auth_store_key(entry_id: str) -> str:
     """Storage key for the Firebase auth-token Store."""
     return f"{DOMAIN}_{entry_id}_auth"
 
-# connectivity-status-v2 wire values. No _OPTIONS list - unlike CHARGING_STATE_*, nothing
-# currently validates connectionState against a closed set.
+# connectivity-status-v2 wire values. No _OPTIONS list; nothing currently validates
+# connectionState against a closed set.
 CONNECTION_STATE_ONLINE = "Online"  # confirmed live
 CONNECTION_STATE_OFFLINE = "Offline"  # unconfirmed
 CONNECTION_STATE_UNKNOWN = "Unknown"
@@ -101,8 +101,7 @@ SMART_SCHEDULE_TYPE_CHARGING = "CHARGING"  # confirmed live
 # Charger Status - a derived, user-meaningful state combining chargingState and the sticky
 # charging/unplugged/finished timestamps (see charger_status() in helpers.py); not a wire value.
 # The raw chargingState passthrough lives on its own separate entity (see CHARGING_STATE_OPTIONS
-# above). Named CHARGER_STATUS_* rather than STATUS_* to avoid future collisions in this flat
-# const.py; the entity itself is just named "Status" in the UI.
+# above). The entity itself is just named "Status" in the UI.
 #
 # snake_case translation keys - display text lives in strings.json/translations/en.json's
 # per-entity `state` block instead.
@@ -155,11 +154,9 @@ DAY_OF_WEEK_OPTIONS = [
 ]
 
 # Charge Mode select's display labels - the same entity, same underlying "respect the
-# schedule/cost plan vs prioritise charging over it" choice in both Charging Schemes, but matching
-# the app's own wording exactly per scheme rather than a shared generic label. Smart Charging:
-# read/write both go through maxPrice, not SmartChargingPreferencesDTO.chargingStrategy - see
-# charging_priority_label()/max_price_for_charging_priority() in helpers.py. Basic Charging:
-# charge-overrides-based - see charge_priority_label_basic() in helpers.py. snake_case
+# schedule/cost plan vs prioritise charging over it" choice in both Charging Schemes. Smart
+# Charging: see charging_priority_label()/max_price_for_charging_priority() in helpers.py. Basic
+# Charging: charge-overrides-based - see charge_priority_label_basic() in helpers.py. snake_case
 # translation keys, not display text.
 CHARGE_PRIORITY_LOWEST_COST = "lowest_cost"
 CHARGE_PRIORITY_COMPLETE_CHARGE = "complete_charge"

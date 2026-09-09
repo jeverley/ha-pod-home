@@ -38,7 +38,7 @@ async def async_setup_entry(
         entry,
         entry.runtime_data,
         async_add_entities,
-        [PodHomeVehicleChargingSensor],
+        [PodHomeVehicleChargingSensor, PodHomeVehiclePluggedInSensor],
     )
 
 
@@ -108,3 +108,31 @@ class PodHomeVehicleChargingSensor(PodHomeVehicleEntity, BinarySensorEntity):
     def is_on(self) -> bool | None:
         vehicle = self.vehicle
         return vehicle.is_charging if vehicle else None
+
+
+class PodHomeVehiclePluggedInSensor(PodHomeVehicleEntity, BinarySensorEntity):
+    """Whether the vehicle itself reports as plugged in (via Enode) - true regardless of which
+    charger, not necessarily a Pod Point one this account knows about."""
+
+    _attr_translation_key = "vehicle_plugged_in"
+    _attr_name = "Plugged in"
+    _attr_device_class = BinarySensorDeviceClass.PLUG
+
+    @property
+    def unique_id(self) -> str:
+        return f"{DOMAIN}_{self.vehicle_id}_plugged_in"
+
+    @property
+    def is_on(self) -> bool | None:
+        vehicle = self.vehicle
+        return vehicle.is_plugged_in if vehicle else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        vehicle = self.vehicle
+        if not vehicle:
+            return None
+        # None unless plugged in specifically to this charger.
+        return {
+            "charger_serial_number": self.ppid if vehicle.is_plugged_in_to_this_charger else None,
+        }

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 class PodHomeAuthError(Exception):
     """Raised when Firebase sign-in/token refresh fails - callers should treat this as needing
-    reauth."""
+    reauth. `transient=True` marks a request-level failure (e.g. a network error) rather than
+    Firebase actually rejecting the credentials."""
+
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
 
 
 class PodHomeApiError(Exception):

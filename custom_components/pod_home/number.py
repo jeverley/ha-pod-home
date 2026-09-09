@@ -10,7 +10,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .entity import PodHomeOptimisticWriteMixin, PodHomeVehicleEntity, async_setup_dynamic_vehicles
+from .entity import (
+    PodHomeOptimisticWriteMixin,
+    PodHomeVehicleEntity,
+    async_handle_write_auth_error,
+    async_setup_dynamic_vehicles,
+)
+from .podpoint_mobile_api import PodHomeAuthError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -81,9 +87,14 @@ class PodHomeVehicleTargetChargeNumber(
             raise HomeAssistantError("No linked vehicle to set Target Charge for")
         # native_step=1 is only a UI hint; a service call can still supply a fractional value.
         # chargeLimitPercent is a whole percentage, so round before sending.
-        await self.coordinator.api.async_set_vehicle_charge_limit(ppid, vehicle.id, round(value))
+        try:
+            await self.coordinator.api.async_set_vehicle_charge_limit(
+                ppid, vehicle.id, round(value)
+            )
+        except PodHomeAuthError as exc:
+            await async_handle_write_auth_error(self.coordinator, exc)
         # Read-back for this write is the staleness-tiered vehicles fetch, not fetched every
         # poll - force it so the refresh below actually has a chance to confirm the write.
         self.coordinator.request_vehicles_fetch()
         self._set_optimistic_value(round(value))
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_request_refresh_after_write()

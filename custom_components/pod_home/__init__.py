@@ -26,8 +26,7 @@ from .services import async_setup_services
 _LOGGER = logging.getLogger(__name__)
 
 # pod_home is config-entry-only (async_setup here just registers services.py's domain-wide
-# actions) - no YAML configuration is supported, so hassfest requires this be stated explicitly
-# rather than left implicit.
+# actions) - no YAML configuration is supported; hassfest requires this stated explicitly.
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORMS: list[Platform] = [
@@ -42,12 +41,46 @@ PLATFORMS: list[Platform] = [
     Platform.LOCK,
 ]
 
-# Firebase refresh token, persisted across restarts so reload can silently refresh instead of
-# doing a full sign-in each time (AUTH_STORAGE_VERSION/auth_store_key in const.py, shared with
-# config_flow.py which must clear this Store on a successful reauth).
+# Firebase refresh token, persisted across restarts (AUTH_STORAGE_VERSION/auth_store_key in
+# const.py, shared with config_flow.py which must clear this Store on a successful reauth).
 AUTH_SAVE_DELAY = 5  # seconds, coalesced
 
 type PodHomeConfigEntry = ConfigEntry[PodHomeDataUpdateCoordinator]
+
+
+class _AuthTokenSaver:
+    """Persists Firebase auth tokens on change, coalesced via async_call_later and guarded
+    against a delayed write landing after reauth has since changed the password."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        auth_store: Store[dict[str, Any]],
+        entry: PodHomeConfigEntry,
+        signed_in_password: str,
+    ) -> None:
+        self._hass = hass
+        self._auth_store = auth_store
+        self._entry = entry
+        self._signed_in_password = signed_in_password
+        self._cancel_delayed_save: Callable[[], None] | None = None
+        self._pending_tokens: dict[str, Any] | None = None
+
+    def save(self, tokens: dict[str, Any]) -> None:
+        """on_token_change callback passed to PodHomeAuth."""
+        if self._cancel_delayed_save is not None:
+            self._cancel_delayed_save()
+        self._pending_tokens = tokens
+        self._cancel_delayed_save = async_call_later(
+            self._hass, AUTH_SAVE_DELAY, self._save_if_still_current
+        )
+
+    async def _save_if_still_current(self, _now: datetime.datetime) -> None:
+        self._cancel_delayed_save = None
+        if self._entry.data.get(CONF_PASSWORD) != self._signed_in_password:
+            return
+        assert self._pending_tokens is not None
+        await self._auth_store.async_save(self._pending_tokens)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -71,45 +104,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> b
         _LOGGER.warning("Couldn't load saved auth tokens, signing in fresh", exc_info=True)
         auth_data = None
 
-    # Captured now, compared against entry.data live at write time (below) - entry.data is
-    # mutated in place by a reauth, not replaced, so this detects "this session's password is
-    # now stale" even for a write that was already delayed/in-flight when reauth completed.
+    # Captured now; compared against entry.data live at write time to detect a reauth that
+    # changed the password mid-flight.
     signed_in_password = entry.data[CONF_PASSWORD]
 
-    _cancel_delayed_save: Callable[[], None] | None = None
-
-    def _save_auth_tokens() -> None:
-        # Only called from within auth.async_get_id_token(), never during construction, so
-        # `auth` (defined below) is always bound by the time this runs. Guards against a
-        # delayed write landing after a reauth has since changed the password. Scheduled with
-        # async_call_later, not Store.async_delay_save, so a stale write can be skipped outright
-        # at fire time instead of writing a literal `data: null` (Store.async_delay_save always
-        # writes its data_func's return value as-is). Re-checked inside the callback, not just
-        # before scheduling, since reauth's Store.async_remove() runs on a separate Store
-        # instance that can't cancel this one's pending write.
-        nonlocal _cancel_delayed_save
-        if _cancel_delayed_save is not None:
-            _cancel_delayed_save()
-
-        async def _save_if_still_current(_now: datetime.datetime) -> None:
-            nonlocal _cancel_delayed_save
-            _cancel_delayed_save = None
-            if entry.data.get(CONF_PASSWORD) != signed_in_password:
-                return
-            tokens = auth.export_tokens()
-            # Only called after a successful sign-in/refresh (see _save_auth_tokens' docstring),
-            # which always leaves real tokens set - export_tokens() returning None here would
-            # mean this fired before any token was ever obtained.
-            if tokens is not None:
-                await auth_store.async_save(tokens)
-
-        _cancel_delayed_save = async_call_later(hass, AUTH_SAVE_DELAY, _save_if_still_current)
-
+    token_saver = _AuthTokenSaver(hass, auth_store, entry, signed_in_password)
     auth = PodHomeAuth(
         session,
         entry.data[CONF_EMAIL],
         entry.data[CONF_PASSWORD],
-        on_token_change=_save_auth_tokens,
+        on_token_change=token_saver.save,
     )
     auth.import_tokens(auth_data)
     api = PodHomeApiClient(session, auth)

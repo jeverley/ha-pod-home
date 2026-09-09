@@ -26,14 +26,14 @@ class PodHomeAuth:
         email: str,
         password: str,
         api_key: str = FIREBASE_API_KEY,
-        on_token_change: Callable[[], None] | None = None,
+        on_token_change: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self._session = session
         self._email = email
         self._password = password
         self._api_key = api_key
-        # Called (sync, no args) after a sign-in or refresh changes the tokens, so a caller can
-        # persist them. Not called from import_tokens().
+        # Called (sync) with the freshly-exported tokens after a sign-in or refresh changes
+        # them, so a caller can persist them. Not called from import_tokens().
         self._on_token_change = on_token_change
 
         self._id_token: str | None = None
@@ -77,20 +77,30 @@ class PodHomeAuth:
                 if self._refresh_token:
                     try:
                         await self._async_refresh()
-                        if self._on_token_change:
-                            self._on_token_change()
+                        self._notify_token_change()
                         # _async_refresh() always sets a real token or raises - never leaves
                         # self._id_token None on success.
                         assert self._id_token is not None
                         return self._id_token
-                    except PodHomeAuthError:
+                    except PodHomeAuthError as exc:
+                        if exc.transient:
+                            raise
                         pass  # refresh token itself may have expired - fall back to sign-in
                 await self._async_sign_in()
-                if self._on_token_change:
-                    self._on_token_change()
+                self._notify_token_change()
             # Same guarantee as above - _async_sign_in() always sets a real token or raises.
             assert self._id_token is not None
             return self._id_token
+
+    def _notify_token_change(self) -> None:
+        if self._on_token_change is None:
+            return
+        tokens = self.export_tokens()
+        # None when expires_at is unknown (e.g. a sign-in response missing expiresIn) - nothing
+        # exportable yet, skip the callback rather than notifying with incomplete data.
+        if tokens is None:
+            return
+        self._on_token_change(tokens)
 
     def _is_expiring(self) -> bool:
         if self._expires_at is None:
@@ -113,7 +123,9 @@ class PodHomeAuth:
                     err = (body or {}).get("error", body)
                     raise PodHomeAuthError(f"Firebase sign-in failed: {err}")
         except aiohttp.ClientError as exc:
-            raise PodHomeAuthError(f"Firebase sign-in request failed: {exc}") from exc
+            raise PodHomeAuthError(
+                f"Firebase sign-in request failed: {exc}", transient=True
+            ) from exc
 
         self._apply_token_response(body)
 
@@ -132,16 +144,25 @@ class PodHomeAuth:
                     err = (body or {}).get("error", body)
                     raise PodHomeAuthError(f"Firebase token refresh failed: {err}")
         except aiohttp.ClientError as exc:
-            raise PodHomeAuthError(f"Firebase token refresh request failed: {exc}") from exc
+            raise PodHomeAuthError(
+                f"Firebase token refresh request failed: {exc}", transient=True
+            ) from exc
 
         # Refresh response uses snake_case keys, unlike sign-in.
-        self._id_token = body["id_token"]
-        self._refresh_token = body.get("refresh_token", self._refresh_token)
-        self._expires_at = datetime.utcnow() + timedelta(seconds=int(body["expires_in"]))
+        try:
+            self._id_token = body["id_token"]
+            self._refresh_token = body.get("refresh_token", self._refresh_token)
+            self._expires_at = datetime.utcnow() + timedelta(seconds=int(body["expires_in"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise PodHomeAuthError(f"Firebase token refresh returned an unexpected body: {exc}") from exc
 
     def _apply_token_response(self, body: dict[str, Any]) -> None:
         self._id_token = body["idToken"]
         self._refresh_token = body.get("refreshToken")
-        self._expires_at = datetime.utcnow() + timedelta(
-            seconds=int(body.get("expiresIn", 3600))
+        expires_in = body.get("expiresIn")
+        # None (rather than a guessed lifetime) makes _is_expiring() treat the token as already
+        # expiring, forcing a refresh/re-sign-in on the next call instead of trusting a guess.
+        self._expires_at = (
+            datetime.utcnow() + timedelta(seconds=int(expires_in)) if expires_in is not None
+            else None
         )

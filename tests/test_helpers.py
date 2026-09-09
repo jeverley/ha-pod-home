@@ -413,7 +413,7 @@ def test_expand_manual_schedule_events_simple_same_day_window():
     start, end, summary = events[0]
     assert start == datetime.datetime(2026, 1, 5, 0, 30, tzinfo=UTC)
     assert end == datetime.datetime(2026, 1, 5, 5, 30, tzinfo=UTC)
-    assert summary == "Manual schedule"
+    assert summary == "Charging"
 
 
 def test_expand_manual_schedule_events_inactive_window_produces_nothing():
@@ -544,7 +544,7 @@ def test_current_charging_seconds_sums_only_charging_windows():
     ]
     events = helpers.smart_schedule_events(windows, session_start, now)
     assert helpers.current_charging_seconds(
-        events, session_start, now, override_active=False, override_started_at=None
+        events, session_start, now, override_events=[]
     ) == 2 * 3600
 
 
@@ -560,7 +560,7 @@ def test_current_charging_seconds_clips_to_session_and_now():
     ]
     events = helpers.smart_schedule_events(windows, session_start, now)
     assert helpers.current_charging_seconds(
-        events, session_start, now, override_active=False, override_started_at=None
+        events, session_start, now, override_events=[]
     ) == 15 * 60
 
 
@@ -570,7 +570,7 @@ def test_current_charging_seconds_none_when_no_schedule_no_override():
     now = datetime.datetime(2026, 1, 1, tzinfo=UTC)
     session_start = datetime.datetime(2025, 12, 31, tzinfo=UTC)
     assert helpers.current_charging_seconds(
-        None, session_start, now, override_active=False, override_started_at=None
+        None, session_start, now, override_events=[]
     ) is None
 
 
@@ -588,7 +588,7 @@ def test_current_charging_seconds_zero_is_a_real_answer_not_none():
     ]
     events = helpers.smart_schedule_events(windows, session_start, now)
     assert helpers.current_charging_seconds(
-        events, session_start, now, override_active=False, override_started_at=None
+        events, session_start, now, override_events=[]
     ) == 0
 
 
@@ -596,7 +596,7 @@ def test_current_charging_seconds_override_active_from_session_start():
     session_start = datetime.datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
     now = datetime.datetime(2026, 1, 1, 2, 0, tzinfo=UTC)
     assert helpers.current_charging_seconds(
-        [], session_start, now, override_active=True, override_started_at=session_start
+        [], session_start, now, override_events=[(session_start, now, "Boost")]
     ) == 2 * 3600
 
 
@@ -610,13 +610,13 @@ def test_current_charging_seconds_override_midsession_with_schedule_before_it():
         (
             datetime.datetime(2026, 1, 1, 0, 0, tzinfo=UTC),
             datetime.datetime(2026, 1, 1, 0, 30, tzinfo=UTC),
-            "Manual schedule",
+            "Charging",
         )
     ]
     # 30 min of schedule (00:00-00:30) + 1h of override (01:00-02:00) = 1.5h.
     assert helpers.current_charging_seconds(
         schedule_events, session_start, now,
-        override_active=True, override_started_at=override_start,
+        override_events=[(override_start, now, "Boost")],
     ) == int(datetime.timedelta(hours=1, minutes=30).total_seconds())
 
 
@@ -628,14 +628,14 @@ def test_current_charging_seconds_overlap_between_schedule_and_override_not_doub
         (
             datetime.datetime(2026, 1, 1, 0, 0, tzinfo=UTC),
             datetime.datetime(2026, 1, 1, 0, 30, tzinfo=UTC),
-            "Manual schedule",
+            "Charging",
         )
     ]
     # Schedule covers 00:00-00:30, override covers 00:15-01:00 - they overlap 00:15-00:30.
     # Merged coverage is 00:00-01:00 = 1h, NOT 30min + 45min = 75min.
     assert helpers.current_charging_seconds(
         schedule_events, session_start, now,
-        override_active=True, override_started_at=override_start,
+        override_events=[(override_start, now, "Boost")],
     ) == 3600
 
 
@@ -644,13 +644,18 @@ def test_current_charging_seconds_override_start_before_session_start_is_clipped
     now = datetime.datetime(2026, 1, 1, 1, 0, tzinfo=UTC)
     override_start = datetime.datetime(2025, 12, 31, 0, 0, tzinfo=UTC)  # before session_start
     assert helpers.current_charging_seconds(
-        [], session_start, now, override_active=True, override_started_at=override_start
+        [], session_start, now, override_events=[(override_start, now, "Boost")]
     ) == 3600  # whole session, not backdated
 
 
-def test_current_charging_seconds_override_unknown_start_degrades_to_naive():
+def test_current_charging_seconds_ended_override_keeps_its_own_bounded_contribution():
+    """A boost that was cancelled mid-session (its event's end is before `now`, not extended to
+    it) still contributes its real interval - the schedule-unavailable-this-poll case doesn't
+    drop it back to unknown/zero."""
     session_start = datetime.datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
-    now = datetime.datetime(2026, 1, 1, 2, 0, tzinfo=UTC)
+    override_start = datetime.datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+    override_end = datetime.datetime(2026, 1, 1, 0, 30, tzinfo=UTC)  # cancelled after 30 min
+    now = datetime.datetime(2026, 1, 1, 1, 0, tzinfo=UTC)
     assert helpers.current_charging_seconds(
-        [], session_start, now, override_active=True, override_started_at=None
-    ) == 2 * 3600
+        None, session_start, now, override_events=[(override_start, override_end, "Boost")]
+    ) == 30 * 60

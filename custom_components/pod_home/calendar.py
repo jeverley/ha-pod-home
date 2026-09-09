@@ -25,8 +25,7 @@ if TYPE_CHECKING:
 
 PARALLEL_UPDATES = 0
 
-# How far ahead to look for the "next" event when nothing is currently in progress - the
-# `event` property has no natural range to work with the way async_get_events() does.
+# How far ahead to search for the next event.
 _UPCOMING_WINDOW = datetime.timedelta(days=8)
 
 
@@ -43,10 +42,9 @@ async def async_setup_entry(
 
 class PodHomeScheduleCalendar(PodHomeEntity, CalendarEntity):
     """The mode-appropriate charge schedule as real calendar events - not mode-gated; branches on
-    `schedule_mode()` internally instead of splitting into two mode-specific entities (see
-    expand_manual_schedule_events()/smart_schedule_events() in helpers.py for the two branches).
-    Empty outside an active/recent Smart Charging session, or on an unrecognized status - a
-    correct empty result in both cases, not an error."""
+    `schedule_mode()` internally (see expand_manual_schedule_events()/smart_schedule_events() in
+    helpers.py for the two branches). Empty outside an active/recent Smart Charging session, or
+    on an unrecognized status - a correct empty result in both cases, not an error."""
 
     _attr_translation_key = "schedule"
     _attr_name = "Schedule"

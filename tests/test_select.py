@@ -44,6 +44,7 @@ async def test_select_option_writes_max_price_and_refreshes(hass: HomeAssistant)
 
     coordinator.api.async_set_charge_priority_max_price.assert_called_once_with(PPID, 0.30)
     coordinator.async_request_refresh.assert_called_once()
+    assert coordinator._last_write_at is not None
 
 
 async def test_select_option_masks_stale_readback_until_second_update(
@@ -155,6 +156,7 @@ async def test_basic_mode_select_always_on_writes_when_not_already_active(
     coordinator.api.async_set_always_on.assert_called_once()
     assert coordinator.api.async_set_always_on.call_args.args[0] == PPID
     coordinator.async_request_refresh.assert_called_once()
+    assert coordinator._last_write_at is not None
 
 
 async def test_basic_mode_select_always_on_skips_write_when_already_active(
@@ -187,6 +189,7 @@ async def test_basic_mode_select_schedule_deletes_when_always_on_active(
 
     coordinator.api.async_delete_charge_override.assert_called_once_with(PPID)
     coordinator.async_request_refresh.assert_called_once()
+    assert coordinator._last_write_at is not None
 
 
 async def test_basic_mode_select_schedule_skips_delete_when_not_active(

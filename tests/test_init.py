@@ -1,9 +1,6 @@
-"""__init__.py's async_setup_entry - the real first-refresh path. test_config_flow.py mocks
-async_setup_entry entirely (it's about the flow's own behaviour); test_coordinator.py exercises
-_async_fetch_data/_async_update_data directly, bypassing config-entry setup. Neither covers
-async_setup_entry actually running end-to-end: auth token load, coordinator construction, a real
-first refresh, and every platform's real async_setup_entry - against a mocked API client rather
-than a live account, which is what's under test here.
+"""__init__.py's async_setup_entry - the real first-refresh path: auth token load, coordinator
+construction, a real first refresh, and every platform's real async_setup_entry, all run
+end-to-end against a mocked API client rather than a live account.
 """
 from __future__ import annotations
 
@@ -26,11 +23,9 @@ PPID = "PSL-000001"
 
 
 def _stub_api() -> PodHomeApiClient:
-    """Minimal autospecced client - enough for one full, successful first refresh in Basic
-    mode. Mirrors tests/test_coordinator.py's own _stub_api(), kept separate rather than shared -
-    that file cares about the coordinator's own parsing branches, this one only cares that a real
-    async_setup_entry (coordinator construction + first refresh + every platform's setup) can run
-    end-to-end without touching a live account."""
+    """Minimal autospecced client - enough for one full, successful first refresh in Basic mode,
+    so a real async_setup_entry (coordinator construction + first refresh + every platform's
+    setup) can run end-to-end without touching a live account."""
     api = create_autospec(PodHomeApiClient, instance=True)
     api.async_list_chargers.return_value = [
         {

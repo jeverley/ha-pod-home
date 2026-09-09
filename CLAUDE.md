@@ -56,6 +56,34 @@ live" narrative framing in code comments. Don't point comments/docstrings at any
 (DECISIONS.md, CLAUDE.md, README.md, QUALITY_SCALE.md) either - if the fact matters, it's terse
 enough to state directly; if it needs more than that, it doesn't belong in code at all.
 
+A code comment may state a fact. It may never state a comparison. If a comment mentions an
+alternative that was considered, a trade-off between two approaches, or explains why one approach
+was chosen over another - that's reasoning, not a fact, and it doesn't belong in code at any
+length, however compressed. A comment with no comparison in it - just the fact or gotcha itself,
+standing alone - should almost always be one sentence. If a pure fact won't fit in one or two
+sentences, that's usually a sign it's actually two facts (split it), or that the surrounding code
+needs a clearer name/structure instead of a comment carrying the load.
+
+Same test for docstrings: a docstring that's grown long is usually explaining *why* (reasoning -
+doesn't belong in code) or explaining *too much of what* (the function does too much - see
+"Function size" below), not failing to be a good docstring.
+
+### Function size
+
+No hard line-count ceiling - a field-by-field constructor call or an `if`/`elif` chain over a
+closed enum is fine at any length. The real test: does this function mix more than 2-3
+independently-nameable concerns (fetch this, then cache that, then branch on mode, then compute
+something unrelated)? If yes, split along those concern boundaries into named private methods
+regardless of current line count - prefer that over a longer docstring/comment that just explains
+all the concerns a reader now has to hold in their head to follow the function.
+
+Doesn't apply to a function whose job is assembling one aggregate value from several already-
+fetched inputs, where each step runs once, only from this call site - that's not concern-mixing,
+it's what assembling a rich object legitimately looks like, and splitting it further only adds
+indirection with no reuse or independent-testability gained. Extract a piece only when it's
+independently meaningful on its own terms (a real concept with a name, reusable or unit-testable
+standalone) - not just to shrink the parent function's line count.
+
 ### Entity states and translations
 
 A `device_class: enum` sensor's (or a `select`'s) raw state must be a stable snake_case key, with

@@ -190,11 +190,25 @@ async def test_vehicle_range_odometer_suggested_unit_from_account_preference(
 
 async def test_vehicle_battery_synced_at_attribute(hass: HomeAssistant) -> None:
     synced = datetime.datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
-    vehicle = make_vehicle(id="v1", battery_level_percent=42, synced_at=synced)
+    vehicle = make_vehicle(
+        id="v1", battery_level_percent=42, battery_capacity_kwh=75.0, synced_at=synced
+    )
     coordinator = make_coordinator(hass, {PPID: make_charger(vehicle=vehicle)})
     entity = sensor.PodHomeVehicleBatteryLevelSensor(coordinator, "v1")
     assert entity.native_value == 42
-    assert entity.extra_state_attributes == {"synced_at": "2026-01-01T12:00:00+00:00"}
+    assert entity.extra_state_attributes == {
+        "battery_capacity_kwh": 75.0,
+        "synced_at": "2026-01-01T12:00:00+00:00",
+    }
+
+
+async def test_vehicle_battery_capacity_attribute_present_without_synced_at(
+    hass: HomeAssistant,
+) -> None:
+    vehicle = make_vehicle(id="v1", battery_capacity_kwh=75.0, synced_at=None)
+    coordinator = make_coordinator(hass, {PPID: make_charger(vehicle=vehicle)})
+    entity = sensor.PodHomeVehicleBatteryLevelSensor(coordinator, "v1")
+    assert entity.extra_state_attributes == {"battery_capacity_kwh": 75.0}
 
 
 async def test_vehicle_expected_charge_attributes(hass: HomeAssistant) -> None:

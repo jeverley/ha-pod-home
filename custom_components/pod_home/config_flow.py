@@ -92,13 +92,9 @@ class PodHomeConfigFlow(ConfigFlow, domain=DOMAIN):
                 _LOGGER.debug("Sign-in failed during reauth: %s", exc)
                 errors["base"] = "invalid_auth"
             else:
-                # The persisted Firebase refresh token (see __init__.py) is keyed by entry_id,
-                # which doesn't change on reauth - without clearing it, the reload below would
-                # restore the *old* session (from before the password change) and silently
-                # refresh that instead of signing in fresh with the new password, immediately
-                # failing again. A failed clear must not block reauth from completing (matches
-                # __init__.py's own async_load guard) - __init__.py's write-time password check
-                # is the real backstop if this is ever skipped.
+                # Clears the persisted refresh token (keyed by entry_id, unchanged by reauth)
+                # before reload, so a stale pre-reauth session isn't silently restored. A failed
+                # clear must not block reauth from completing.
                 try:
                     await Store(
                         self.hass, AUTH_STORAGE_VERSION, auth_store_key(reauth_entry.entry_id)

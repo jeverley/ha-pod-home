@@ -9,10 +9,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 
 from custom_components.pod_home.const import DOMAIN
+from custom_components.pod_home.podpoint_mobile_api import PodHomeAuthError
 from custom_components.pod_home.services import (
     SERVICE_CANCEL_BOOST,
     SERVICE_START_BOOST,
@@ -54,6 +55,21 @@ async def test_start_boost_full_charge_when_no_duration_given(hass: HomeAssistan
     coordinator.api.async_create_charge_override.assert_awaited_once()
     _, kwargs = coordinator.api.async_create_charge_override.call_args
     assert kwargs["end_at"] - kwargs["requested_at"] == datetime.timedelta(hours=12)
+    coordinator.async_request_refresh.assert_awaited_once()
+    assert coordinator._last_write_at is not None
+
+
+async def test_start_boost_auth_error_triggers_refresh_and_clean_failure(
+    hass: HomeAssistant,
+) -> None:
+    coordinator, device_id = await _setup(hass, charging_state="Charging")
+    coordinator.api.async_create_charge_override.side_effect = PodHomeAuthError("expired")
+
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
+        )
+
     coordinator.async_request_refresh.assert_awaited_once()
 
 
@@ -117,6 +133,7 @@ async def test_cancel_boost_deletes_the_active_override(hass: HomeAssistant) -> 
 
     coordinator.api.async_delete_charge_override.assert_awaited_once_with(PPID)
     coordinator.async_request_refresh.assert_awaited_once()
+    assert coordinator._last_write_at is not None
 
 
 async def test_cancel_boost_rejects_when_nothing_active(hass: HomeAssistant) -> None:

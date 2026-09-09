@@ -1,18 +1,15 @@
 """Lock platform for pod_home - Remote Lock.
 
-WRITE ENDPOINT with a real physical-access effect on the charger: locked means no one can start
-a charging session without unlocking it first, matching the app's own Remote Lock feature. Do
-not lock/unlock outside of the user explicitly doing so live, knowing what it'll do.
+WRITE ENDPOINT with a real access-control effect on the charger, not the cable: locked means no
+one can start a charging session on the charger until it's unlocked again - it does not
+physically lock a plugged-in cable in place. Do not lock/unlock outside of the user explicitly
+doing so live, knowing what it'll do.
 
 NOT YET TESTED against a real account - Remote Lock is Solo 3S-only (per Pod Point's own app
-guide), and the account this integration is developed against has a Solo 3, which can't support
-it at all (confirmed live: GET /remote-lock/{ppid} returns `{"offMode": null}`). Built anyway per
-the user's explicit request, understanding that constraint.
+guide); GET /remote-lock/{ppid} returns `{"offMode": null}` on hardware that doesn't support it.
 
 The entity is only ever CREATED for a charger once it's confirmed to support Remote Lock
-(`remote_lock_off_mode is not None`) - not created-then-disabled. Hardware support is a
-permanent, one-time fact about a physical charger, unlike the mode/tariff-gated entities
-elsewhere, so there's no benefit to a disabled-but-visible entity on every unsupported install.
+(`remote_lock_off_mode is not None`) - created only once hardware support is confirmed.
 """
 from __future__ import annotations
 
@@ -24,8 +21,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .entity import PodHomeEntity, PodHomeOptimisticWriteMixin, async_setup_dynamic_chargers
-from .podpoint_mobile_api import PodHomeApiError
+from .entity import (
+    PodHomeEntity,
+    PodHomeOptimisticWriteMixin,
+    async_handle_write_auth_error,
+    async_setup_dynamic_chargers,
+)
+from .podpoint_mobile_api import PodHomeApiError, PodHomeAuthError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -46,12 +48,11 @@ async def async_setup_entry(
 
 
 class PodHomeRemoteLock(PodHomeOptimisticWriteMixin[bool], PodHomeEntity, LockEntity):
-    """Remote Lock - prevents a new charging session from starting until unlocked. Per the app
-    guide, lock/unlock is only possible while the charger is online and unplugged; neither is
-    enforced client-side here (no `available` override - unlike Boost, the app guide doesn't
-    describe an app-side pre-check for this), so an offline or plugged-in lock/unlock attempt is
-    left to the API's own response rather than guessed at. PodHomeOptimisticWriteMixin masks
-    is_locked's read-your-own-write race - see its docstring."""
+    """Remote Lock - prevents anyone from using the charger to start a new session until
+    unlocked; doesn't lock a plugged-in cable in place. Per the app guide, a charger can only be
+    locked while no car is currently plugged in; neither that nor being online is enforced
+    client-side here (no `available` override). PodHomeOptimisticWriteMixin masks is_locked's
+    read-your-own-write race - see its docstring."""
 
     _attr_translation_key = "remote_lock"
     _attr_name = "Remote lock"
@@ -79,6 +80,8 @@ class PodHomeRemoteLock(PodHomeOptimisticWriteMixin[bool], PodHomeEntity, LockEn
             raise HomeAssistantError("No charger to lock/unlock")
         try:
             await self.coordinator.api.async_set_remote_lock(self.ppid, off_mode)
+        except PodHomeAuthError as exc:
+            await async_handle_write_auth_error(self.coordinator, exc)
         except PodHomeApiError as exc:
             if exc.status == 501:
                 raise HomeAssistantError(
@@ -86,4 +89,4 @@ class PodHomeRemoteLock(PodHomeOptimisticWriteMixin[bool], PodHomeEntity, LockEn
                 ) from exc
             raise
         self._set_optimistic_value(off_mode)
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_request_refresh_after_write()

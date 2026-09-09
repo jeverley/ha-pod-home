@@ -17,8 +17,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
-from .entity import PodHomeEntity, async_setup_dynamic_chargers
+from .entity import PodHomeEntity, async_handle_write_auth_error, async_setup_dynamic_chargers
 from .helpers import parse_time_of_day
+from .podpoint_mobile_api import PodHomeAuthError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -39,11 +40,7 @@ async def async_setup_entry(
 
 def _read_boost_duration(hass: HomeAssistant, ppid: str) -> datetime.time:
     """Reads the current value of the Boost duration time entity (time.py) via the entity
-    registry + state machine, rather than a direct object reference - the two entities are set
-    up independently by separate platforms, so this is the standard cross-entity read pattern
-    rather than a fragile string-built entity_id guess. Boost duration has no default (see
-    time.py) - unset and a genuine 00:00 are both rejected here with a clean, actionable error
-    rather than reaching the API with a request Pod Point will 400 on (a zero-length override)."""
+    registry + state machine. Unset and 00:00 are both rejected before reaching the API."""
     registry = er.async_get(hass)
     entity_id = registry.async_get_entity_id("time", DOMAIN, f"{DOMAIN}_{ppid}_boost_duration")
     if entity_id is None:
@@ -63,11 +60,8 @@ _FULL_CHARGE_DURATION = datetime.timedelta(hours=12)
 
 
 class PodHomeBoostFullChargeButton(PodHomeEntity, ButtonEntity):
-    """Triggers a boost matching the app's "Full charge" option - a flat 12-hour override, NOT
-    an indefinite/"Always On" one. `endAt: null` is rejected by the server (403) despite the
-    OpenAPI schema describing it as valid, and doesn't match the app's real behavior anyway -
-    triggering "Full charge" from the app shows an end time exactly 12 hours out, not
-    indefinite."""
+    """Triggers a boost matching the app's "Full charge" option. A flat 12-hour override;
+    endAt: null is rejected by the server (403)."""
 
     _attr_translation_key = "boost_full_charge"
     _attr_name = "Full charge"
@@ -79,27 +73,25 @@ class PodHomeBoostFullChargeButton(PodHomeEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        # The app itself won't start a boost with the cable unplugged - matched here rather
-        # than left to fail live against the API. Also unavailable during Always On (Basic
-        # Charging) - the app doesn't allow boosting while it's active.
-        charger = self._available_charger
-        return charger is not None and self._cable_connected and not charger.always_on_active
+        return self._boostable
 
     async def async_press(self) -> None:
         if not self.charger:
             raise HomeAssistantError("No charger to boost")
         requested_at = dt_util.utcnow()
-        await self.coordinator.api.async_create_charge_override(
-            self.ppid, requested_at=requested_at, end_at=requested_at + _FULL_CHARGE_DURATION
-        )
-        await self.coordinator.async_request_refresh()
+        try:
+            await self.coordinator.api.async_create_charge_override(
+                self.ppid, requested_at=requested_at, end_at=requested_at + _FULL_CHARGE_DURATION
+            )
+        except PodHomeAuthError as exc:
+            await async_handle_write_auth_error(self.coordinator, exc)
+        await self.coordinator.async_request_refresh_after_write()
 
 
 class PodHomeBoostDurationButton(PodHomeEntity, ButtonEntity):
     """Triggers a boost for the duration set on Boost duration (time.py), read at press time -
     matching the app's "Set duration" option. Boost duration is a one-shot input, not a sticky
-    preference - resets back to unset after a successful press (not on failure, so a rejected
-    attempt can be retried without re-entering the value)."""
+    preference - resets to unset only after a successful press."""
 
     _attr_translation_key = "boost_duration_button"
     _attr_name = "Boost for duration"
@@ -111,10 +103,7 @@ class PodHomeBoostDurationButton(PodHomeEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        # The app itself won't start a boost with the cable unplugged, or during Always On -
-        # see Full charge above.
-        charger = self._available_charger
-        return charger is not None and self._cable_connected and not charger.always_on_active
+        return self._boostable
 
     async def async_press(self) -> None:
         if not self.charger:
@@ -124,13 +113,14 @@ class PodHomeBoostDurationButton(PodHomeEntity, ButtonEntity):
         end_at = requested_at + datetime.timedelta(
             hours=duration.hour, minutes=duration.minute
         )
-        await self.coordinator.api.async_create_charge_override(
-            self.ppid, requested_at=requested_at, end_at=end_at
-        )
-        await self.coordinator.async_request_refresh()
-        # pod_home owns both entities, so a direct call is the right tool here rather than a
-        # generic cross-integration service (HA's time.set_value requires a real time value, no
-        # way to clear one via it) - see time.py's PodHomeBoostDurationTime.async_reset().
+        try:
+            await self.coordinator.api.async_create_charge_override(
+                self.ppid, requested_at=requested_at, end_at=end_at
+            )
+        except PodHomeAuthError as exc:
+            await async_handle_write_auth_error(self.coordinator, exc)
+        await self.coordinator.async_request_refresh_after_write()
+        # pod_home owns both entities - see time.py's PodHomeBoostDurationTime.async_reset().
         duration_entity = self.coordinator.boost_duration_entities.get(self.ppid)
         if duration_entity is not None:
             await duration_entity.async_reset()
@@ -150,17 +140,15 @@ class PodHomeCancelBoostButton(PodHomeEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        # Unlike the entity-availability convention for sensors (unavailable = can't fetch data),
-        # a button's availability controls whether it's pressable at all - greying this out when
-        # there's nothing to cancel prevents a no-op DELETE, matching HA's own convention for
-        # action entities that don't currently apply (e.g. a media player's "next track"). This
-        # already carries the "is a boost active" signal, so the icon stays static rather than
-        # duplicating that via a second, redundant dynamic-icon mechanism.
+        # Greyed out when there's nothing to cancel, to prevent a no-op DELETE.
         charger = self._available_charger
         return charger is not None and charger.boost_end_at is not None
 
     async def async_press(self) -> None:
         if not self.charger:
             raise HomeAssistantError("No charger to cancel a boost on")
-        await self.coordinator.api.async_delete_charge_override(self.ppid)
-        await self.coordinator.async_request_refresh()
+        try:
+            await self.coordinator.api.async_delete_charge_override(self.ppid)
+        except PodHomeAuthError as exc:
+            await async_handle_write_auth_error(self.coordinator, exc)
+        await self.coordinator.async_request_refresh_after_write()

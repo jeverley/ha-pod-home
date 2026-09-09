@@ -27,53 +27,53 @@ class PodHomeApiClient:
         self._auth = auth
         self._base_url = base_url
 
-    async def _async_get(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        token = await self._auth.async_get_id_token()
-        url = self._base_url + path
+    @staticmethod
+    async def _read_body(resp: aiohttp.ClientResponse) -> Any:
+        """Parse a response body as JSON, falling back to a raw-text wrapper if it isn't."""
+        raw = await resp.read()
+        if not raw:
+            return None
         try:
-            async with self._session.get(
-                url,
-                params=params,
-                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-            ) as resp:
-                raw = await resp.read()
-                if not raw:
-                    body = None
-                else:
-                    try:
-                        body = await resp.json(content_type=None)
-                    except (aiohttp.ContentTypeError, ValueError):
-                        body = {"raw": raw.decode(errors="replace")}
-                if resp.status in (401, 403):
-                    raise PodHomeAuthError(f"mobile-api rejected the request: {resp.status} {body}")
-                if resp.status >= 400:
-                    raise PodHomeApiError(resp.status, body)
-                return body
-        except aiohttp.ClientError as exc:
-            raise PodHomeApiError(0, str(exc)) from exc
+            return await resp.json(content_type=None)
+        except (aiohttp.ContentTypeError, ValueError):
+            return {"raw": raw.decode(errors="replace")}
 
-    async def _async_write(self, method: str, path: str, json_body: dict[str, Any] | None) -> None:
-        """Shared by _async_put/_async_patch - same request/error handling, verb differs."""
+    async def _async_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+    ) -> tuple[int, Any]:
+        """Shared request/error-handling core for _async_get/_async_write/
+        _async_post_for_response - returns (status, parsed body)."""
         token = await self._auth.async_get_id_token()
         url = self._base_url + path
         try:
             async with self._session.request(
                 method,
                 url,
+                params=params,
                 json=json_body,
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
             ) as resp:
+                body = await self._read_body(resp)
                 if resp.status in (401, 403):
-                    raise PodHomeAuthError(f"mobile-api rejected the request: {resp.status}")
+                    raise PodHomeAuthError(f"mobile-api rejected the request: {resp.status} {body}")
                 if resp.status >= 400:
-                    raw = await resp.read()
-                    try:
-                        body = await resp.json(content_type=None)
-                    except (aiohttp.ContentTypeError, ValueError):
-                        body = {"raw": raw.decode(errors="replace")}
                     raise PodHomeApiError(resp.status, body)
+                return resp.status, body
         except aiohttp.ClientError as exc:
             raise PodHomeApiError(0, str(exc)) from exc
+
+    async def _async_get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        _status, body = await self._async_request("GET", path, params=params)
+        return body
+
+    async def _async_write(self, method: str, path: str, json_body: dict[str, Any] | None) -> None:
+        """Shared by _async_put/_async_patch/_async_post/_async_delete - verb differs."""
+        await self._async_request(method, path, json_body=json_body)
 
     async def _async_put(self, path: str, json_body: dict[str, Any]) -> None:
         await self._async_write("PUT", path, json_body)
@@ -88,36 +88,12 @@ class PodHomeApiClient:
         await self._async_write("DELETE", path, None)
 
     async def _async_post_for_response(self, path: str, json_body: dict[str, Any]) -> dict[str, Any]:
-        """Like _async_write, but returns the parsed response body (needed by the api3 session
-        endpoint, whose response body is the entire point of calling it)."""
-        token = await self._auth.async_get_id_token()
-        url = self._base_url + path
-        try:
-            async with self._session.post(
-                url,
-                json=json_body,
-                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-            ) as resp:
-                raw = await resp.read()
-                if not raw:
-                    body = None
-                else:
-                    try:
-                        body = await resp.json(content_type=None)
-                    except (aiohttp.ContentTypeError, ValueError):
-                        body = {"raw": raw.decode(errors="replace")}
-                if resp.status in (401, 403):
-                    raise PodHomeAuthError(f"mobile-api rejected the request: {resp.status} {body}")
-                if resp.status >= 400:
-                    raise PodHomeApiError(resp.status, body)
-                # A 2xx response is documented to return the session body; an empty/non-dict one
-                # would silently violate this method's own return type - fail loudly instead of
-                # letting a caller expecting a dict receive None or something else unexpected.
-                if not isinstance(body, dict):
-                    raise PodHomeApiError(resp.status, body)
-                return body
-        except aiohttp.ClientError as exc:
-            raise PodHomeApiError(0, str(exc)) from exc
+        """Returns the parsed response body (needed by the api3 session endpoint, whose
+        response body is the entire point of calling it)."""
+        status, body = await self._async_request("POST", path, json_body=json_body)
+        if not isinstance(body, dict):
+            raise PodHomeApiError(status, body)
+        return body
 
     # --- confirmed endpoints ---
 
@@ -186,10 +162,9 @@ class PodHomeApiClient:
         )
 
     async def async_firmware(self, unit_id: int) -> dict[str, Any] | None:
-        """GET /api3/v5/units/{unitId}/firmware - legacy path, superseded by
-        async_charger_firmware() (ppid-addressed). Confirmed live: `data: [{serialNumber,
-        versionInfo: {architecture, details, manifestId}, updateStatus: {isUpdateAvailable}}]`.
-        """
+        """GET /api3/v5/units/{unitId}/firmware, unitId-addressed. Confirmed live: `data:
+        [{serialNumber, versionInfo: {architecture, details, manifestId}, updateStatus:
+        {isUpdateAvailable}}]`."""
         return cast(
             "dict[str, Any] | None",
             await self._async_get(f"/api3/v5/units/{unit_id}/firmware"),
@@ -207,8 +182,7 @@ class PodHomeApiClient:
         """POST /api3/v5/sessions - prerequisite for other api3/v5 calls. Needs the Firebase
         bearer token (handled automatically) plus the plain email/password again in the body.
         Returns `{"sessions": {"user_id": ..., "id": ...}}`; `user_id` is what async_api3_pods()
-        needs. NOT YET CALLED live - sending the password again is a bigger deal than a normal
-        read-only exploratory call, handle with the same credential care as elsewhere."""
+        needs. NOT YET CALLED live."""
         return await self._async_post_for_response(
             "/api3/v5/sessions", {"email": email, "password": password}
         )
@@ -216,10 +190,9 @@ class PodHomeApiClient:
     async def async_api3_pods(
         self, user_id: int, *, perpage: int = 5, page: int = 1, include: str | None = None
     ) -> dict[str, Any]:
-        """GET /api3/v5/users/{userId}/pods. `user_id` comes from async_create_api3_session()
-        (not the Firebase uid from /users). Confirmed live: `include=charges` is accepted but
-        always returns an empty list - charges are a separate endpoint, see
-        async_api3_charges()."""
+        """GET /api3/v5/users/{userId}/pods. `user_id` is the api3 user id from
+        async_create_api3_session(). Confirmed live: `include=charges` is accepted but always
+        returns an empty list - charges are a separate endpoint, see async_api3_charges()."""
         params: dict[str, Any] = {"perpage": perpage, "page": page}
         if include:
             params["include"] = include
@@ -230,9 +203,8 @@ class PodHomeApiClient:
     async def async_api3_charges(
         self, user_id: int, *, perpage: int = 5, page: int = 1
     ) -> dict[str, Any]:
-        """GET /api3/v5/users/{userId}/charges - source for charge history/current-session data
-        (not async_api3_pods()'s `include=charges`, which always returns empty). Returns
-        `{"charges": [...]}`; each entry has `id`, `kwh_used`, `duration`, `starts_at`,
+        """GET /api3/v5/users/{userId}/charges - source for charge history/current-session data.
+        Returns `{"charges": [...]}`; each entry has `id`, `kwh_used`, `duration`, `starts_at`,
         `ends_at`, `energy_cost`, `charging_duration`, `billing_event`, `location`, `pod`,
         `organisation` - `ends_at: null` with a live `kwh_used` marks the current session.
         NOT YET CALLED live."""
@@ -275,9 +247,8 @@ class PodHomeApiClient:
     ) -> None:
         """POST /chargers/{ppid}/charge-overrides - triggers a boost ("Charge Now").
         `requestedAt` required, `endAt` nullable (`ChargeOverrideRequestDTO`) - but an explicit
-        `endAt: null` is rejected (403); pass a real `end_at` always, and use
-        async_set_always_on() below for an indefinite override instead. WRITE ENDPOINT with a
-        real physical effect on the charger."""
+        `endAt: null` is rejected (403). WRITE ENDPOINT with a real physical effect on the
+        charger."""
         await self._async_post(
             f"/chargers/{ppid}/charge-overrides",
             {
@@ -290,8 +261,7 @@ class PodHomeApiClient:
         """POST /chargers/{ppid}/charge-overrides - switches Basic Charging to Always On
         (indefinite charging, ignoring the schedule). The body must OMIT `endAt` entirely, not
         even as `null` - an explicit `endAt: null` is rejected (403) despite the OpenAPI schema
-        describing them as equivalent. Kept separate from async_create_charge_override(), which
-        always sends `endAt` (even as null). WRITE ENDPOINT with a real physical effect on the
+        describing them as equivalent. WRITE ENDPOINT with a real physical effect on the
         charger."""
         await self._async_post(
             f"/chargers/{ppid}/charge-overrides", {"requestedAt": requested_at.isoformat()}
@@ -406,15 +376,13 @@ class PodHomeApiClient:
         return cast(dict[str, Any], await self._async_get(f"/chargers/{ppid}/restrictions"))
 
     async def async_charger_model_info(self, ppid: str) -> dict[str, Any]:
-        """GET /chargers/{ppid}/model-info - a dedicated model-info endpoint, distinct from the
-        modelInfo already embedded in each /chargers entry."""
+        """GET /chargers/{ppid}/model-info - a dedicated model-info endpoint."""
         return cast(dict[str, Any], await self._async_get(f"/chargers/{ppid}/model-info"))
 
     async def async_charger_firmware(self, ppid: str) -> list[dict[str, Any]]:
-        """GET /chargers/{ppid}/firmware - confirmed live: a bare list (not `data`-wrapped,
-        unlike the legacy async_firmware()/api3/v5/units/{unitId}/firmware path this replaced in
-        pod_home): `[{serialNumber, versionInfo: {architecture, details, manifestId},
-        updateStatus: {isUpdateAvailable}}]`. ppid-addressed, no unitId dependency."""
+        """GET /chargers/{ppid}/firmware, ppid-addressed. Confirmed live: a bare list:
+        `[{serialNumber, versionInfo: {architecture, details, manifestId}, updateStatus:
+        {isUpdateAvailable}}]`."""
         return cast(
             list[dict[str, Any]], await self._async_get(f"/chargers/{ppid}/firmware")
         )
@@ -434,8 +402,7 @@ class PodHomeApiClient:
         return cast(dict[str, Any], await self._async_get(f"/chargers/{ppid}/dnoregion"))
 
     async def async_delegated_control(self, ppid: str) -> dict[str, Any]:
-        """GET /smart-charging/delegated-controls/{ppid} - single-charger view, distinct from
-        async_smart_charging_chargers_and_vehicles() (the account-wide list). Shape not yet
+        """GET /smart-charging/delegated-controls/{ppid} - single-charger view. Shape not yet
         confirmed."""
         return cast(
             dict[str, Any], await self._async_get(f"/smart-charging/delegated-controls/{ppid}")

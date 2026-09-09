@@ -82,15 +82,14 @@ def known_or_none(value: T | None, known_values: list[T]) -> T | None:
 
 def humanize_tariff_rate(tariff_rate: str | None) -> str | None:
     """Turn a raw tariffRate value (e.g. "OFF_PEAK") into a display-friendly label (e.g.
-    "Off peak"), or None if missing. Generic SHOUTY_SNAKE_CASE -> sentence case transform, not a
-    fixed enum lookup. Used as the fallback for values not in CALENDAR_TARIFF_RATE_LABELS below."""
+    "Off peak"), or None if missing. Generic SHOUTY_SNAKE_CASE -> sentence case transform.
+    Used as the fallback for values not in CALENDAR_TARIFF_RATE_LABELS below."""
     if not tariff_rate:
         return None
     return tariff_rate.replace("_", " ").capitalize()
 
 
-# Matches the Pod Home app's own wording exactly, which doesn't match humanize_tariff_rate()'s
-# generic transform ("Peak"/"Off-peak" vs "On peak"/"Off peak").
+# Matches the Pod Home app's own wording exactly.
 CALENDAR_TARIFF_RATE_LABELS = {
     "ON_PEAK": "Peak",
     "OFF_PEAK": "Off-peak",
@@ -137,11 +136,7 @@ def schedule_mode(delegated_control_status: str | None) -> str | None:
 
 
 def smart_mode_available(delegated_control_status: str | None) -> bool:
-    """Whether a Smart-Charging-only entity (Ready By, Target Charge, Expected Charge) should
-    report itself available - `available`/`unavailable`, not entity-registry disable, since
-    Charging Mode genuinely toggles live (unlike Remote Lock's permanent hardware-support gating
-    - see lock.py). An unresolved/unrecognized status defaults to available rather than guessed
-    unavailable, matching schedule_mode()'s own "don't guess" handling."""
+    """Unresolved/unrecognized status defaults to available."""
     mode = schedule_mode(delegated_control_status)
     return mode is None or mode == SCHEDULE_MODE_SMART_CHARGING
 
@@ -163,6 +158,13 @@ def is_momentarily_unplugged(charging_state: str | None) -> bool:
     return CHARGING_STATE_CABLE_CONNECTED.get(charging_state) is False
 
 
+def boostable(charging_state: str | None, always_on_active: bool | None) -> bool:
+    """A boost can't be started with the cable unplugged or during a confirmed Always On
+    (Basic Charging) - shared by button.py's boost-start buttons and services.py's start_boost
+    service."""
+    return not is_momentarily_unplugged(charging_state) and always_on_active is False
+
+
 def charger_status(charger: "PodHomeCharger", now_utc: datetime.datetime) -> str | None:
     """Derive a small, user-meaningful Status from chargingState and the sticky
     charging_started_at/cable_unplugged_at/charge_finished_at timestamps the coordinator
@@ -171,8 +173,7 @@ def charger_status(charger: "PodHomeCharger", now_utc: datetime.datetime) -> str
     _is_finished_sticky() holds; SuspendedEVSE otherwise defaults to Paused; unrecognized/Unknown
     resolves to unknown.
 
-    chargingState alone decides Charging - the vehicle's isCharging/is_fully_charged flags aren't
-    consulted, since they're Enode-reported and not scoped to this specific charger."""
+    chargingState alone decides Charging."""
     charging_state = charger.charging_state
 
     if charging_state == CHARGING_STATE_FAULTED:
@@ -269,8 +270,8 @@ def charging_priority_label(
     max_price: float | None, tariff_windows: list["PodHomeTariffWindow"] | None
 ) -> str | None:
     """Derive the Charge Priority select's current label from maxPrice (GET .../preferences),
-    compared against the account's own tariff rates - not read from chargingStrategy. maxPrice
-    matches the cheapest tariff rate for "Lowest cost", the priciest for "Complete charge". Uses
+    compared against the account's own tariff rates. maxPrice matches the cheapest tariff rate for
+    "Lowest cost", the priciest for "Complete charge". Uses
     math.isclose() since float round-tripping through JSON isn't
     guaranteed bit-exact. On a single-rate tariff (min(prices) == max(prices)), "Lowest cost" and
     "Complete charge" can't be told apart from maxPrice alone, so this resolves to unknown."""
@@ -296,7 +297,7 @@ def max_price_for_charging_priority(
     .../delegated-controls/{ppid}/preferences: the cheapest tariff rate for "Lowest cost", the
     priciest for "Complete charge" (mirrors charging_priority_label()'s read-side lookup, so
     write and read agree). None if there's no tariff data yet, or the label isn't recognized -
-    the caller should refuse to write rather than guess at a price."""
+    the caller should refuse to write."""
     if not tariff_windows:
         return None
     prices = [w.price for w in tariff_windows if w.price is not None]
@@ -309,11 +310,13 @@ def max_price_for_charging_priority(
     return None
 
 
-def charge_priority_label_basic(always_on_active: bool) -> str:
+def charge_priority_label_basic(always_on_active: bool | None) -> str | None:
     """Charge Priority's Basic Charging read side - the same select as Smart Charging's
     charging_priority_label() above, different mode, different underlying mechanism: "Always on"
     means an indefinite (no endAt) charge-overrides entry is currently active, "Schedule" means
-    it isn't."""
+    it isn't. None (charge-overrides never successfully fetched for this ppid) stays None."""
+    if always_on_active is None:
+        return None
     return CHARGE_PRIORITY_ALWAYS_ON if always_on_active else CHARGE_PRIORITY_SCHEDULE
 
 
@@ -353,7 +356,7 @@ def expand_manual_schedule_events(
                     cursor + datetime.timedelta(days=day_span), end_t, tzinfo=tz
                 )
                 if end_dt > range_start_dt:
-                    events.append((start_dt, end_dt, "Manual schedule"))
+                    events.append((start_dt, end_dt, "Charging"))
             cursor += datetime.timedelta(days=1)
     events.sort(key=lambda e: e[0])
     return events
@@ -366,7 +369,7 @@ def smart_schedule_events(
 ) -> list[tuple[datetime.datetime, datetime.datetime, str]]:
     """Build (start, end, summary) events directly from smart_schedule_windows' own absolute
     timestamps, clamped to the requested range. Only CHARGING windows produce an event -
-    PLUGGED_IN is a point-in-time marker (no range) and PAUSED windows are deliberately excluded.
+    PLUGGED_IN is a point-in-time marker (no range) and PAUSED windows are excluded.
     Each event shows its tariff rate via calendar_tariff_rate_label()."""
     events: list[tuple[datetime.datetime, datetime.datetime, str]] = []
     for window in windows or []:
@@ -392,9 +395,9 @@ def _sum_clipped_event_seconds(
 ) -> int:
     """Sum of time covered by `events` (each a (start, end, summary) tuple in the shape
     smart_schedule_events()/expand_manual_schedule_events() both produce) within
-    [session_start, now]. Overlapping events are merged (interval union) before summing, not
-    added independently - needed once a schedule occurrence and an active override's own
-    synthetic event can both cover the same moment (e.g. Always On toggled on mid-window)."""
+    [session_start, now]. Overlapping events are merged (interval union) before summing - needed
+    once a schedule occurrence and an active override's own synthetic event can both cover the
+    same moment (e.g. Always On toggled on mid-window)."""
     intervals: list[tuple[datetime.datetime, datetime.datetime]] = []
     for start_dt, end_dt, _summary in events:
         start, end = max(start_dt, session_start), min(end_dt, now)
@@ -420,26 +423,21 @@ def current_charging_seconds(
     session_start: datetime.datetime | None,
     now: datetime.datetime,
     *,
-    override_active: bool,
-    override_started_at: datetime.datetime | None,
+    override_events: list[tuple[datetime.datetime, datetime.datetime, str]],
 ) -> int | None:
     """Cumulative charging seconds for the current, in-progress charge, either Charging Scheme.
     `schedule_events` is the caller's pre-built event list (smart_schedule_events() for Smart,
     expand_manual_schedule_events() for Basic); None means no schedule was available this poll,
-    distinct from a real, possibly-empty list. An active Boost/Always-On override is layered in
-    as one more event, merged with schedule overlap via _sum_clipped_event_seconds() rather than
-    double-counted.
+    distinct from a real, possibly-empty list. `override_events` covers every Boost/Always On
+    that could have contributed to this session, including ones since cancelled/ended - merged
+    with schedule overlap via _sum_clipped_event_seconds() rather than double-counted.
 
-    Returns None only when nothing can be refined against (`schedule_events` is None and no
-    override active) - a real 0 is a different, valid answer. An override with unknown
-    `override_started_at` is credited from `session_start` (degrades to the naive estimate,
-    never overcounts). Known limitation: only the currently active override is tracked - one
-    that ran and ended earlier in the same session leaves no trace."""
+    Returns None only when nothing can be refined against (`schedule_events` is None and
+    `override_events` is empty) - a real 0 is a different, valid answer."""
     if session_start is None:
         return None
-    if schedule_events is None and not override_active:
+    if schedule_events is None and not override_events:
         return None
     events = list(schedule_events) if schedule_events is not None else []
-    if override_active:
-        events.append((override_started_at or session_start, now, "Override"))
+    events.extend(override_events)
     return _sum_clipped_event_seconds(events, session_start, now)

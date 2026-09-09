@@ -42,6 +42,7 @@ async def test_async_lock_sends_off_mode_true_and_refreshes(hass: HomeAssistant)
 
     coordinator.api.async_set_remote_lock.assert_called_once_with(PPID, True)
     coordinator.async_request_refresh.assert_called_once()
+    assert coordinator._last_write_at is not None
 
 
 async def test_async_unlock_sends_off_mode_false_and_refreshes(hass: HomeAssistant) -> None:

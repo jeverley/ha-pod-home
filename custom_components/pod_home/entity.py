@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Generic, TypeVar
+from typing import TYPE_CHECKING, Generic, NoReturn, TypeVar
 
+from homeassistant.const import UnitOfLength
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -11,11 +13,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import ATTRIBUTION, DOMAIN, MANUFACTURER
 from .coordinator import PodHomeCharge, PodHomeCharger, PodHomeDataUpdateCoordinator, PodHomeVehicle
 from .helpers import (
+    boostable,
     humanize_model_style,
     is_momentarily_unplugged,
     select_last_charge,
     smart_mode_available,
 )
+from .podpoint_mobile_api import PodHomeAuthError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -46,14 +50,11 @@ class PodHomeEntity(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
 
     @property
     def available(self) -> bool:
-        return super().available and self.charger is not None
+        return self._available_charger is not None
 
     @property
     def _available_charger(self) -> PodHomeCharger | None:
-        """self.charger, already narrowed non-None whenever this class's own `available` (base
-        CoordinatorEntity availability plus a charger existing) holds - lets a subclass that
-        layers extra conditions onto `available` do so in one guard instead of separately
-        re-deriving `charger is not None` itself."""
+        """self.charger, narrowed non-None whenever available holds."""
         charger = self.charger
         return charger if super().available and charger is not None else None
 
@@ -64,6 +65,12 @@ class PodHomeEntity(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
         confirmed a charger exists."""
         charger = self.charger
         return not is_momentarily_unplugged(charger.charging_state if charger else None)
+
+    @property
+    def _boostable(self) -> bool:
+        """Shared by both boost-start buttons (button.py) - see helpers.boostable()."""
+        charger = self._available_charger
+        return charger is not None and boostable(charger.charging_state, charger.always_on_active)
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -84,8 +91,7 @@ class PodHomeVehicleEntity(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
     """Common base for vehicle entities - keyed by vehicle_id, not by the charger it's currently
     linked to. Standalone device, not via_device-linked to a charger.
 
-    The linked charger is re-derived from live coordinator data on every access rather than
-    fixed at construction, since a vehicle can move between chargers on a multi-charger account.
+    The linked charger is re-derived from live coordinator data on every access.
     """
 
     _attr_has_entity_name = True
@@ -120,11 +126,16 @@ class PodHomeVehicleEntity(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
     @property
     def _smart_mode_available(self) -> bool:
         """Shared by every Smart-Charging-gated vehicle entity (Ready By, Target Charge,
-        Expected Charge) - resolves the linked charger once here rather than each caller
-        re-deriving it, and is only meaningful once `available` above has already confirmed a
-        linked vehicle/charger exists."""
+        Expected Charge) - resolves the linked charger once here, and is only meaningful once
+        `available` above has already confirmed a linked vehicle/charger exists."""
         charger = self._charger_for_vehicle()
         return charger is not None and smart_mode_available(charger.delegated_control_status)
+
+    @property
+    def _suggested_distance_unit(self) -> str | None:
+        """Shared by every km-native distance sensor (Estimated range, Odometer) - switches the
+        default display to miles per the account's preferred distance unit."""
+        return UnitOfLength.MILES if self.coordinator.unit_of_distance == "mi" else None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -140,8 +151,7 @@ class PodHomeVehicleEntity(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
 
 class PodHomeAccountEntity(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
     """Common base for account-level entities - not tied to any specific charger or vehicle
-    (e.g. the rewards balance). Grouped under a "Pod Point" device (one per config entry) rather
-    than going device-less."""
+    (e.g. the rewards balance). Grouped under a "Pod Point" device (one per config entry)."""
 
     _attr_has_entity_name = True
     _attr_attribution = ATTRIBUTION
@@ -168,20 +178,8 @@ _OptimisticT = TypeVar("_OptimisticT")
 class PodHomeOptimisticWriteMixin(
     CoordinatorEntity[PodHomeDataUpdateCoordinator], Generic[_OptimisticT]
 ):
-    """Masks the read-your-own-write race after a successful write: a write's own immediate
-    `async_request_refresh()` can race Pod Point's backend actually making the change visible
-    (confirmed live), so the just-written value is shown until the SECOND coordinator update
-    after it, not the first (which is that same racy refresh, still in flight when this fires)
-    or a fixed delay. The poll after that is trusted either way, whether it confirms the write
-    or reveals something else actually happened.
-
-    Inherits CoordinatorEntity for real, not just for typing's sake - every concrete class that
-    mixes this in already provides that ancestor via PodHomeEntity/PodHomeVehicleEntity, so this
-    just states plainly what's already guaranteed rather than lying to the type checker. Generic
-    over the value's real type (bool for lock.py, int for number.py, str for select.py,
-    datetime.time for time.py - each concrete class parametrizes its own, e.g.
-    `PodHomeOptimisticWriteMixin[bool]`), so every consumer reads back a properly-typed value
-    with a plain `is not None` check rather than its own isinstance() narrowing."""
+    """Masks the read-your-own-write race: the just-written value is shown until the second
+    coordinator update after the write."""
 
     _optimistic_value: _OptimisticT | None = None
     _optimistic_polls_remaining: int = 0
@@ -199,6 +197,17 @@ class PodHomeOptimisticWriteMixin(
             if self._optimistic_polls_remaining == 0:
                 self._optimistic_value = None
         super()._handle_coordinator_update()
+
+
+async def async_handle_write_auth_error(
+    coordinator: PodHomeDataUpdateCoordinator, exc: PodHomeAuthError
+) -> NoReturn:
+    """Shared by every write entity's async_press/async_set_*/async_lock/async_unlock -
+    requests a coordinator refresh so a genuinely-expired auth session triggers the usual reauth
+    flow (coordinator.py's own PodHomeAuthError handling), then fails this write clearly instead
+    of leaving a raw PodHomeAuthError as the visible error."""
+    await coordinator.async_request_refresh()
+    raise HomeAssistantError(f"Pod Point rejected the request: {exc}") from exc
 
 
 def async_setup_dynamic_chargers(
@@ -239,9 +248,8 @@ def async_setup_dynamic_vehicles(
     async_add_entities: AddEntitiesCallback,
     entity_classes: list[type[PodHomeVehicleEntity]],
 ) -> None:
-    """Same pattern as async_setup_dynamic_chargers, keyed purely by vehicle_id rather than
-    (ppid, vehicle_id) - a vehicle's associated charger can change (see PodHomeVehicleEntity),
-    and keying by ppid too would create a second, duplicate set of entities whenever it does."""
+    """Same pattern as async_setup_dynamic_chargers. Keyed by vehicle_id only, since a vehicle's
+    linked charger can change (see PodHomeVehicleEntity)."""
     known_vehicle_ids: set[str] = set()
 
     def _async_add_new_vehicles() -> None:

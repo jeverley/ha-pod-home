@@ -34,6 +34,7 @@ async def test_target_charge_set_value_rounds_and_refreshes(hass: HomeAssistant)
 
     coordinator.api.async_set_vehicle_charge_limit.assert_called_once_with(PPID, "v1", 73)
     coordinator.async_request_refresh.assert_called_once()
+    assert coordinator._last_write_at is not None
 
 
 async def test_target_charge_set_value_forces_vehicle_fetch(hass: HomeAssistant) -> None:

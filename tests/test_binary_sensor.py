@@ -54,3 +54,39 @@ async def test_vehicle_charging_sensor(hass: HomeAssistant) -> None:
 
     coordinator.data = {}
     assert entity.is_on is None  # no linked vehicle found
+
+
+async def test_vehicle_plugged_in_sensor(hass: HomeAssistant) -> None:
+    coordinator = make_coordinator(
+        hass, {PPID: make_charger(vehicle=make_vehicle(id="v1", is_plugged_in=True))}
+    )
+    entity = binary_sensor.PodHomeVehiclePluggedInSensor(coordinator, "v1")
+    assert entity.is_on is True
+
+    coordinator.data = {PPID: make_charger(vehicle=make_vehicle(id="v1", is_plugged_in=False))}
+    assert entity.is_on is False
+
+    coordinator.data = {}
+    assert entity.is_on is None  # no linked vehicle found
+
+
+async def test_vehicle_plugged_in_sensor_charger_serial_number_attribute(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = make_coordinator(
+        hass,
+        {PPID: make_charger(vehicle=make_vehicle(id="v1", is_plugged_in_to_this_charger=True))},
+    )
+    entity = binary_sensor.PodHomeVehiclePluggedInSensor(coordinator, "v1")
+    assert entity.extra_state_attributes == {"charger_serial_number": PPID}
+
+    # Plugged in somewhere, but not into THIS charger - None, not the ppid.
+    coordinator.data = {
+        PPID: make_charger(
+            vehicle=make_vehicle(id="v1", is_plugged_in=True, is_plugged_in_to_this_charger=False)
+        )
+    }
+    assert entity.extra_state_attributes == {"charger_serial_number": None}
+
+    coordinator.data = {}
+    assert entity.extra_state_attributes is None  # no linked vehicle found

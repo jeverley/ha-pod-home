@@ -30,9 +30,8 @@ async def async_setup_entry(
 class PodHomeFirmwareUpdateEntity(PodHomeEntity, UpdateEntity):
     """Firmware update status.
 
-    The API's update_available is a plain boolean; no real target version string is known, so
-    when true, latest_version is set to a placeholder marker distinct from installed_version
-    purely so HA's comparison shows "update available".
+    update_available is a plain boolean with no target version, so latest_version uses a
+    placeholder marker when true.
     """
 
     _attr_translation_key = "firmware"
@@ -54,6 +53,8 @@ class PodHomeFirmwareUpdateEntity(PodHomeEntity, UpdateEntity):
         if not charger or not charger.firmware:
             return None
         installed = charger.firmware.manifest_id
+        if charger.firmware.update_available is None:
+            return None
         if not charger.firmware.update_available:
             return installed
         return f"{installed} (update available)" if installed else "update available"

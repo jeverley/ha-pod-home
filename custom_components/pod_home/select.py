@@ -18,7 +18,12 @@ from .const import (
     SCHEDULE_MODE_BASIC_CHARGING,
 )
 from .coordinator import PodHomeCharger
-from .entity import PodHomeEntity, PodHomeOptimisticWriteMixin, async_setup_dynamic_chargers
+from .entity import (
+    PodHomeEntity,
+    PodHomeOptimisticWriteMixin,
+    async_handle_write_auth_error,
+    async_setup_dynamic_chargers,
+)
 from .helpers import (
     charge_priority_available,
     charge_priority_label_basic,
@@ -26,6 +31,7 @@ from .helpers import (
     max_price_for_charging_priority,
     schedule_mode,
 )
+from .podpoint_mobile_api import PodHomeAuthError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -87,8 +93,7 @@ class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin[str], PodHomeEntity, S
         if charger is None:
             return False
         if self._is_basic_charging(charger):
-            # Schedule vs Always on doesn't depend on tariff shape at all, unlike Smart
-            # Charging's cost-vs-completion choice below.
+            # Schedule vs Always on doesn't depend on tariff shape at all.
             return True
         return charge_priority_available(charger.tariff_windows)
 
@@ -108,20 +113,29 @@ class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin[str], PodHomeEntity, S
         charger = self.charger
         if not charger:
             raise HomeAssistantError("No charger to set Charge Mode for")
-        if self._is_basic_charging(charger):
-            if option == CHARGE_PRIORITY_ALWAYS_ON:
-                if not charger.always_on_active:
-                    await self.coordinator.api.async_set_always_on(self.ppid, dt_util.utcnow())
-                    self._set_optimistic_value(option)
-                    await self.coordinator.async_request_refresh()
-            elif option == CHARGE_PRIORITY_SCHEDULE:
-                if charger.always_on_active:
-                    await self.coordinator.api.async_delete_charge_override(self.ppid)
-                    self._set_optimistic_value(option)
-                    await self.coordinator.async_request_refresh()
-            else:
-                raise HomeAssistantError(f"Unrecognized Basic Charging option {option!r}")
-            return
+        try:
+            if self._is_basic_charging(charger):
+                await self._async_select_basic_option(charger, option)
+                return
+            await self._async_select_smart_option(charger, option)
+        except PodHomeAuthError as exc:
+            await async_handle_write_auth_error(self.coordinator, exc)
+
+    async def _async_select_basic_option(self, charger: PodHomeCharger, option: str) -> None:
+        if option == CHARGE_PRIORITY_ALWAYS_ON:
+            if not charger.always_on_active:
+                await self.coordinator.api.async_set_always_on(self.ppid, dt_util.utcnow())
+                self._set_optimistic_value(option)
+                await self.coordinator.async_request_refresh_after_write()
+        elif option == CHARGE_PRIORITY_SCHEDULE:
+            if charger.always_on_active is not False:
+                await self.coordinator.api.async_delete_charge_override(self.ppid)
+                self._set_optimistic_value(option)
+                await self.coordinator.async_request_refresh_after_write()
+        else:
+            raise HomeAssistantError(f"Unrecognized Basic Charging option {option!r}")
+
+    async def _async_select_smart_option(self, charger: PodHomeCharger, option: str) -> None:
         max_price = max_price_for_charging_priority(option, charger.tariff_windows)
         if max_price is None:
             raise HomeAssistantError(
@@ -130,4 +144,4 @@ class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin[str], PodHomeEntity, S
             )
         await self.coordinator.api.async_set_charge_priority_max_price(self.ppid, max_price)
         self._set_optimistic_value(option)
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_request_refresh_after_write()
