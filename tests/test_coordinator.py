@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.pod_home.const import DOMAIN
@@ -1416,6 +1417,7 @@ async def test_finished_api3_session_held_only_until_listed(
     }
     coordinator = _make_coordinator(hass, api)
     coordinator._api3_pod_id_by_ppid = {PPID: 555}
+    coordinator._total_started_at_by_ppid[PPID] = ended_at - datetime.timedelta(days=30)
     if latest_started_at is not None:
         coordinator._latest_charge_by_ppid[PPID] = make_charge(started_at=latest_started_at)
 
@@ -1529,108 +1531,91 @@ async def test_charges_safety_refresh_every_six_hours(
     assert api.async_api3_charges.called is expect_fetch
 
 
-async def test_charges_refetched_every_poll_while_session_awaits_listing(
+async def test_charges_retried_after_unplug_and_while_session_awaits_listing(
     hass: HomeAssistant,
 ) -> None:
+    """After an unplug /charges is re-fetched every 5 minutes for 30 minutes, and a closed api3
+    session awaiting listing keeps it on that cadence - then back to the 6-hour safety net."""
     coordinator, poll, _ = _session_end_scenario(hass)
     api = coordinator.api
+    fetched: list[bool] = []
+
+    async def poll_at(moment: str, charges: list[dict]) -> None:
+        before = api.async_charges.await_count
+        with freeze_time(moment):
+            await poll("Available", _API3_CLOSED, charges)
+        fetched.append(api.async_charges.await_count > before)
+
+    coordinator._total_started_at_by_ppid[PPID] = datetime.datetime(
+        2026, 9, 1, tzinfo=datetime.timezone.utc
+    )
     with freeze_time("2026-09-24T05:00:00Z"):
         await poll("Charging", _API3_OPEN, [_PREVIOUS_SESSION])
-    with freeze_time("2026-09-24T05:26:00Z"):
-        await poll("Available", _API3_CLOSED, [_PREVIOUS_SESSION])  # not listed yet
-    with freeze_time("2026-09-24T05:27:00Z"):
-        await poll("Available", _API3_CLOSED, [_PREVIOUS_SESSION])  # still not listed
-    with freeze_time("2026-09-24T05:28:00Z"):
-        await poll("Available", _API3_CLOSED, [_SESSION, _PREVIOUS_SESSION])
-    with freeze_time("2026-09-24T05:29:00Z"):
-        await poll("Available", _API3_CLOSED, [_SESSION, _PREVIOUS_SESSION])
+    await poll_at("2026-09-24T05:26:00Z", [_PREVIOUS_SESSION])  # unplug, not listed yet
+    await poll_at("2026-09-24T05:28:00Z", [_PREVIOUS_SESSION])  # retry not due yet
+    await poll_at("2026-09-24T05:31:00Z", [_PREVIOUS_SESSION])  # retry, still not listed
+    await poll_at("2026-09-24T05:36:00Z", [_SESSION, _PREVIOUS_SESSION])  # listed
+    await poll_at("2026-09-24T06:10:00Z", [_SESSION, _PREVIOUS_SESSION])  # window over
 
-    # Fetched at startup, at unplug, then each poll until listed - not after.
-    assert api.async_charges.await_count == 4
+    assert fetched == [True, False, True, True, False]
     assert coordinator.data[PPID].latest_charge.energy_total == 64
 
 
-def _vehicles_raw(battery: int = 55, odometer: float = 12000) -> list[dict]:
-    return [{
-        "ppid": PPID,
-        "vehicles": [{
-            "id": "vehicle-link-1", "isPluggedInToThisCharger": False, "isPrimary": True,
-            "vehicle": {
-                "id": "vehicle-1",
-                "vehicleInformation": {"displayName": "My Test Car"},
-                "chargeState": {"batteryLevelPercent": battery, "range": 210,
-                                "lastUpdated": "2026-01-01T09:00:00Z"},
-                "odometer": {"distanceKm": odometer},
-            },
-        }],
-    }]
+async def test_session_ended_before_tracking_start_not_held(hass: HomeAssistant) -> None:
+    """A fresh install whose api3 shows a session closed before tracking started: holding it
+    would count it live, then drop it once /charges lists it (the baseline skips it)."""
+    ended_at = datetime.datetime(2026, 9, 24, 5, 25, 39, tzinfo=datetime.timezone.utc)
+    api = _stub_api()
+    api.async_api3_charges.return_value = {"charges": [_API3_CLOSED]}
+    coordinator = _make_coordinator(hass, api)
+    coordinator._api3_pod_id_by_ppid = {PPID: 555}
+
+    await coordinator._async_refresh_api3_charges(999, ended_at + datetime.timedelta(minutes=30))
+
+    assert coordinator._current_charge_by_ppid == {}
 
 
-_NOW = datetime.datetime(2026, 10, 18, 12, 0, tzinfo=datetime.timezone.utc)
-_MIN = datetime.timedelta(minutes=1)
+async def test_month_totals_fall_back_to_ha_time_zone(hass: HomeAssistant) -> None:
+    """A charger with no usable timezone buckets sessions in HA's configured zone, the same
+    zone its month start comes from - not the host system's."""
+    previous = dt_util.get_default_time_zone()
+    dt_util.set_default_time_zone(ZoneInfo("America/Los_Angeles"))
+    try:
+        coordinator = _make_coordinator(hass, _stub_api())
+        coordinator._charge_entries = [
+            # 23:30 on 30 September in Los Angeles - still 1 October in UTC.
+            (PPID, _charge_entry("2026-10-01T06:30:00Z", 10, 100), {"id": PPID}),
+            (PPID, _charge_entry("2026-10-02T06:30:00Z", 5, 50), {"id": PPID}),
+        ]
+        totals = coordinator._month_to_date_totals(PPID, None, datetime.date(2026, 10, 1))
+    finally:
+        dt_util.set_default_time_zone(previous)
+
+    assert totals == (5, 50)
 
 
-@freeze_time(_NOW)
 @pytest.mark.parametrize(
-    ("previous", "current", "fetched_ago", "cable_changed_ago", "data_changed_ago", "expect"),
+    ("charging_state", "fetched_ago", "expect_fetch"),
     [
-        ("Available", "Available", 10, None, None, False),  # parked, idle cadence
-        ("Available", "Available", 30, None, None, True),
-        ("SuspendedEV", "SuspendedEV", 5, None, None, True),  # plugged in - active cadence
-        ("SuspendedEV", "SuspendedEV", 3, None, None, False),
-        ("SuspendedEV", "Available", 1, None, None, True),  # unplug - immediate
-        ("Available", "Preparing", 1, None, None, True),  # plug-in - immediate
-        ("Available", "Available", 5, 20, None, True),  # within 30 min of an unplug
-        ("Available", "Available", 5, 40, None, False),
-        ("Available", "Available", 5, None, 10, True),  # data changing - a drive
-        ("Available", "Available", 5, None, 40, False),
+        ("SuspendedEV", datetime.timedelta(minutes=5), True),  # plugged in
+        ("SuspendedEV", datetime.timedelta(minutes=3), False),
+        ("Available", datetime.timedelta(minutes=5), True),  # unplugged
+        ("Available", datetime.timedelta(minutes=3), False),
     ],
 )
-async def test_vehicle_refresh_cadence(
+async def test_vehicles_refreshed_every_five_minutes_outside_charging(
     hass: HomeAssistant,
-    previous: str,
-    current: str,
-    fetched_ago: int,
-    cable_changed_ago: int | None,
-    data_changed_ago: int | None,
-    expect: bool,
+    charging_state: str,
+    fetched_ago: datetime.timedelta,
+    expect_fetch: bool,
 ) -> None:
     api = _stub_api()
     api.async_list_chargers.return_value = [_charger_raw()]
-    api.async_connectivity_status.return_value = {"chargingState": current}
+    api.async_connectivity_status.return_value = {"chargingState": charging_state}
     coordinator = _make_coordinator(hass, api)
-    coordinator.data = {PPID: make_charger(charging_state=previous)}
-    coordinator._vehicles_fetched_at = _NOW - fetched_ago * _MIN
-    if cable_changed_ago is not None:
-        coordinator._cable_changed_at = _NOW - cable_changed_ago * _MIN
-    if data_changed_ago is not None:
-        coordinator._vehicle_data_changed_at = _NOW - data_changed_ago * _MIN
+    coordinator.data = {PPID: make_charger(charging_state=charging_state)}
+    coordinator._vehicles_fetched_at = datetime.datetime.now(datetime.timezone.utc) - fetched_ago
 
     await coordinator._async_fetch_data()
 
-    assert api.async_smart_charging_chargers_and_vehicles.called is expect
-
-
-async def test_vehicle_data_change_detected_from_readings_only(hass: HomeAssistant) -> None:
-    """A changed battery level, range or odometer marks the vehicle data as changing; a fetch
-    with the same readings (e.g. only a newer sync timestamp) doesn't."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
-    api.async_connectivity_status.return_value = {"chargingState": "Available"}
-    coordinator = _make_coordinator(hass, api)
-
-    api.async_smart_charging_chargers_and_vehicles.return_value = _vehicles_raw()
-    coordinator.data = await coordinator._async_fetch_data()
-    assert coordinator._vehicle_data_changed_at is None
-
-    resynced = _vehicles_raw()
-    resynced[0]["vehicles"][0]["vehicle"]["chargeState"]["lastUpdated"] = "2026-01-01T10:00:00Z"
-    api.async_smart_charging_chargers_and_vehicles.return_value = resynced
-    coordinator._vehicles_fetched_at = None
-    coordinator.data = await coordinator._async_fetch_data()
-    assert coordinator._vehicle_data_changed_at is None
-
-    api.async_smart_charging_chargers_and_vehicles.return_value = _vehicles_raw(battery=54)
-    coordinator._vehicles_fetched_at = None
-    coordinator.data = await coordinator._async_fetch_data()
-    assert coordinator._vehicle_data_changed_at is not None
+    assert api.async_smart_charging_chargers_and_vehicles.called is expect_fetch
