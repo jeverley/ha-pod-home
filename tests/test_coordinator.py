@@ -1548,3 +1548,89 @@ async def test_charges_refetched_every_poll_while_session_awaits_listing(
     # Fetched at startup, at unplug, then each poll until listed - not after.
     assert api.async_charges.await_count == 4
     assert coordinator.data[PPID].latest_charge.energy_total == 64
+
+
+def _vehicles_raw(battery: int = 55, odometer: float = 12000) -> list[dict]:
+    return [{
+        "ppid": PPID,
+        "vehicles": [{
+            "id": "vehicle-link-1", "isPluggedInToThisCharger": False, "isPrimary": True,
+            "vehicle": {
+                "id": "vehicle-1",
+                "vehicleInformation": {"displayName": "My Test Car"},
+                "chargeState": {"batteryLevelPercent": battery, "range": 210,
+                                "lastUpdated": "2026-01-01T09:00:00Z"},
+                "odometer": {"distanceKm": odometer},
+            },
+        }],
+    }]
+
+
+_NOW = datetime.datetime(2026, 10, 18, 12, 0, tzinfo=datetime.timezone.utc)
+_MIN = datetime.timedelta(minutes=1)
+
+
+@freeze_time(_NOW)
+@pytest.mark.parametrize(
+    ("previous", "current", "fetched_ago", "cable_changed_ago", "data_changed_ago", "expect"),
+    [
+        ("Available", "Available", 10, None, None, False),  # parked, idle cadence
+        ("Available", "Available", 30, None, None, True),
+        ("SuspendedEV", "SuspendedEV", 5, None, None, True),  # plugged in - active cadence
+        ("SuspendedEV", "SuspendedEV", 3, None, None, False),
+        ("SuspendedEV", "Available", 1, None, None, True),  # unplug - immediate
+        ("Available", "Preparing", 1, None, None, True),  # plug-in - immediate
+        ("Available", "Available", 5, 20, None, True),  # within 30 min of an unplug
+        ("Available", "Available", 5, 40, None, False),
+        ("Available", "Available", 5, None, 10, True),  # data changing - a drive
+        ("Available", "Available", 5, None, 40, False),
+    ],
+)
+async def test_vehicle_refresh_cadence(
+    hass: HomeAssistant,
+    previous: str,
+    current: str,
+    fetched_ago: int,
+    cable_changed_ago: int | None,
+    data_changed_ago: int | None,
+    expect: bool,
+) -> None:
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_connectivity_status.return_value = {"chargingState": current}
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = {PPID: make_charger(charging_state=previous)}
+    coordinator._vehicles_fetched_at = _NOW - fetched_ago * _MIN
+    if cable_changed_ago is not None:
+        coordinator._cable_changed_at = _NOW - cable_changed_ago * _MIN
+    if data_changed_ago is not None:
+        coordinator._vehicle_data_changed_at = _NOW - data_changed_ago * _MIN
+
+    await coordinator._async_fetch_data()
+
+    assert api.async_smart_charging_chargers_and_vehicles.called is expect
+
+
+async def test_vehicle_data_change_detected_from_readings_only(hass: HomeAssistant) -> None:
+    """A changed battery level, range or odometer marks the vehicle data as changing; a fetch
+    with the same readings (e.g. only a newer sync timestamp) doesn't."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_connectivity_status.return_value = {"chargingState": "Available"}
+    coordinator = _make_coordinator(hass, api)
+
+    api.async_smart_charging_chargers_and_vehicles.return_value = _vehicles_raw()
+    coordinator.data = await coordinator._async_fetch_data()
+    assert coordinator._vehicle_data_changed_at is None
+
+    resynced = _vehicles_raw()
+    resynced[0]["vehicles"][0]["vehicle"]["chargeState"]["lastUpdated"] = "2026-01-01T10:00:00Z"
+    api.async_smart_charging_chargers_and_vehicles.return_value = resynced
+    coordinator._vehicles_fetched_at = None
+    coordinator.data = await coordinator._async_fetch_data()
+    assert coordinator._vehicle_data_changed_at is None
+
+    api.async_smart_charging_chargers_and_vehicles.return_value = _vehicles_raw(battery=54)
+    coordinator._vehicles_fetched_at = None
+    coordinator.data = await coordinator._async_fetch_data()
+    assert coordinator._vehicle_data_changed_at is not None
