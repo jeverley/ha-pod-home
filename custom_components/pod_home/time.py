@@ -113,7 +113,7 @@ class PodHomeVehicleReadyByTime(
         except PodHomeAuthError as exc:
             await async_handle_write_auth_error(self.coordinator, exc)
         self._set_optimistic_value(value)
-        await self.coordinator.async_request_refresh_after_write()
+        await self.coordinator.async_request_refresh()
 
 
 class PodHomeBoostDurationTime(PodHomeEntity, RestoreEntity, TimeEntity):

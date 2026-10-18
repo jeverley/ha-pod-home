@@ -89,4 +89,4 @@ class PodHomeRemoteLock(PodHomeOptimisticWriteMixin[bool], PodHomeEntity, LockEn
                 ) from exc
             raise
         self._set_optimistic_value(off_mode)
-        await self.coordinator.async_request_refresh_after_write()
+        await self.coordinator.async_request_refresh()

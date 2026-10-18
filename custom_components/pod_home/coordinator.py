@@ -19,6 +19,7 @@ from homeassistant.util import dt as dt_util
 # TEMPORARY: vendored copy, see __init__.py's import comment.
 from .podpoint_mobile_api import PodHomeApiClient, PodHomeApiError, PodHomeAuthError
 from .const import (
+    CHARGING_STATE_CABLE_CONNECTED,
     CHARGING_STATE_CHARGING,
     CHARGING_STATE_OPTIONS,
     CHARGING_STATE_SUSPENDED_EV,
@@ -48,7 +49,8 @@ RECENT_CHARGES_LOOKBACK = datetime.timedelta(days=30)
 # the charger checks in at most every 5 minutes, more often around a plug-in or charging ending.
 FAST_POLL_INTERVAL = datetime.timedelta(seconds=60)
 SLOW_POLL_INTERVAL = datetime.timedelta(seconds=300)
-RECENT_CHANGE_WINDOW = datetime.timedelta(seconds=360)
+# Fast polling runs this long after a plug-in, until charging starts.
+PLUG_IN_FAST_POLL_WINDOW = datetime.timedelta(seconds=360)
 CHECK_IN_BUFFER = datetime.timedelta(seconds=5)
 # How far back _charging_state_transitions_by_ppid keeps entries - bounds an otherwise
 # unbounded-over-uptime list; a real charging session never spans this long.
@@ -494,13 +496,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # pod id) - see _async_refresh_account_level_data for cadence.
         self._current_charge_by_ppid: dict[str, PodHomeCharge] = {}
         self._warned_keys: set[str] = set()
-        # Wall-clock time WE observed each charger's chargingState last change (or first saw the
-        # charger). Drives adaptive polling.
-        self._charging_state_changed_at: dict[str, datetime.datetime] = {}
-        # Wall-clock time of the most recent control-entity write, any ppid - also drives
-        # adaptive polling, so whatever changed gets detected sooner regardless of prior charger
-        # activity. See mark_recent_write()/async_request_refresh_after_write().
-        self._last_write_at: datetime.datetime | None = None
+        # Wall-clock time WE observed each charger being plugged in, kept until it charges or is
+        # unplugged. Drives adaptive polling.
+        self._plugged_in_at: dict[str, datetime.datetime] = {}
         # Per-ppid (lastSeenAt, chargingState) pairs, recorded on genuine change - see
         # _record_charging_state_transition()/_confirmed_override_events()/_effective_now().
         self._charging_state_transitions_by_ppid: dict[
@@ -523,17 +521,6 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # Live PodHomeBoostDurationTime instances, keyed by ppid, used by button.py to reset the
         # entity after a boost.
         self.boost_duration_entities: dict[str, Any] = {}
-
-    def mark_recent_write(self) -> None:
-        """Speeds up polling immediately after any control entity's write, regardless of prior
-        charger activity - see _async_adjust_poll_interval()."""
-        self._last_write_at = dt_util.utcnow()
-
-    async def async_request_refresh_after_write(self) -> None:
-        """Every write call site uses this instead of async_request_refresh() directly, so
-        marking the write as recent can't be forgotten at an individual call site."""
-        self.mark_recent_write()
-        await self.async_request_refresh()
 
     async def async_load_sticky_state(self) -> None:
         """Restore Status's sticky timestamps, each charger's latest charge and the Total Energy
@@ -1574,8 +1561,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         last_seen_at = _parse_dt(status.get("lastSeenAt"))
         latest_charge = self._latest_charge_by_ppid.get(ppid)
 
-        if self._record_charging_state_transition(ppid, charging_state, last_seen_at):
-            self._charging_state_changed_at[ppid] = dt_util.utcnow()
+        self._track_plug_in(ppid, charging_state, last_seen_at)
         current_charge = self._current_charge_duration(
             ppid, now, tz, delegated_control_status, smart_schedule_windows
         )
@@ -1617,21 +1603,37 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             always_on_active=override_state.always_on_active if override_state else None,
         )
 
+    def _track_plug_in(
+        self, ppid: str, charging_state: str | None, last_seen_at: datetime.datetime | None
+    ) -> None:
+        """Record chargingState and keep _plugged_in_at from a plug-in until charging starts or
+        the cable is unplugged."""
+        transitions = self._charging_state_transitions_by_ppid.get(ppid)
+        previous_state = transitions[-1][1] if transitions else None
+        if (
+            self._record_charging_state_transition(ppid, charging_state, last_seen_at)
+            and CHARGING_STATE_CABLE_CONNECTED.get(previous_state or "") is False
+            and CHARGING_STATE_CABLE_CONNECTED.get(charging_state or "") is True
+        ):
+            self._plugged_in_at[ppid] = dt_util.utcnow()
+        if charging_state is not None and (
+            charging_state == CHARGING_STATE_CHARGING
+            or CHARGING_STATE_CABLE_CONNECTED.get(charging_state) is not True
+        ):
+            self._plugged_in_at.pop(ppid, None)
+
     def _base_poll_interval(self, now: datetime.datetime) -> datetime.timedelta:
-        """FAST_POLL_INTERVAL within RECENT_CHANGE_WINDOW of a chargingState change or
-        control-entity write, otherwise SLOW_POLL_INTERVAL."""
-        recent = any(
-            now - changed_at <= RECENT_CHANGE_WINDOW
-            for changed_at in self._charging_state_changed_at.values()
-        ) or (
-            self._last_write_at is not None and now - self._last_write_at <= RECENT_CHANGE_WINDOW
+        """FAST_POLL_INTERVAL within PLUG_IN_FAST_POLL_WINDOW of a plug-in that hasn't started
+        charging yet, otherwise SLOW_POLL_INTERVAL."""
+        awaiting_charge = any(
+            now - plugged_in_at <= PLUG_IN_FAST_POLL_WINDOW
+            for plugged_in_at in self._plugged_in_at.values()
         )
-        return FAST_POLL_INTERVAL if recent else SLOW_POLL_INTERVAL
+        return FAST_POLL_INTERVAL if awaiting_charge else SLOW_POLL_INTERVAL
 
     def _async_adjust_poll_interval(self, chargers: dict[str, PodHomeCharger]) -> None:
-        """Set the delay to the next poll: FAST_POLL_INTERVAL after a recent chargingState change
-        or control-entity write, otherwise SLOW_POLL_INTERVAL - each counted from the latest
-        charger check-in (plus CHECK_IN_BUFFER) when that's still ahead, else from now."""
+        """Set the delay to the next poll: _base_poll_interval() counted from the latest charger
+        check-in (plus CHECK_IN_BUFFER) when that's still ahead, else from now."""
         now = dt_util.utcnow()
         interval = self._base_poll_interval(now)
         upcoming = [
@@ -1642,10 +1644,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         upcoming = [delay for delay in upcoming if delay > datetime.timedelta(0)]
         new_interval = min(min(upcoming), interval + CHECK_IN_BUFFER) if upcoming else interval
         _LOGGER.debug(
-            "Next poll in %s (%s activity in the last %s)",
+            "Next poll in %s (%s)",
             new_interval,
-            "recent" if interval == FAST_POLL_INTERVAL else "no recent",
-            RECENT_CHANGE_WINDOW,
+            "awaiting charge after plug-in" if interval == FAST_POLL_INTERVAL else "idle",
         )
         self.update_interval = new_interval
 

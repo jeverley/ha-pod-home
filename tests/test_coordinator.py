@@ -239,7 +239,7 @@ async def test_failed_poll_retries_at_base_interval(
     coordinator = _make_coordinator(hass, api)
     coordinator.update_interval = datetime.timedelta(seconds=7)
     if changed_ago is not None:
-        coordinator._charging_state_changed_at[PPID] = dt_util.utcnow() - changed_ago
+        coordinator._plugged_in_at[PPID] = dt_util.utcnow() - changed_ago
 
     with pytest.raises(UpdateFailed):
         await coordinator._async_update_data()
@@ -515,54 +515,26 @@ async def test_firmware_version_synced_to_device_registry(hass: HomeAssistant) -
     assert registry.async_get(device.id).sw_version == "A30P-2.0"
 
 
-async def test_adjust_poll_interval_speeds_up_after_recent_activity(hass: HomeAssistant) -> None:
+async def test_adjust_poll_interval_speeds_up_after_plug_in(hass: HomeAssistant) -> None:
     api = _stub_api()
     coordinator = _make_coordinator(hass, api)
     coordinator.update_interval = SLOW_POLL_INTERVAL
-    coordinator._charging_state_changed_at[PPID] = datetime.datetime.now(datetime.timezone.utc)
+    coordinator._plugged_in_at[PPID] = datetime.datetime.now(datetime.timezone.utc)
     coordinator._async_adjust_poll_interval({})
     assert coordinator.update_interval == FAST_POLL_INTERVAL
 
 
-async def test_adjust_poll_interval_slows_down_without_recent_activity(
+async def test_adjust_poll_interval_slows_down_after_window(
     hass: HomeAssistant,
 ) -> None:
     api = _stub_api()
     coordinator = _make_coordinator(hass, api)
     coordinator.update_interval = FAST_POLL_INTERVAL
-    coordinator._charging_state_changed_at[PPID] = datetime.datetime(
+    coordinator._plugged_in_at[PPID] = datetime.datetime(
         2020, 1, 1, tzinfo=datetime.timezone.utc
     )
     coordinator._async_adjust_poll_interval({})
     assert coordinator.update_interval == SLOW_POLL_INTERVAL
-
-
-async def test_adjust_poll_interval_speeds_up_after_recent_write(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
-    coordinator.update_interval = SLOW_POLL_INTERVAL
-    coordinator.mark_recent_write()
-    coordinator._async_adjust_poll_interval({})
-    assert coordinator.update_interval == FAST_POLL_INTERVAL
-
-
-async def test_adjust_poll_interval_slows_down_without_recent_write(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
-    coordinator.update_interval = FAST_POLL_INTERVAL
-    coordinator._last_write_at = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
-    coordinator._async_adjust_poll_interval({})
-    assert coordinator.update_interval == SLOW_POLL_INTERVAL
-
-
-async def test_async_request_refresh_after_write_marks_recent_write(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
-    assert coordinator._last_write_at is None
-    with patch.object(coordinator, "async_request_refresh", new=AsyncMock()) as mock_refresh:
-        await coordinator.async_request_refresh_after_write()
-    assert coordinator._last_write_at is not None
-    mock_refresh.assert_awaited_once()
 
 
 async def test_api3_charges_matched_to_ppid_via_pod_id(hass: HomeAssistant) -> None:
@@ -1613,13 +1585,13 @@ async def test_vehicles_fetched_every_poll(hass: HomeAssistant) -> None:
 
 @freeze_time("2026-10-18T12:00:00Z")
 @pytest.mark.parametrize(
-    ("last_seen_ago", "state_changed_ago", "expected_delay"),
+    ("last_seen_ago", "plugged_in_ago", "expected_delay"),
     [
         # Idle: next poll 5 minutes + 5 seconds after the latest check-in.
         (datetime.timedelta(minutes=2), None, datetime.timedelta(minutes=3, seconds=5)),
         # Check-in overdue - poll again in a full slow interval from now.
         (datetime.timedelta(minutes=6), None, SLOW_POLL_INTERVAL),
-        # Recent chargingState change: 60 seconds + 5 seconds after the latest check-in...
+        # Recent plug-in: 60 seconds + 5 seconds after the latest check-in...
         (datetime.timedelta(seconds=30), datetime.timedelta(minutes=1),
          datetime.timedelta(seconds=35)),
         # ...or a full fast interval from now once that's passed.
@@ -1631,13 +1603,13 @@ async def test_vehicles_fetched_every_poll(hass: HomeAssistant) -> None:
 async def test_poll_timed_from_latest_check_in(
     hass: HomeAssistant,
     last_seen_ago: datetime.timedelta,
-    state_changed_ago: datetime.timedelta | None,
+    plugged_in_ago: datetime.timedelta | None,
     expected_delay: datetime.timedelta,
 ) -> None:
     coordinator = _make_coordinator(hass, _stub_api())
     now = datetime.datetime(2026, 10, 18, 12, 0, tzinfo=datetime.timezone.utc)
-    if state_changed_ago is not None:
-        coordinator._charging_state_changed_at[PPID] = now - state_changed_ago
+    if plugged_in_ago is not None:
+        coordinator._plugged_in_at[PPID] = now - plugged_in_ago
 
     coordinator._async_adjust_poll_interval({PPID: make_charger(last_seen_at=now - last_seen_ago)})
 
@@ -1645,8 +1617,8 @@ async def test_poll_timed_from_latest_check_in(
 
 
 async def test_missing_charging_state_doesnt_trigger_fast_polling(hass: HomeAssistant) -> None:
-    """A poll whose connectivity call failed (no chargingState) isn't a state change, and nor is
-    the next poll reading the same state as before it."""
+    """A poll whose connectivity call failed (no chargingState) doesn't make the next reading
+    look like a plug-in."""
     api = _stub_api()
     api.async_list_chargers.return_value = [_charger_raw()]
     coordinator = _make_coordinator(hass, api)
@@ -1668,9 +1640,39 @@ async def test_missing_charging_state_doesnt_trigger_fast_polling(hass: HomeAssi
     assert coordinator.update_interval == datetime.timedelta(minutes=4, seconds=5)
 
 
+@pytest.mark.parametrize(
+    ("states", "expect_fast"),
+    [
+        (["Available", "SuspendedEV"], True),  # plugged in, not charging yet
+        (["Available", "SuspendedEV", "Charging"], False),  # charging started
+        (["Available", "Charging"], False),  # charging straight away
+        (["Charging", "SuspendedEV"], False),  # charging finished
+        (["SuspendedEV", "Available"], False),  # unplugged
+        (["SuspendedEV"], False),  # first sight
+    ],
+)
+async def test_fast_polling_only_while_awaiting_charge_after_plug_in(
+    hass: HomeAssistant, states: list[str], expect_fast: bool
+) -> None:
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    coordinator = _make_coordinator(hass, api)
+    for minute, state in enumerate(states):
+        api.async_connectivity_status.return_value = {
+            "chargingState": state, "lastSeenAt": f"2026-10-18T12:0{minute}:00Z",
+        }
+        with freeze_time(f"2026-10-18T12:0{minute}:30Z"):
+            coordinator.data = await coordinator._async_fetch_data()
+
+    expected = datetime.timedelta(seconds=35) if expect_fast else datetime.timedelta(
+        minutes=4, seconds=35
+    )
+    assert coordinator.update_interval == expected
+
+
 async def test_routine_check_ins_alone_dont_keep_polling_fast(hass: HomeAssistant) -> None:
-    """lastSeenAt advancing every few minutes is routine - only a chargingState change (or a
-    write) switches to fast polling."""
+    """lastSeenAt advancing every few minutes is routine - only a plug-in switches to fast
+    polling."""
     api = _stub_api()
     api.async_list_chargers.return_value = [_charger_raw()]
     coordinator = _make_coordinator(hass, api)
@@ -1678,7 +1680,7 @@ async def test_routine_check_ins_alone_dont_keep_polling_fast(hass: HomeAssistan
         "chargingState": "Available", "lastSeenAt": "2026-10-18T11:50:00Z",
     }
     with freeze_time("2026-10-18T11:51:00Z"):
-        coordinator.data = await coordinator._async_fetch_data()  # first sight - fast
+        coordinator.data = await coordinator._async_fetch_data()  # first sight
     api.async_connectivity_status.return_value = {
         "chargingState": "Available", "lastSeenAt": "2026-10-18T11:59:00Z",
     }

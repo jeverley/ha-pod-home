@@ -96,7 +96,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             )
         except PodHomeAuthError as exc:
             await async_handle_write_auth_error(coordinator, exc)
-        await coordinator.async_request_refresh_after_write()
+        await coordinator.async_request_refresh()
 
     async def _async_cancel_boost(call: ServiceCall) -> None:
         coordinator, ppid = _resolve_charger(hass, call.data[ATTR_DEVICE_ID])
@@ -107,7 +107,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             await coordinator.api.async_delete_charge_override(ppid)
         except PodHomeAuthError as exc:
             await async_handle_write_auth_error(coordinator, exc)
-        await coordinator.async_request_refresh_after_write()
+        await coordinator.async_request_refresh()
 
     hass.services.async_register(
         DOMAIN, SERVICE_START_BOOST, _async_start_boost, schema=START_BOOST_SCHEMA
