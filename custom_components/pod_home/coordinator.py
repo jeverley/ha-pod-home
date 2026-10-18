@@ -401,6 +401,8 @@ def _parse_charge_overrides(
 class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharger]]):
     """Polls mobile-api.pod-point.com and builds a PodHomeCharger per ppid."""
 
+    config_entry: "PodHomeConfigEntry"
+
     def __init__(
         self,
         hass: HomeAssistant,
@@ -1144,12 +1146,16 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
     def _sync_device_sw_versions(self, chargers: dict[str, PodHomeCharger]) -> None:
         """Keep each charger's device registry sw_version in step with its firmware."""
         registry = dr.async_get(self.hass)
+        device_by_ppid = {
+            identifier: device
+            for device in dr.async_entries_for_config_entry(registry, self.config_entry.entry_id)
+            for domain, identifier in device.identifiers
+            if domain == DOMAIN
+        }
         for ppid, charger in chargers.items():
             sw_version = charger.firmware.manifest_id if charger.firmware else None
-            if sw_version is None:
-                continue
-            device = registry.async_get_device(identifiers={(DOMAIN, ppid)})
-            if device is not None and device.sw_version != sw_version:
+            device = device_by_ppid.get(ppid)
+            if sw_version is not None and device is not None and device.sw_version != sw_version:
                 registry.async_update_device(device.id, sw_version=sw_version)
 
     async def _async_fetch_stale_per_charger_data(
