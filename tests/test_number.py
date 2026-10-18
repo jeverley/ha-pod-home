@@ -2,7 +2,7 @@
 the shared factories in tests/_fixtures.py."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -35,18 +35,6 @@ async def test_target_charge_set_value_rounds_and_refreshes(hass: HomeAssistant)
     coordinator.api.async_set_vehicle_charge_limit.assert_called_once_with(PPID, "v1", 73)
     coordinator.async_request_refresh.assert_called_once()
     assert coordinator._last_write_at is not None
-
-
-async def test_target_charge_set_value_forces_vehicle_fetch(hass: HomeAssistant) -> None:
-    vehicle = make_vehicle(id="v1")
-    coordinator = make_coordinator(hass, {PPID: make_charger(vehicle=vehicle)})
-    coordinator.async_request_refresh = AsyncMock()
-    coordinator.request_vehicles_fetch = MagicMock()
-    entity = number.PodHomeVehicleTargetChargeNumber(coordinator, "v1")
-
-    await entity.async_set_native_value(72.6)
-
-    coordinator.request_vehicles_fetch.assert_called_once()
 
 
 async def test_target_charge_masks_stale_readback_until_second_update(

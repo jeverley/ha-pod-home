@@ -112,9 +112,6 @@ class PodHomeVehicleReadyByTime(
             await self.coordinator.api.async_set_vehicle_intents(ppid, vehicle.id, intent_details)
         except PodHomeAuthError as exc:
             await async_handle_write_auth_error(self.coordinator, exc)
-        # Read-back for this write is the staleness-tiered vehicles fetch - force it so the
-        # refresh below actually has a chance to confirm the write.
-        self.coordinator.request_vehicles_fetch()
         self._set_optimistic_value(value)
         await self.coordinator.async_request_refresh_after_write()
 

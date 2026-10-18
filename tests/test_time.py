@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import datetime
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -45,18 +45,6 @@ async def test_ready_by_set_value_writes_intents_with_echoed_kwh(hass: HomeAssis
     assert all(d["chargeByTime"] == "08:00:00" and d["chargeKWh"] == 42.34 for d in call_details)
     coordinator.async_request_refresh.assert_called_once()
     assert coordinator._last_write_at is not None
-
-
-async def test_ready_by_set_value_forces_vehicle_fetch(hass: HomeAssistant) -> None:
-    vehicle = make_vehicle(id="v1", intent_charge_kwh=42.0)
-    coordinator = make_coordinator(hass, {PPID: make_charger(vehicle=vehicle)})
-    coordinator.async_request_refresh = AsyncMock()
-    coordinator.request_vehicles_fetch = MagicMock()
-    entity = time_platform.PodHomeVehicleReadyByTime(coordinator, "v1")
-
-    await entity.async_set_value(datetime.time(8, 0, 0))
-
-    coordinator.request_vehicles_fetch.assert_called_once()
 
 
 async def test_ready_by_masks_stale_readback_until_second_update(hass: HomeAssistant) -> None:
