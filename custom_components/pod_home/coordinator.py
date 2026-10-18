@@ -44,10 +44,12 @@ _LOGGER = logging.getLogger(__name__)
 # /charges lookback - 31 calendar days, since its from/to dates are both inclusive.
 RECENT_CHARGES_LOOKBACK = datetime.timedelta(days=30)
 
-# Adaptive polling constants.
+# Adaptive polling constants. Polls are timed from the latest charger check-in (lastSeenAt):
+# the charger checks in at most every 5 minutes, more often around a plug-in or charging ending.
 FAST_POLL_INTERVAL = datetime.timedelta(seconds=60)
 SLOW_POLL_INTERVAL = datetime.timedelta(seconds=300)
 RECENT_CHANGE_WINDOW = datetime.timedelta(seconds=360)
+CHECK_IN_BUFFER = datetime.timedelta(seconds=5)
 # How far back _charging_state_transitions_by_ppid keeps entries - bounds an otherwise
 # unbounded-over-uptime list; a real charging session never spans this long.
 CHARGING_STATE_TRANSITION_RETENTION = datetime.timedelta(days=2)
@@ -508,9 +510,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # False until api3 charges succeed, and after any failure - makes session data due.
         self._api3_charges_fetched = False
         self._warned_keys: set[str] = set()
-        # Wall-clock time WE observed each charger's lastSeenAt last change - not the
-        # lastSeenAt value itself, which is the charger's own clock. Drives adaptive polling.
-        self._last_seen_changed_at: dict[str, datetime.datetime] = {}
+        # Wall-clock time WE observed each charger's chargingState last change (or first saw the
+        # charger). Drives adaptive polling.
+        self._charging_state_changed_at: dict[str, datetime.datetime] = {}
         # Wall-clock time of the most recent control-entity write, any ppid - also drives
         # adaptive polling, so whatever changed gets detected sooner regardless of prior charger
         # activity. See mark_recent_write()/async_request_refresh_after_write().
@@ -1172,7 +1174,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                 self._total_energy_store.async_delay_save(
                     self._total_energy_state_for_storage, STICKY_STATE_SAVE_DELAY
                 )
-                self._async_adjust_poll_interval()
+                self._async_adjust_poll_interval(self.data)
                 return self.data
             return {}
         self._clear_warning("empty_chargers")
@@ -1198,7 +1200,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             self._total_energy_state_for_storage, STICKY_STATE_SAVE_DELAY
         )
 
-        self._async_adjust_poll_interval()
+        self._async_adjust_poll_interval(result)
         return result
 
     def _cable_unplugged_since_last_poll(self, ppid: str, charging_state: str | None) -> bool:
@@ -1629,11 +1631,10 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
 
         last_seen_at = _parse_dt(status.get("lastSeenAt"))
         previous = self.data.get(ppid) if self.data else None
-        if (
-            ppid not in self._last_seen_changed_at
-            or last_seen_at != (previous.last_seen_at if previous else None)
+        if ppid not in self._charging_state_changed_at or charging_state != (
+            previous.charging_state if previous else None
         ):
-            self._last_seen_changed_at[ppid] = dt_util.utcnow()
+            self._charging_state_changed_at[ppid] = dt_util.utcnow()
 
         latest_charge = self._latest_charge_by_ppid.get(ppid)
 
@@ -1679,25 +1680,32 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             always_on_active=override_state.always_on_active if override_state else None,
         )
 
-    def _async_adjust_poll_interval(self) -> None:
-        """Speed up or slow down future polls based on how recently any charger's lastSeenAt
-        changed, or a control-entity write happened. Takes effect from the next scheduled poll."""
+    def _async_adjust_poll_interval(self, chargers: dict[str, PodHomeCharger]) -> None:
+        """Set the delay to the next poll: FAST_POLL_INTERVAL after a recent chargingState change
+        or control-entity write, otherwise SLOW_POLL_INTERVAL - each counted from the latest
+        charger check-in (plus CHECK_IN_BUFFER) when that's still ahead, else from now."""
         now = dt_util.utcnow()
         recent = any(
             now - changed_at <= RECENT_CHANGE_WINDOW
-            for changed_at in self._last_seen_changed_at.values()
+            for changed_at in self._charging_state_changed_at.values()
         ) or (
             self._last_write_at is not None and now - self._last_write_at <= RECENT_CHANGE_WINDOW
         )
-        new_interval = FAST_POLL_INTERVAL if recent else SLOW_POLL_INTERVAL
-        if new_interval != self.update_interval:
-            _LOGGER.debug(
-                "Switching poll interval to %s (%s activity in the last %s)",
-                new_interval,
-                "recent" if recent else "no recent",
-                RECENT_CHANGE_WINDOW,
-            )
-            self.update_interval = new_interval
+        interval = FAST_POLL_INTERVAL if recent else SLOW_POLL_INTERVAL
+        upcoming = [
+            charger.last_seen_at + interval + CHECK_IN_BUFFER - now
+            for charger in chargers.values()
+            if charger.last_seen_at is not None
+        ]
+        upcoming = [delay for delay in upcoming if delay > datetime.timedelta(0)]
+        new_interval = min(min(upcoming), interval + CHECK_IN_BUFFER) if upcoming else interval
+        _LOGGER.debug(
+            "Next poll in %s (%s activity in the last %s)",
+            new_interval,
+            "recent" if recent else "no recent",
+            RECENT_CHANGE_WINDOW,
+        )
+        self.update_interval = new_interval
 
     @staticmethod
     def _charge_entries_by_ppid(

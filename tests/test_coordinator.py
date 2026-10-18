@@ -497,8 +497,8 @@ async def test_adjust_poll_interval_speeds_up_after_recent_activity(hass: HomeAs
     api = _stub_api()
     coordinator = _make_coordinator(hass, api)
     coordinator.update_interval = SLOW_POLL_INTERVAL
-    coordinator._last_seen_changed_at[PPID] = datetime.datetime.now(datetime.timezone.utc)
-    coordinator._async_adjust_poll_interval()
+    coordinator._charging_state_changed_at[PPID] = datetime.datetime.now(datetime.timezone.utc)
+    coordinator._async_adjust_poll_interval({})
     assert coordinator.update_interval == FAST_POLL_INTERVAL
 
 
@@ -508,8 +508,10 @@ async def test_adjust_poll_interval_slows_down_without_recent_activity(
     api = _stub_api()
     coordinator = _make_coordinator(hass, api)
     coordinator.update_interval = FAST_POLL_INTERVAL
-    coordinator._last_seen_changed_at[PPID] = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
-    coordinator._async_adjust_poll_interval()
+    coordinator._charging_state_changed_at[PPID] = datetime.datetime(
+        2020, 1, 1, tzinfo=datetime.timezone.utc
+    )
+    coordinator._async_adjust_poll_interval({})
     assert coordinator.update_interval == SLOW_POLL_INTERVAL
 
 
@@ -518,7 +520,7 @@ async def test_adjust_poll_interval_speeds_up_after_recent_write(hass: HomeAssis
     coordinator = _make_coordinator(hass, api)
     coordinator.update_interval = SLOW_POLL_INTERVAL
     coordinator.mark_recent_write()
-    coordinator._async_adjust_poll_interval()
+    coordinator._async_adjust_poll_interval({})
     assert coordinator.update_interval == FAST_POLL_INTERVAL
 
 
@@ -527,7 +529,7 @@ async def test_adjust_poll_interval_slows_down_without_recent_write(hass: HomeAs
     coordinator = _make_coordinator(hass, api)
     coordinator.update_interval = FAST_POLL_INTERVAL
     coordinator._last_write_at = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
-    coordinator._async_adjust_poll_interval()
+    coordinator._async_adjust_poll_interval({})
     assert coordinator.update_interval == SLOW_POLL_INTERVAL
 
 
@@ -1619,3 +1621,56 @@ async def test_vehicles_refreshed_every_five_minutes_outside_charging(
     await coordinator._async_fetch_data()
 
     assert api.async_smart_charging_chargers_and_vehicles.called is expect_fetch
+
+
+@freeze_time("2026-10-18T12:00:00Z")
+@pytest.mark.parametrize(
+    ("last_seen_ago", "state_changed_ago", "expected_delay"),
+    [
+        # Idle: next poll 5 minutes + 5 seconds after the latest check-in.
+        (datetime.timedelta(minutes=2), None, datetime.timedelta(minutes=3, seconds=5)),
+        # Check-in overdue - poll again in a full slow interval from now.
+        (datetime.timedelta(minutes=6), None, SLOW_POLL_INTERVAL),
+        # Recent chargingState change: 60 seconds + 5 seconds after the latest check-in...
+        (datetime.timedelta(seconds=30), datetime.timedelta(minutes=1),
+         datetime.timedelta(seconds=35)),
+        # ...or a full fast interval from now once that's passed.
+        (datetime.timedelta(minutes=2), datetime.timedelta(minutes=1), FAST_POLL_INTERVAL),
+        # Charger clock ahead of ours - never more than one interval plus the buffer.
+        (-datetime.timedelta(minutes=1), None, SLOW_POLL_INTERVAL + datetime.timedelta(seconds=5)),
+    ],
+)
+async def test_poll_timed_from_latest_check_in(
+    hass: HomeAssistant,
+    last_seen_ago: datetime.timedelta,
+    state_changed_ago: datetime.timedelta | None,
+    expected_delay: datetime.timedelta,
+) -> None:
+    coordinator = _make_coordinator(hass, _stub_api())
+    now = datetime.datetime(2026, 10, 18, 12, 0, tzinfo=datetime.timezone.utc)
+    if state_changed_ago is not None:
+        coordinator._charging_state_changed_at[PPID] = now - state_changed_ago
+
+    coordinator._async_adjust_poll_interval({PPID: make_charger(last_seen_at=now - last_seen_ago)})
+
+    assert coordinator.update_interval == expected_delay
+
+
+async def test_routine_check_ins_alone_dont_keep_polling_fast(hass: HomeAssistant) -> None:
+    """lastSeenAt advancing every few minutes is routine - only a chargingState change (or a
+    write) switches to fast polling."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    coordinator = _make_coordinator(hass, api)
+    api.async_connectivity_status.return_value = {
+        "chargingState": "Available", "lastSeenAt": "2026-10-18T11:50:00Z",
+    }
+    with freeze_time("2026-10-18T11:51:00Z"):
+        coordinator.data = await coordinator._async_fetch_data()  # first sight - fast
+    api.async_connectivity_status.return_value = {
+        "chargingState": "Available", "lastSeenAt": "2026-10-18T11:59:00Z",
+    }
+    with freeze_time("2026-10-18T12:00:00Z"):
+        coordinator.data = await coordinator._async_fetch_data()
+
+    assert coordinator.update_interval == datetime.timedelta(minutes=4, seconds=5)
