@@ -1503,3 +1503,48 @@ async def test_month_totals_reset_at_local_midnight_without_refetch(hass: HomeAs
     api.async_charges.assert_not_called()
     assert result[PPID].month_energy_kwh == 0
     assert result[PPID].month_cost_amount == 0
+
+
+@pytest.mark.parametrize(
+    ("fetched_ago", "expect_fetch"),
+    [(datetime.timedelta(minutes=45), False), (datetime.timedelta(hours=6), True)],
+)
+async def test_charges_safety_refresh_every_six_hours(
+    hass: HomeAssistant, fetched_ago: datetime.timedelta, expect_fetch: bool
+) -> None:
+    """With no unplug and nothing awaiting listing, /charges and api3 are only re-fetched on
+    the 6-hour safety net."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_connectivity_status.return_value = {"chargingState": "Available"}
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = {PPID: make_charger(charging_state="Available")}
+    coordinator._api3_user_id = 123
+    coordinator._api3_charges_fetched = True
+    coordinator._charges_fetched_at = datetime.datetime.now(datetime.timezone.utc) - fetched_ago
+
+    await coordinator._async_fetch_data()
+
+    assert api.async_charges.called is expect_fetch
+    assert api.async_api3_charges.called is expect_fetch
+
+
+async def test_charges_refetched_every_poll_while_session_awaits_listing(
+    hass: HomeAssistant,
+) -> None:
+    coordinator, poll, _ = _session_end_scenario(hass)
+    api = coordinator.api
+    with freeze_time("2026-09-24T05:00:00Z"):
+        await poll("Charging", _API3_OPEN, [_PREVIOUS_SESSION])
+    with freeze_time("2026-09-24T05:26:00Z"):
+        await poll("Available", _API3_CLOSED, [_PREVIOUS_SESSION])  # not listed yet
+    with freeze_time("2026-09-24T05:27:00Z"):
+        await poll("Available", _API3_CLOSED, [_PREVIOUS_SESSION])  # still not listed
+    with freeze_time("2026-09-24T05:28:00Z"):
+        await poll("Available", _API3_CLOSED, [_SESSION, _PREVIOUS_SESSION])
+    with freeze_time("2026-09-24T05:29:00Z"):
+        await poll("Available", _API3_CLOSED, [_SESSION, _PREVIOUS_SESSION])
+
+    # Fetched at startup, at unplug, then each poll until listed - not after.
+    assert api.async_charges.await_count == 4
+    assert coordinator.data[PPID].latest_charge.energy_total == 64

@@ -56,9 +56,12 @@ CHARGING_STATE_TRANSITION_RETENTION = datetime.timedelta(days=2)
 FIRMWARE_TARIFF_REFRESH_INTERVAL = datetime.timedelta(hours=6)
 
 # /charges lists a session once its cable is unplugged: fetched on the first poll after an unplug
-# (see _cable_unplugged_since_last_poll), otherwise on this slower cadence as a fallback for late
-# finalization or non-session-driven changes (e.g. a billing correction).
-CHARGE_STATS_REFRESH_INTERVAL = datetime.timedelta(minutes=30)
+# (see _cable_unplugged_since_last_poll) and every poll while a closed session awaits listing,
+# otherwise on this cadence as a safety net for a missed unplug or a billing correction.
+CHARGES_SAFETY_REFRESH_INTERVAL = datetime.timedelta(hours=6)
+
+# Linked-vehicle data refresh cadence while plugged in but not charging - see below.
+VEHICLE_PLUGGED_IN_REFRESH_INTERVAL = datetime.timedelta(minutes=30)
 
 # How long a session api3 has closed but /charges hasn't listed yet stays the current charge.
 API3_UNLISTED_SESSION_HOLD = datetime.timedelta(hours=24)
@@ -69,7 +72,7 @@ API3_ACCOUNT_REFRESH_INTERVAL = datetime.timedelta(hours=6)
 
 # Linked-vehicle data (battery/range/odometer/charge-rate/etc, from
 # async_smart_charging_chargers_and_vehicles) refresh cadence: every poll while a vehicle is
-# actively charging, CHARGE_STATS_REFRESH_INTERVAL while plugged in but not charging, this
+# actively charging, VEHICLE_PLUGGED_IN_REFRESH_INTERVAL while plugged in but not charging, this
 # faster interval while fully unplugged (the one case the vehicle itself might be moving). Tier
 # is decided from THIS poll's own freshly-fetched charger-side cable-connected state (a
 # connectivity preflight in _async_fetch_data, run before this decision).
@@ -476,7 +479,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # these each poll. None until the first successful fetch.
         self._charge_entries: list[tuple[str, dict[str, Any], dict[str, Any]]] | None = None
         # /charges (latest_charge) is one account-wide call, not per-ppid, so its own staleness
-        # is tracked as a single timestamp - see CHARGE_STATS_REFRESH_INTERVAL for cadence.
+        # is tracked as a single timestamp - see CHARGES_SAFETY_REFRESH_INTERVAL for cadence.
         self._charges_fetched_at: datetime.datetime | None = None
         # Merged across polls and persisted in the sticky Store, so a charge older than
         # RECENT_CHARGES_LOOKBACK survives restarts.
@@ -993,7 +996,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             vehicles_stale = True
         elif any_cable_connected_this_poll:
             vehicles_stale = self._value_stale(
-                self._vehicles_fetched_at, now, CHARGE_STATS_REFRESH_INTERVAL
+                self._vehicles_fetched_at, now, VEHICLE_PLUGGED_IN_REFRESH_INTERVAL
             )
         else:
             vehicles_stale = self._value_stale(
@@ -1048,7 +1051,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         due this poll - account-level, fetched once regardless of charger count. Mutates
         self state directly, matching _async_refresh_rewards() etc."""
         session_data_due = any_unplugged or self._value_stale(
-            self._charges_fetched_at, now, CHARGE_STATS_REFRESH_INTERVAL
+            self._charges_fetched_at, now, CHARGES_SAFETY_REFRESH_INTERVAL
         )
         # api3 account mapping (user_id, ppid->pod_id) - own conservative cadence (it changes
         # essentially never).
@@ -1070,13 +1073,23 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # api3 closes a session and /charges lists it at unplug. Outside charging both are
         # fetched in the same poll, api3 first, so Total energy's live part and the finished
         # session swap in one update.
+        # A closed session still awaiting /charges re-checks both every poll until listed.
         api3_user_id = self._api3_user_id
         if api3_user_id is not None and not self._api3_charges_fetched:
             session_data_due = True
-        if api3_user_id is not None and (any_charging_this_poll or session_data_due):
+        if api3_user_id is not None and (
+            any_charging_this_poll or session_data_due or self._any_session_awaiting_listing()
+        ):
             await self._async_refresh_api3_charges(api3_user_id, now)
-        if session_data_due:
+        if session_data_due or self._any_session_awaiting_listing():
             await self._async_refresh_charges(now, month_window_start)
+
+    def _any_session_awaiting_listing(self) -> bool:
+        """Whether any charger's current charge is a closed api3 session /charges hasn't listed
+        yet (see _awaiting_charges_listing)."""
+        return any(
+            charge.ended_at is not None for charge in self._current_charge_by_ppid.values()
+        )
 
     async def _async_refresh_charges(
         self, now: datetime.datetime, month_window_start: datetime.date
