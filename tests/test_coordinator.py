@@ -1313,9 +1313,9 @@ async def test_total_energy_held_while_charges_lags_api3(hass: HomeAssistant) ->
     assert totals == [63.7, 64, 64]
 
 
-async def test_api3_charges_failure_retries_session_data_next_poll(hass: HomeAssistant) -> None:
-    """A failed api3 charges fetch leaves session data due, so api3 and /charges retry together
-    next poll instead of waiting out the 6-hour safety net."""
+async def test_api3_charges_failure_retried_without_charges(hass: HomeAssistant) -> None:
+    """A failed api3 charges fetch is retried next poll on its own; /charges stays on its
+    schedule."""
     api = _stub_api()
     api.async_list_chargers.return_value = [_charger_raw()]
     api.async_connectivity_status.return_value = {"chargingState": "Available"}
@@ -1329,7 +1329,7 @@ async def test_api3_charges_failure_retries_session_data_next_poll(hass: HomeAss
         await coordinator._async_fetch_data()
 
     assert api.async_api3_charges.await_count == 2
-    assert api.async_charges.await_count == 2
+    assert api.async_charges.await_count == 1
 
 
 @pytest.mark.parametrize(
@@ -1596,6 +1596,8 @@ async def test_vehicles_fetched_every_poll(hass: HomeAssistant) -> None:
          datetime.timedelta(seconds=35)),
         # ...or a full fast interval from now once that's passed.
         (datetime.timedelta(minutes=2), datetime.timedelta(minutes=1), FAST_POLL_INTERVAL),
+        # Check-in due within the buffer - never less than the buffer.
+        (datetime.timedelta(minutes=5, seconds=4.5), None, datetime.timedelta(seconds=5)),
         # Charger clock ahead of ours - never more than one interval plus the buffer.
         (-datetime.timedelta(minutes=1), None, SLOW_POLL_INTERVAL + datetime.timedelta(seconds=5)),
     ],

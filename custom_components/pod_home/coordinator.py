@@ -495,6 +495,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # The live in-progress charge, if any (one account-wide call, filtered per-ppid by api3
         # pod id) - see _async_refresh_account_level_data for cadence.
         self._current_charge_by_ppid: dict[str, PodHomeCharge] = {}
+        # False after a failed api3 charges fetch - retried every poll until it succeeds.
+        self._api3_charges_ok = True
         self._warned_keys: set[str] = set()
         # Wall-clock time WE observed each charger being plugged in, kept until it charges or is
         # unplugged. Drives adaptive polling.
@@ -1008,13 +1010,12 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # fetched in the same poll, api3 first, so Total energy's live part and the finished
         # session swap in one update.
         api3_user_id = self._api3_user_id
-        api3_fetched = True
-        if api3_user_id is not None and (any_charging_this_poll or session_data_due):
-            api3_fetched = await self._async_refresh_api3_charges(api3_user_id, now)
+        if api3_user_id is not None and (
+            any_charging_this_poll or session_data_due or not self._api3_charges_ok
+        ):
+            self._api3_charges_ok = await self._async_refresh_api3_charges(api3_user_id, now)
         if session_data_due and await self._async_refresh_charges(now, month_window_start):
             self._charges_fetched_at = now
-        if not api3_fetched:
-            self._charges_fetched_at = None  # retries api3 and /charges next poll
 
     async def _async_refresh_charges(
         self, now: datetime.datetime, month_window_start: datetime.date
@@ -1642,7 +1643,12 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             if charger.last_seen_at is not None
         ]
         upcoming = [delay for delay in upcoming if delay > datetime.timedelta(0)]
-        new_interval = min(min(upcoming), interval + CHECK_IN_BUFFER) if upcoming else interval
+        new_interval = (
+            # HA can fire a poll up to a second early, leaving a sub-second delay.
+            max(min(min(upcoming), interval + CHECK_IN_BUFFER), CHECK_IN_BUFFER)
+            if upcoming
+            else interval
+        )
         _LOGGER.debug(
             "Next poll in %s (%s)",
             new_interval,
