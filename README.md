@@ -8,6 +8,7 @@ targets. A clean rewrite for that newer backend, not a patch to the older integr
 
 ## Requirements
 
+- Home Assistant 2026.10 or later.
 - A Pod Point account with the email/password you use to sign in to the Pod Home app.
 - At least one Pod Point charger on that account.
 
