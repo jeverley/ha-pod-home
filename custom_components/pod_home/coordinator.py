@@ -50,7 +50,7 @@ RECENT_CHARGES_LOOKBACK = datetime.timedelta(days=30)
 FAST_POLL_INTERVAL = datetime.timedelta(seconds=60)
 SLOW_POLL_INTERVAL = datetime.timedelta(seconds=300)
 # Fast polling runs this long after a plug-in, until charging starts.
-PLUG_IN_FAST_POLL_WINDOW = datetime.timedelta(seconds=360)
+PLUG_IN_FAST_POLL_WINDOW = datetime.timedelta(minutes=5)
 CHECK_IN_BUFFER = datetime.timedelta(seconds=5)
 # How far back _charging_state_transitions_by_ppid keeps entries - bounds an otherwise
 # unbounded-over-uptime list; a real charging session never spans this long.
