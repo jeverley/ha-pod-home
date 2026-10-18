@@ -916,6 +916,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         )
 
     async def _async_update_data(self) -> dict[str, PodHomeCharger]:
+        # A failed poll keeps this; a successful one replaces it with the check-in-aligned delay.
+        self.update_interval = FAST_POLL_INTERVAL
         try:
             return await self._async_fetch_data()
         except PodHomeAuthError as exc:
@@ -1072,25 +1074,27 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # api3 closes a session and /charges lists it at unplug. Outside charging both are
         # fetched in the same poll, api3 first, so Total energy's live part and the finished
         # session swap in one update.
-        # A closed session still awaiting /charges re-checks both on CHARGES_RETRY_INTERVAL.
+        # A closed session still awaiting /charges re-checks both on CHARGES_RETRY_INTERVAL for
+        # CHARGES_AFTER_UNPLUG_WINDOW after it ended.
         api3_user_id = self._api3_user_id
         if api3_user_id is not None and not self._api3_charges_fetched:
             session_data_due = True
-        awaiting_before_api3 = retry_due and self._any_session_awaiting_listing()
+        awaiting_before_api3 = retry_due and self._any_session_awaiting_listing(now)
         if api3_user_id is not None and (
             any_charging_this_poll or session_data_due or awaiting_before_api3
         ):
             await self._async_refresh_api3_charges(api3_user_id, now)
         # Re-checked after the api3 refresh: a session api3 now shows listed needs no /charges.
-        awaiting_after_api3 = retry_due and self._any_session_awaiting_listing()
+        awaiting_after_api3 = retry_due and self._any_session_awaiting_listing(now)
         if session_data_due or awaiting_after_api3:
             await self._async_refresh_charges(now, month_window_start)
 
-    def _any_session_awaiting_listing(self) -> bool:
+    def _any_session_awaiting_listing(self, now: datetime.datetime) -> bool:
         """Whether any charger's current charge is a closed api3 session /charges hasn't listed
-        yet (see _awaiting_charges_listing)."""
+        yet (see _awaiting_charges_listing) that ended within CHARGES_AFTER_UNPLUG_WINDOW."""
         return any(
-            charge.ended_at is not None for charge in self._current_charge_by_ppid.values()
+            charge.ended_at is not None and now - charge.ended_at < CHARGES_AFTER_UNPLUG_WINDOW
+            for charge in self._current_charge_by_ppid.values()
         )
 
     async def _async_refresh_charges(
@@ -1128,8 +1132,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         local calendar month - the month the app attributes each session to."""
         if self._charge_entries is None:
             return None, None
-        energy = 0.0
-        cost = 0
+        energy: float | None = 0.0
+        cost: int | None = 0
         for entry_ppid, entry, _charger in self._charge_entries:
             started_at = _parse_dt(entry.get("startedAt"))
             if (
@@ -1139,9 +1143,11 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                 < month_start_local
             ):
                 continue
-            energy += entry.get("energyTotal") or 0
-            cost += (entry.get("cost") or {}).get("amount") or 0
-        return round(energy, 3), cost
+            entry_energy = entry.get("energyTotal")
+            entry_cost = (entry.get("cost") or {}).get("amount")
+            energy = None if energy is None or entry_energy is None else energy + entry_energy
+            cost = None if cost is None or entry_cost is None else cost + entry_cost
+        return (None if energy is None else round(energy, 3)), cost
 
     async def _async_fetch_data(self) -> dict[str, PodHomeCharger]:
         try:
@@ -1295,19 +1301,21 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
 
     def _record_charging_state_transition(
         self, ppid: str, charging_state: str | None, last_seen_at: datetime.datetime | None
-    ) -> None:
+    ) -> bool:
         """Records (lastSeenAt, chargingState) whenever chargingState differs from the last
         recorded entry - anchored on the charger's own lastSeenAt, not our poll time
         (chargingState has no timestamp of its own). Feeds _confirmed_override_events()/
-        _effective_now() below."""
+        _effective_now() below. Returns whether a transition was recorded."""
         if charging_state is None or last_seen_at is None:
-            return
+            return False
         transitions = self._charging_state_transitions_by_ppid.setdefault(ppid, [])
-        if not transitions or transitions[-1][1] != charging_state:
-            transitions.append((last_seen_at, charging_state))
-            cutoff = last_seen_at - CHARGING_STATE_TRANSITION_RETENTION
-            while transitions and transitions[0][0] < cutoff:
-                transitions.pop(0)
+        if transitions and transitions[-1][1] == charging_state:
+            return False
+        transitions.append((last_seen_at, charging_state))
+        cutoff = last_seen_at - CHARGING_STATE_TRANSITION_RETENTION
+        while transitions and transitions[0][0] < cutoff:
+            transitions.pop(0)
+        return True
 
     @staticmethod
     def _has_confirmed_energy(current_charge: PodHomeCharge) -> bool:
@@ -1630,15 +1638,10 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             self._total_started_at_by_ppid[ppid] = now
 
         last_seen_at = _parse_dt(status.get("lastSeenAt"))
-        previous = self.data.get(ppid) if self.data else None
-        if ppid not in self._charging_state_changed_at or charging_state != (
-            previous.charging_state if previous else None
-        ):
-            self._charging_state_changed_at[ppid] = dt_util.utcnow()
-
         latest_charge = self._latest_charge_by_ppid.get(ppid)
 
-        self._record_charging_state_transition(ppid, charging_state, last_seen_at)
+        if self._record_charging_state_transition(ppid, charging_state, last_seen_at):
+            self._charging_state_changed_at[ppid] = dt_util.utcnow()
         current_charge = self._current_charge_duration(
             ppid, now, tz, delegated_control_status, smart_schedule_windows
         )

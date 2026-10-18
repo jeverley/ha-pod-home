@@ -225,6 +225,19 @@ async def test_empty_chargers_still_saves_state_and_adjusts_poll_interval(
     mock_energy_save.assert_called_once()
 
 
+async def test_failed_poll_retries_at_fast_interval(hass: HomeAssistant) -> None:
+    """A check-in-aligned delay of a few seconds isn't reused to retry a failing API."""
+    api = _stub_api()
+    api.async_list_chargers.side_effect = PodHomeApiError(500, {})
+    coordinator = _make_coordinator(hass, api)
+    coordinator.update_interval = datetime.timedelta(seconds=7)
+
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+
+    assert coordinator.update_interval == FAST_POLL_INTERVAL
+
+
 async def test_auth_error_raises_config_entry_auth_failed(hass: HomeAssistant) -> None:
     api = _stub_api()
     api.async_list_chargers.side_effect = PodHomeAuthError("token expired")
@@ -1364,7 +1377,7 @@ async def test_total_energy_held_while_charges_lags_api3(hass: HomeAssistant) ->
         await poll("Available", _API3_CLOSED, [_PREVIOUS_SESSION])  # /charges not listed yet
         held = coordinator.data[PPID].current_charge
         assert held is not None and held.energy_total == 64 and held.duration == 35521
-    with freeze_time("2026-09-24T05:57:00Z"):
+    with freeze_time("2026-09-24T05:51:00Z"):
         await poll("Available", _API3_CLOSED, [_SESSION, _PREVIOUS_SESSION])
         charger = coordinator.data[PPID]
         assert select_last_charge(charger.current_charge, charger.latest_charge) is (
@@ -1461,6 +1474,26 @@ async def test_month_totals_summed_from_charges_by_local_start(hass: HomeAssista
     api.async_charges.assert_awaited_once_with(
         datetime.date(2026, 9, 18), datetime.date(2026, 10, 18)
     )
+
+
+@freeze_time("2026-10-18T12:00:00Z")
+async def test_month_cost_unknown_when_an_entry_has_no_cost(hass: HomeAssistant) -> None:
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_charges.return_value = {
+        "data": {
+            "charges": [
+                _charge_entry("2026-10-12T20:00:00Z", 5.2, 60),
+                {**_charge_entry("2026-10-14T20:00:00Z", 3, 0), "cost": None},
+            ]
+        }
+    }
+    coordinator = _make_coordinator(hass, api)
+
+    result = await coordinator._async_fetch_data()
+
+    assert result[PPID].month_energy_kwh == 8.2
+    assert result[PPID].month_cost_amount is None
 
 
 async def test_month_totals_unknown_until_charges_fetched(hass: HomeAssistant) -> None:
@@ -1563,6 +1596,21 @@ async def test_charges_retried_after_unplug_and_while_session_awaits_listing(
     assert coordinator.data[PPID].latest_charge.energy_total == 64
 
 
+@pytest.mark.parametrize(
+    ("ended_ago", "expect_awaiting"),
+    [(datetime.timedelta(minutes=20), True), (datetime.timedelta(minutes=40), False)],
+)
+async def test_unlisted_session_retries_stop_after_window(
+    hass: HomeAssistant, ended_ago: datetime.timedelta, expect_awaiting: bool
+) -> None:
+    """A held session /charges never lists only drives 5-minute retries for 30 minutes."""
+    coordinator = _make_coordinator(hass, _stub_api())
+    now = datetime.datetime(2026, 9, 24, 6, 0, tzinfo=datetime.timezone.utc)
+    coordinator._current_charge_by_ppid[PPID] = make_charge(ended_at=now - ended_ago)
+
+    assert coordinator._any_session_awaiting_listing(now) is expect_awaiting
+
+
 async def test_session_ended_before_tracking_start_not_held(hass: HomeAssistant) -> None:
     """A fresh install whose api3 shows a session closed before tracking started: holding it
     would count it live, then drop it once /charges lists it (the baseline skips it)."""
@@ -1654,6 +1702,30 @@ async def test_poll_timed_from_latest_check_in(
     coordinator._async_adjust_poll_interval({PPID: make_charger(last_seen_at=now - last_seen_ago)})
 
     assert coordinator.update_interval == expected_delay
+
+
+async def test_missing_charging_state_doesnt_trigger_fast_polling(hass: HomeAssistant) -> None:
+    """A poll whose connectivity call failed (no chargingState) isn't a state change, and nor is
+    the next poll reading the same state as before it."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    coordinator = _make_coordinator(hass, api)
+    api.async_connectivity_status.return_value = {
+        "chargingState": "Available", "lastSeenAt": "2026-10-18T11:00:00Z",
+    }
+    with freeze_time("2026-10-18T11:01:00Z"):
+        coordinator.data = await coordinator._async_fetch_data()  # first sight
+    api.async_connectivity_status.side_effect = PodHomeApiError(500, {})
+    with freeze_time("2026-10-18T11:50:00Z"):
+        coordinator.data = await coordinator._async_fetch_data()
+    api.async_connectivity_status.side_effect = None
+    api.async_connectivity_status.return_value = {
+        "chargingState": "Available", "lastSeenAt": "2026-10-18T11:54:00Z",
+    }
+    with freeze_time("2026-10-18T11:55:00Z"):
+        coordinator.data = await coordinator._async_fetch_data()
+
+    assert coordinator.update_interval == datetime.timedelta(minutes=4, seconds=5)
 
 
 async def test_routine_check_ins_alone_dont_keep_polling_fast(hass: HomeAssistant) -> None:
