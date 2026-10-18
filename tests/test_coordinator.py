@@ -54,7 +54,6 @@ def _stub_api() -> PodHomeApiClient:
     api.async_get_charge_overrides.return_value = []
     api.async_connectivity_status.return_value = {}
     api.async_smart_schedule_active.return_value = {}
-    api.async_charge_statistics.return_value = {}
     api.async_charger_firmware.return_value = []
     api.async_tariffs.return_value = {}
     api.async_manual_schedules.return_value = {}
@@ -122,7 +121,15 @@ async def test_first_refresh_parses_charger_basic_mode(hass: HomeAssistant) -> N
             }
         ]
     }
-    api.async_charge_statistics.return_value = {"energy": {"totalUsage": 12.3, "cost": 456}}
+    started_now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    api.async_charges.return_value = {
+        "data": {
+            "charges": [
+                {"id": "m1", "startedAt": started_now, "endedAt": started_now,
+                 "energyTotal": 12.3, "cost": {"amount": 456}, "charger": {"id": PPID}},
+            ]
+        }
+    }
 
     coordinator = _make_coordinator(hass, api)
     result = await coordinator._async_fetch_data()
@@ -369,6 +376,10 @@ async def test_accumulate_total_energy_sums_finalized_charges_once_each(
 ) -> None:
     api = _stub_api()
     coordinator = _make_coordinator(hass, api)
+    now = datetime.datetime(2026, 1, 2, tzinfo=datetime.timezone.utc)
+    coordinator._total_started_at_by_ppid[PPID] = datetime.datetime(
+        2025, 12, 31, tzinfo=datetime.timezone.utc
+    )
 
     entries = [
         (
@@ -382,12 +393,12 @@ async def test_accumulate_total_energy_sums_finalized_charges_once_each(
             {},
         ),
     ]
-    coordinator._accumulate_total_energy(entries)
+    coordinator._accumulate_total_energy(entries, now)
     assert coordinator._total_energy_kwh_by_ppid[PPID] == 8.0
 
     # Same batch replayed (e.g. a re-poll covering an overlapping lookback window) - already
     # counted (watermark has moved past both), must not double-add.
-    coordinator._accumulate_total_energy(entries)
+    coordinator._accumulate_total_energy(entries, now)
     assert coordinator._total_energy_kwh_by_ppid[PPID] == 8.0
 
 
@@ -395,8 +406,25 @@ async def test_accumulate_total_energy_skips_still_open_sessions(hass: HomeAssis
     api = _stub_api()
     coordinator = _make_coordinator(hass, api)
     entries = [(PPID, {"id": "c1", "endedAt": None, "energyTotal": 5.0}, {})]
-    coordinator._accumulate_total_energy(entries)
+    coordinator._accumulate_total_energy(entries, datetime.datetime.now(datetime.timezone.utc))
     assert PPID not in coordinator._total_energy_kwh_by_ppid
+
+
+async def test_accumulate_total_energy_starts_at_tracking_start(hass: HomeAssistant) -> None:
+    """Sessions that ended before this install started tracking a charger aren't added - a
+    first fetch covering past weeks of history counts nothing until a session ends after it."""
+    api = _stub_api()
+    coordinator = _make_coordinator(hass, api)
+    first_fetch = datetime.datetime(2026, 1, 10, tzinfo=datetime.timezone.utc)
+    history = [(PPID, {"id": "c1", "endedAt": "2026-01-05T01:00:00Z", "energyTotal": 5.0}, {})]
+
+    coordinator._accumulate_total_energy(history, first_fetch)
+    assert PPID not in coordinator._total_energy_kwh_by_ppid
+
+    coordinator._total_started_at_by_ppid[PPID] = first_fetch
+    new_session = (PPID, {"id": "c2", "endedAt": "2026-01-11T01:00:00Z", "energyTotal": 3.0}, {})
+    coordinator._accumulate_total_energy([*history, new_session], first_fetch)
+    assert coordinator._total_energy_kwh_by_ppid[PPID] == 3.0
 
 
 async def test_sticky_state_round_trips_through_store(hass: HomeAssistant) -> None:
@@ -1144,7 +1172,7 @@ async def test_vehicles_not_refetched_when_still_idle_and_fresh(hass: HomeAssist
 async def test_finalized_charge_data_fetched_when_cable_unplugged(
     hass: HomeAssistant, previous_state: str, current_state: str, expect_fetch: bool
 ) -> None:
-    """/charges and month-to-date charge-statistics list a session once its cable is unplugged."""
+    """/charges lists a session once its cable is unplugged."""
     api = _stub_api()
     api.async_list_chargers.return_value = [_charger_raw()]
     api.async_connectivity_status.return_value = {"chargingState": current_state}
@@ -1152,12 +1180,10 @@ async def test_finalized_charge_data_fetched_when_cable_unplugged(
     now = datetime.datetime.now(datetime.timezone.utc)
     coordinator.data = {PPID: make_charger(charging_state=previous_state)}
     coordinator._charges_fetched_at = now  # not otherwise stale
-    coordinator._month_stats_fetched_at[PPID] = now
 
     await coordinator._async_fetch_data()
 
     assert api.async_charges.called is expect_fetch
-    assert api.async_charge_statistics.called is expect_fetch
 
 
 async def test_api3_charges_fetched_same_poll_as_charging_transition(hass: HomeAssistant) -> None:
@@ -1322,7 +1348,7 @@ async def test_total_energy_never_drops_across_session_end(hass: HomeAssistant) 
         await poll("Available", _API3_CLOSED, [_SESSION, _PREVIOUS_SESSION])
 
     assert totals == sorted(totals)
-    assert totals[-1] == 93.5
+    assert totals[-1] == 64  # the earlier session ended before tracking started
 
 
 async def test_total_energy_held_while_charges_lags_api3(hass: HomeAssistant) -> None:
@@ -1342,7 +1368,7 @@ async def test_total_energy_held_while_charges_lags_api3(hass: HomeAssistant) ->
             charger.latest_charge
         )
 
-    assert totals == [93.2, 93.5, 93.5]
+    assert totals == [63.7, 64, 64]
 
 
 async def test_api3_charges_retried_until_fetched(hass: HomeAssistant) -> None:
@@ -1398,3 +1424,82 @@ async def test_finished_api3_session_held_only_until_listed(
     )
 
     assert (PPID in coordinator._current_charge_by_ppid) is expect_held
+
+
+def _charge_entry(started_at: str, energy: float, cost: int, ppid: str = PPID) -> dict:
+    return {"startedAt": started_at, "endedAt": started_at, "energyTotal": energy,
+            "cost": {"amount": cost}, "charger": {"id": ppid}}
+
+
+@freeze_time("2026-10-18T12:00:00Z")
+async def test_month_totals_summed_from_charges_by_local_start(hass: HomeAssistant) -> None:
+    """Month energy/cost sum the sessions that started this charger-local calendar month - the
+    attribution the app uses."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_charges.return_value = {
+        "data": {
+            "charges": [
+                _charge_entry("2026-09-30T23:30:00Z", 10, 100),  # 00:30 BST on 1 October
+                _charge_entry("2026-10-12T20:00:00Z", 5.2, 60),
+                _charge_entry("2026-09-23T19:25:34Z", 64, 1173),  # September
+                _charge_entry("2026-10-05T20:00:00Z", 7, 70, ppid="PSL-OTHER"),
+                {**_charge_entry("2026-10-09T17:32:24Z", 0, 0), "endedAt": None},
+            ]
+        }
+    }
+    coordinator = _make_coordinator(hass, api)
+
+    result = await coordinator._async_fetch_data()
+
+    assert result[PPID].month_energy_kwh == 15.2
+    assert result[PPID].month_cost_amount == 160
+    api.async_charges.assert_awaited_once_with(
+        datetime.date(2026, 9, 18), datetime.date(2026, 10, 18)
+    )
+
+
+async def test_month_totals_unknown_until_charges_fetched(hass: HomeAssistant) -> None:
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_charges.side_effect = PodHomeApiError(500, {})
+    coordinator = _make_coordinator(hass, api)
+
+    result = await coordinator._async_fetch_data()
+
+    assert result[PPID].month_energy_kwh is None
+    assert result[PPID].month_cost_amount is None
+
+
+@freeze_time("2026-10-31T12:00:00Z")
+async def test_charges_window_reaches_before_local_month_start(hass: HomeAssistant) -> None:
+    """On the 31st, today - 30 is the 1st itself - the window still starts the day before."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    coordinator = _make_coordinator(hass, api)
+
+    await coordinator._async_fetch_data()
+
+    api.async_charges.assert_awaited_once_with(
+        datetime.date(2026, 9, 30), datetime.date(2026, 10, 31)
+    )
+
+
+@freeze_time("2026-11-01T00:30:00Z")
+async def test_month_totals_reset_at_local_midnight_without_refetch(hass: HomeAssistant) -> None:
+    """Totals are recomputed each poll from the stored sessions, so the 1st's local midnight
+    resets them even when /charges isn't due."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    coordinator = _make_coordinator(hass, api)
+    coordinator._charge_entries = [
+        (PPID, _charge_entry("2026-10-20T20:00:00Z", 30, 300), {"id": PPID})
+    ]
+    coordinator._charges_fetched_at = datetime.datetime.now(datetime.timezone.utc)
+    coordinator._api3_charges_fetched = True
+
+    result = await coordinator._async_fetch_data()
+
+    api.async_charges.assert_not_called()
+    assert result[PPID].month_energy_kwh == 0
+    assert result[PPID].month_cost_amount == 0
