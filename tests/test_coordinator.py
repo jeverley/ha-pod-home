@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, create_autospec, patch
 from zoneinfo import ZoneInfo
 
 import pytest
+from freezegun import freeze_time
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import device_registry as dr
@@ -28,6 +29,8 @@ from custom_components.pod_home.podpoint_mobile_api import (
     PodHomeApiError,
     PodHomeAuthError,
 )
+from custom_components.pod_home.helpers import select_last_charge
+import custom_components.pod_home.sensor as sensor
 from tests._fixtures import make_charge, make_charger
 
 pytestmark = pytest.mark.asyncio
@@ -661,7 +664,7 @@ async def test_current_charge_duration_freezes_when_schedule_unavailable(
     # freeze at the previous poll's committed value.
     api.async_connectivity_status.return_value = {"chargingState": "SuspendedEVSE"}
     api.async_smart_schedule_active.return_value = {}
-    coordinator._api3_charges_fetched_at = None
+    coordinator._charges_fetched_at = None  # session data due - refetches api3
 
     result = await coordinator._async_fetch_data()
 
@@ -977,7 +980,7 @@ async def test_current_charge_duration_schedule_start_trusted_end_freezes_on_obs
     api.async_connectivity_status.return_value = {
         "chargingState": "SuspendedEV", "lastSeenAt": stopped_at.isoformat(),
     }
-    coordinator._api3_charges_fetched_at = None
+    coordinator._charges_fetched_at = None  # session data due - refetches api3
 
     result = await coordinator._async_fetch_data()
 
@@ -1018,7 +1021,7 @@ async def test_current_charge_duration_unknown_while_never_confirmed_energy(
     coordinator.data = await coordinator._async_fetch_data()
     assert coordinator._current_charge_by_ppid[PPID].duration is None
 
-    coordinator._api3_charges_fetched_at = None
+    coordinator._charges_fetched_at = None  # session data due - refetches api3
     result = await coordinator._async_fetch_data()
     assert result[PPID].current_charge.duration is None
 
@@ -1130,15 +1133,18 @@ async def test_vehicles_not_refetched_when_still_idle_and_fresh(hass: HomeAssist
 @pytest.mark.parametrize(
     ("previous_state", "current_state", "expect_fetch"),
     [
-        ("Charging", "SuspendedEV", True),  # stopped - a finalized session may now be listed
-        ("Charging", "Charging", False),  # still charging - nothing new to list yet
-        ("Available", "Charging", False),  # started - nothing new to list yet
+        ("SuspendedEV", "Available", True),  # unplugged after charging finished
+        ("Charging", "Available", True),  # unplugged mid-charge
+        ("Charging", "SuspendedEV", False),  # finished but still plugged in
+        ("Charging", "Charging", False),
+        ("Available", "Preparing", False),  # plugged in
+        ("Unknown", "Available", True),  # previous state not known to be unplugged
     ],
 )
-async def test_finalized_charge_data_fetched_when_charging_stops(
+async def test_finalized_charge_data_fetched_when_cable_unplugged(
     hass: HomeAssistant, previous_state: str, current_state: str, expect_fetch: bool
 ) -> None:
-    """/charges and month-to-date charge-statistics both list finalized sessions only."""
+    """/charges and month-to-date charge-statistics list a session once its cable is unplugged."""
     api = _stub_api()
     api.async_list_chargers.return_value = [_charger_raw()]
     api.async_connectivity_status.return_value = {"chargingState": current_state}
@@ -1162,11 +1168,39 @@ async def test_api3_charges_fetched_same_poll_as_charging_transition(hass: HomeA
     now = datetime.datetime.now(datetime.timezone.utc)
     coordinator.data = {PPID: make_charger(charging_state="Available")}
     coordinator._api3_user_id = 123  # only fetched at all once this is known
-    coordinator._api3_charges_fetched_at = now  # not otherwise stale
+    coordinator._api3_charges_fetched = True
+    coordinator._charges_fetched_at = now  # session data not otherwise due
 
     await coordinator._async_fetch_data()
 
     api.async_api3_charges.assert_called_once()
+    api.async_charges.assert_not_called()
+
+
+@pytest.mark.parametrize("charges_fetched_ago", [None, datetime.timedelta(minutes=5)])
+async def test_api3_and_charges_fetched_together_outside_charging(
+    hass: HomeAssistant, charges_fetched_ago: datetime.timedelta | None
+) -> None:
+    """Outside charging, api3 is fetched only alongside /charges, and first - so a session api3
+    already shows closed is never dropped from Total energy before /charges lists it."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_connectivity_status.return_value = {"chargingState": "Available"}
+    calls: list[str] = []
+    api.async_api3_charges.side_effect = lambda *a, **k: calls.append("api3") or {}
+    api.async_charges.side_effect = lambda *a, **k: calls.append("charges") or {}
+    coordinator = _make_coordinator(hass, api)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    coordinator.data = {PPID: make_charger(charging_state="Available")}
+    coordinator._api3_user_id = 123
+    coordinator._api3_charges_fetched = True
+    coordinator._charges_fetched_at = (
+        now - charges_fetched_ago if charges_fetched_ago is not None else None
+    )
+
+    await coordinator._async_fetch_data()
+
+    assert calls == (["api3", "charges"] if charges_fetched_ago is None else [])
 
 
 async def test_connectivity_fetched_once_per_ppid_per_poll(hass: HomeAssistant) -> None:
@@ -1230,3 +1264,137 @@ async def test_remote_lock_polled_every_poll_only_once_set(
     await coordinator._async_fetch_data()
 
     assert api.async_get_remote_lock_status.call_count == expected_calls
+
+
+_PREVIOUS_SESSION = {
+    "id": "c0",
+    "startedAt": "2026-09-20T23:30:00Z",
+    "endedAt": "2026-09-21T04:30:00Z",
+    "energyTotal": 29.5,
+    "charger": {"id": PPID},
+}
+_SESSION = {
+    "id": "c1",
+    "startedAt": "2026-09-23T19:25:34Z",
+    "endedAt": "2026-09-24T05:17:35Z",
+    "energyTotal": 64,
+    "charger": {"id": PPID},
+}
+_API3_OPEN = {
+    "id": 1, "starts_at": "2026-09-23T19:25:34Z", "ends_at": None, "kwh_used": 63.7,
+    "pod": {"id": 555},
+}
+_API3_CLOSED = {
+    **_API3_OPEN, "ends_at": "2026-09-24T05:25:39Z", "kwh_used": 64,
+    "charging_duration": {"raw": 35521},
+}
+
+
+def _session_end_scenario(hass: HomeAssistant):
+    """A coordinator plus a poll(charging_state, api3_entry, charges) helper that records Total
+    energy after each poll - for walking one session through its end."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_create_api3_session.return_value = {"sessions": {"user_id": 999}}
+    api.async_api3_pods.return_value = {"pods": [{"ppid": PPID, "unit_id": 555}]}
+    coordinator = _make_coordinator(hass, api)
+    totals: list[float | None] = []
+
+    async def poll(charging_state: str, api3_entry: dict, charges: list[dict]) -> None:
+        api.async_connectivity_status.return_value = {"chargingState": charging_state}
+        api.async_api3_charges.return_value = {"charges": [api3_entry]}
+        api.async_charges.return_value = {"data": {"charges": charges}}
+        coordinator.data = await coordinator._async_fetch_data()
+        totals.append(sensor.PodHomeTotalEnergySensor(coordinator, PPID).native_value)
+
+    return coordinator, poll, totals
+
+
+async def test_total_energy_never_drops_across_session_end(hass: HomeAssistant) -> None:
+    """Charging, then finished with the cable still in, then unplugged: api3 closes the session
+    and /charges lists it at unplug, and Total energy swaps live for finalized in one poll."""
+    _, poll, totals = _session_end_scenario(hass)
+    with freeze_time("2026-09-24T05:00:00Z"):
+        await poll("Charging", _API3_OPEN, [_PREVIOUS_SESSION])
+    with freeze_time("2026-09-24T05:18:00Z"):
+        await poll("SuspendedEV", {**_API3_OPEN, "kwh_used": 64}, [_PREVIOUS_SESSION])
+    with freeze_time("2026-09-24T05:26:00Z"):
+        await poll("Available", _API3_CLOSED, [_SESSION, _PREVIOUS_SESSION])
+
+    assert totals == sorted(totals)
+    assert totals[-1] == 93.5
+
+
+async def test_total_energy_held_while_charges_lags_api3(hass: HomeAssistant) -> None:
+    """api3 already shows the session closed at unplug but /charges lists it a poll later: the
+    finished api3 session stays current (matched to /charges by started_at) meanwhile."""
+    coordinator, poll, totals = _session_end_scenario(hass)
+    with freeze_time("2026-09-24T05:00:00Z"):
+        await poll("Charging", _API3_OPEN, [_PREVIOUS_SESSION])
+    with freeze_time("2026-09-24T05:26:00Z"):
+        await poll("Available", _API3_CLOSED, [_PREVIOUS_SESSION])  # /charges not listed yet
+        held = coordinator.data[PPID].current_charge
+        assert held is not None and held.energy_total == 64 and held.duration == 35521
+    with freeze_time("2026-09-24T05:57:00Z"):
+        await poll("Available", _API3_CLOSED, [_SESSION, _PREVIOUS_SESSION])
+        charger = coordinator.data[PPID]
+        assert select_last_charge(charger.current_charge, charger.latest_charge) is (
+            charger.latest_charge
+        )
+
+    assert totals == [93.2, 93.5, 93.5]
+
+
+async def test_api3_charges_retried_until_fetched(hass: HomeAssistant) -> None:
+    """A failed (or not yet attempted) api3 charges fetch makes session data due next poll,
+    so api3 and /charges retry together instead of waiting out the 30-minute cadence."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_connectivity_status.return_value = {"chargingState": "Available"}
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = {PPID: make_charger(charging_state="Available")}
+    coordinator._api3_user_id = 123
+    coordinator._charges_fetched_at = datetime.datetime.now(datetime.timezone.utc)
+
+    await coordinator._async_fetch_data()
+    assert api.async_api3_charges.call_count == 1
+    assert api.async_charges.call_count == 1
+
+    await coordinator._async_fetch_data()  # api3 succeeded - nothing due now
+    assert api.async_api3_charges.call_count == 1
+    assert api.async_charges.call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("latest_started_at", "ended_ago", "expect_held"),
+    [
+        (datetime.datetime(2026, 9, 20, 23, 30, tzinfo=datetime.timezone.utc), 1, True),
+        (datetime.datetime(2026, 9, 23, 19, 25, 34, tzinfo=datetime.timezone.utc), 1, False),
+        (None, 1, True),  # nothing listed yet
+        (datetime.datetime(2026, 9, 20, 23, 30, tzinfo=datetime.timezone.utc), 25 * 60, False),
+    ],
+)
+async def test_finished_api3_session_held_only_until_listed(
+    hass: HomeAssistant,
+    latest_started_at: datetime.datetime | None,
+    ended_ago: int,
+    expect_held: bool,
+) -> None:
+    ended_at = datetime.datetime(2026, 9, 24, 5, 25, 39, tzinfo=datetime.timezone.utc)
+    api = _stub_api()
+    api.async_api3_charges.return_value = {
+        "charges": [
+            {"id": 1, "starts_at": "2026-09-23T19:25:34Z", "ends_at": ended_at.isoformat(),
+             "kwh_used": 64, "pod": {"id": 555}},
+        ]
+    }
+    coordinator = _make_coordinator(hass, api)
+    coordinator._api3_pod_id_by_ppid = {PPID: 555}
+    if latest_started_at is not None:
+        coordinator._latest_charge_by_ppid[PPID] = make_charge(started_at=latest_started_at)
+
+    await coordinator._async_refresh_api3_charges(
+        999, ended_at + datetime.timedelta(minutes=ended_ago)
+    )
+
+    assert (PPID in coordinator._current_charge_by_ppid) is expect_held

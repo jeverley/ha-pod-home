@@ -220,6 +220,11 @@ def _is_finished_sticky(charger: "PodHomeCharger", now_utc: datetime.datetime) -
 _SAME_SESSION_TOLERANCE = datetime.timedelta(seconds=5)
 
 
+def same_session_start(a: datetime.datetime | None, b: datetime.datetime | None) -> bool:
+    """Whether two started_at values (api3 and mobile-api) describe the same session."""
+    return a is not None and b is not None and abs(a - b) <= _SAME_SESSION_TOLERANCE
+
+
 def select_last_charge(
     current_charge: "PodHomeCharge | None", latest_charge: "PodHomeCharge | None"
 ) -> "PodHomeCharge | None":
@@ -235,13 +240,10 @@ def select_last_charge(
     already sees that mobile-api hasn't reported back yet)."""
     if not current_charge or not latest_charge:
         return current_charge or latest_charge
-    same_session = (
-        current_charge.started_at is not None
-        and latest_charge.started_at is not None
-        and abs((latest_charge.started_at - current_charge.started_at).total_seconds())
-        <= _SAME_SESSION_TOLERANCE.total_seconds()
-    )
-    if same_session and latest_charge.ended_at is not None:
+    if (
+        same_session_start(current_charge.started_at, latest_charge.started_at)
+        and latest_charge.ended_at is not None
+    ):
         return latest_charge
     return current_charge
 
