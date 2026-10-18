@@ -225,17 +225,26 @@ async def test_empty_chargers_still_saves_state_and_adjusts_poll_interval(
     mock_energy_save.assert_called_once()
 
 
-async def test_failed_poll_retries_at_fast_interval(hass: HomeAssistant) -> None:
-    """A check-in-aligned delay of a few seconds isn't reused to retry a failing API."""
+@pytest.mark.parametrize(
+    ("changed_ago", "expected"),
+    [(datetime.timedelta(minutes=1), FAST_POLL_INTERVAL), (None, SLOW_POLL_INTERVAL)],
+)
+async def test_failed_poll_retries_at_base_interval(
+    hass: HomeAssistant, changed_ago: datetime.timedelta | None, expected: datetime.timedelta
+) -> None:
+    """A check-in-aligned delay of a few seconds isn't reused to retry a failing API, and an
+    idle outage retries at the slow interval."""
     api = _stub_api()
     api.async_list_chargers.side_effect = PodHomeApiError(500, {})
     coordinator = _make_coordinator(hass, api)
     coordinator.update_interval = datetime.timedelta(seconds=7)
+    if changed_ago is not None:
+        coordinator._charging_state_changed_at[PPID] = dt_util.utcnow() - changed_ago
 
     with pytest.raises(UpdateFailed):
         await coordinator._async_update_data()
 
-    assert coordinator.update_interval == FAST_POLL_INTERVAL
+    assert coordinator.update_interval == expected
 
 
 async def test_auth_error_raises_config_entry_auth_failed(hass: HomeAssistant) -> None:
@@ -1405,7 +1414,7 @@ async def test_month_totals_summed_from_charges_by_local_start(hass: HomeAssista
                 _charge_entry("2026-10-12T20:00:00Z", 5.2, 60),
                 _charge_entry("2026-09-23T19:25:34Z", 64, 1173),  # September
                 _charge_entry("2026-10-05T20:00:00Z", 7, 70, ppid="PSL-OTHER"),
-                {**_charge_entry("2026-10-09T17:32:24Z", 0, 0), "endedAt": None},
+                {**_charge_entry("2026-10-09T17:32:24Z", 4, 0), "endedAt": None, "cost": None},
             ]
         }
     }
@@ -1567,6 +1576,27 @@ async def test_month_totals_fall_back_to_ha_time_zone(hass: HomeAssistant) -> No
         dt_util.set_default_time_zone(previous)
 
     assert totals == (5, 50)
+
+
+async def test_api3_failure_while_charging_retries_after_charging_stops(
+    hass: HomeAssistant,
+) -> None:
+    """A failed api3 fetch on the last charging poll still gets retried once charging stops."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_charges.return_value = {"data": {"charges": []}}
+    api.async_api3_charges.side_effect = [PodHomeApiError(500, {}), {"charges": []}]
+    coordinator = _make_coordinator(hass, api)
+    coordinator._api3_user_id = 123
+    coordinator._charges_fetched_at = datetime.datetime.now(datetime.timezone.utc)
+    coordinator.data = {PPID: make_charger(charging_state="Charging")}
+
+    api.async_connectivity_status.return_value = {"chargingState": "Charging"}
+    coordinator.data = await coordinator._async_fetch_data()
+    api.async_connectivity_status.return_value = {"chargingState": "SuspendedEV"}
+    await coordinator._async_fetch_data()
+
+    assert api.async_api3_charges.await_count == 2
 
 
 async def test_vehicles_fetched_every_poll(hass: HomeAssistant) -> None:

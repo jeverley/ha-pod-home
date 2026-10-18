@@ -892,7 +892,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
 
     async def _async_update_data(self) -> dict[str, PodHomeCharger]:
         # A failed poll keeps this; a successful one replaces it with the check-in-aligned delay.
-        self.update_interval = FAST_POLL_INTERVAL
+        self.update_interval = self._base_poll_interval(dt_util.utcnow())
         try:
             return await self._async_fetch_data()
         except PodHomeAuthError as exc:
@@ -928,10 +928,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
     async def _async_fetch_connectivity(
         self, chargers_raw: list[dict[str, Any]]
     ) -> dict[str, dict[str, Any]]:
-        """Connectivity fetched for every charger up front, before deciding the vehicles/
-        `/charges` cadence tiers below, so a charging-state transition promotes those tiers
-        THIS poll. Missing-ppid entries are silently skipped here; the per-charger loop still
-        logs its own warning for them once."""
+        """Connectivity fetched for every charger up front, so this poll's charging state and
+        unplug decide the api3 and `/charges` fetches below. Missing-ppid entries are silently
+        skipped here; the per-charger loop still logs its own warning for them once."""
         ppids: list[str] = []
         for raw in chargers_raw:
             raw_ppid = raw.get("ppid")
@@ -1025,13 +1024,10 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         api3_fetched = True
         if api3_user_id is not None and (any_charging_this_poll or session_data_due):
             api3_fetched = await self._async_refresh_api3_charges(api3_user_id, now)
-        # Stamped only when both succeed, so a failure of either retries both next poll.
-        if (
-            session_data_due
-            and await self._async_refresh_charges(now, month_window_start)
-            and api3_fetched
-        ):
+        if session_data_due and await self._async_refresh_charges(now, month_window_start):
             self._charges_fetched_at = now
+        if not api3_fetched:
+            self._charges_fetched_at = None  # retries api3 and /charges next poll
 
     async def _async_refresh_charges(
         self, now: datetime.datetime, month_window_start: datetime.date
@@ -1065,8 +1061,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
     def _month_to_date_totals(
         self, ppid: str, tz: datetime.tzinfo | None, month_start_local: datetime.date
     ) -> tuple[float | None, int | None]:
-        """Energy (kWh) and cost (minor units) of this charger's sessions that started this
-        local calendar month - the month the app attributes each session to."""
+        """Energy (kWh) and cost (minor units) of this charger's finalized sessions that started
+        this local calendar month - the month the app attributes each session to."""
         if self._charge_entries is None:
             return None, None
         energy: float | None = 0.0
@@ -1075,6 +1071,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             started_at = _parse_dt(entry.get("startedAt"))
             if (
                 entry_ppid != ppid
+                or entry.get("endedAt") is None
                 or started_at is None
                 or started_at.astimezone(tz or dt_util.get_default_time_zone()).date()
                 < month_start_local
@@ -1620,18 +1617,23 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             always_on_active=override_state.always_on_active if override_state else None,
         )
 
-    def _async_adjust_poll_interval(self, chargers: dict[str, PodHomeCharger]) -> None:
-        """Set the delay to the next poll: FAST_POLL_INTERVAL after a recent chargingState change
-        or control-entity write, otherwise SLOW_POLL_INTERVAL - each counted from the latest
-        charger check-in (plus CHECK_IN_BUFFER) when that's still ahead, else from now."""
-        now = dt_util.utcnow()
+    def _base_poll_interval(self, now: datetime.datetime) -> datetime.timedelta:
+        """FAST_POLL_INTERVAL within RECENT_CHANGE_WINDOW of a chargingState change or
+        control-entity write, otherwise SLOW_POLL_INTERVAL."""
         recent = any(
             now - changed_at <= RECENT_CHANGE_WINDOW
             for changed_at in self._charging_state_changed_at.values()
         ) or (
             self._last_write_at is not None and now - self._last_write_at <= RECENT_CHANGE_WINDOW
         )
-        interval = FAST_POLL_INTERVAL if recent else SLOW_POLL_INTERVAL
+        return FAST_POLL_INTERVAL if recent else SLOW_POLL_INTERVAL
+
+    def _async_adjust_poll_interval(self, chargers: dict[str, PodHomeCharger]) -> None:
+        """Set the delay to the next poll: FAST_POLL_INTERVAL after a recent chargingState change
+        or control-entity write, otherwise SLOW_POLL_INTERVAL - each counted from the latest
+        charger check-in (plus CHECK_IN_BUFFER) when that's still ahead, else from now."""
+        now = dt_util.utcnow()
+        interval = self._base_poll_interval(now)
         upcoming = [
             charger.last_seen_at + interval + CHECK_IN_BUFFER - now
             for charger in chargers.values()
@@ -1642,7 +1644,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         _LOGGER.debug(
             "Next poll in %s (%s activity in the last %s)",
             new_interval,
-            "recent" if recent else "no recent",
+            "recent" if interval == FAST_POLL_INTERVAL else "no recent",
             RECENT_CHANGE_WINDOW,
         )
         self.update_interval = new_interval
