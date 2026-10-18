@@ -26,7 +26,7 @@ async def test_is_locked_reflects_off_mode(hass: HomeAssistant) -> None:
     assert entity.is_locked is False
 
 
-async def test_is_locked_none_when_unsupported_or_unset(hass: HomeAssistant) -> None:
+async def test_is_locked_none_when_unsupported(hass: HomeAssistant) -> None:
     """offMode: null - confirmed live for a charger model that doesn't support Remote Lock."""
     coordinator = make_coordinator(hass, {PPID: make_charger(remote_lock_off_mode=None)})
     entity = lock.PodHomeRemoteLock(coordinator, PPID)

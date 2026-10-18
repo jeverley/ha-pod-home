@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -354,8 +355,8 @@ async def test_firmware_and_tariffs_not_refetched_within_staleness_window(
     assert api.async_tariffs.call_count == 1
     assert api.async_manual_schedules.call_count == 1
     assert api.async_delegated_control.call_count == 1
-    # But per-charger data fetched every poll (preferences, charge_overrides, connectivity,
-    # remote_lock) did get called again.
+    # But per-charger data fetched every poll (preferences, charge_overrides, connectivity) did
+    # get called again - remote_lock too, since no successful response has been stored yet.
     assert api.async_smart_charging_preferences.call_count == 2
     assert api.async_get_remote_lock_status.call_count == 2
 
@@ -402,6 +403,7 @@ async def test_sticky_state_round_trips_through_store(hass: HomeAssistant) -> No
     coordinator._charging_started_at_by_ppid[PPID] = now
     coordinator._total_energy_kwh_by_ppid[PPID] = 42.0
     coordinator._total_started_at_by_ppid[PPID] = now
+    coordinator._latest_charge_by_ppid[PPID] = make_charge()
 
     await coordinator._sticky_store.async_save(coordinator._sticky_state_for_storage())
     await coordinator._total_energy_store.async_save(coordinator._total_energy_state_for_storage())
@@ -412,11 +414,51 @@ async def test_sticky_state_round_trips_through_store(hass: HomeAssistant) -> No
     coordinator._charging_started_at_by_ppid = {}
     coordinator._total_energy_kwh_by_ppid = {}
     coordinator._total_started_at_by_ppid = {}
+    coordinator._latest_charge_by_ppid = {}
     await coordinator.async_load_sticky_state()
 
     assert coordinator._charging_started_at_by_ppid[PPID] == now
     assert coordinator._total_energy_kwh_by_ppid[PPID] == 42.0
     assert coordinator._total_started_at_by_ppid[PPID] == now
+    assert coordinator._latest_charge_by_ppid[PPID] == make_charge()
+
+
+async def test_latest_charge_kept_when_outside_lookback_window(hass: HomeAssistant) -> None:
+    """A restored latest charge older than RECENT_CHARGES_LOOKBACK stays reported when the
+    /charges window has no entries for that charger."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_charges.return_value = {"data": {"charges": []}}
+    coordinator = _make_coordinator(hass, api)
+    coordinator._latest_charge_by_ppid[PPID] = make_charge()
+
+    result = await coordinator._async_fetch_data()
+
+    api.async_charges.assert_awaited_once()
+    assert result[PPID].latest_charge == make_charge()
+
+
+async def test_firmware_version_synced_to_device_registry(hass: HomeAssistant) -> None:
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_charger_firmware.return_value = [
+        {
+            "versionInfo": {"manifestId": "A30P-2.0"},
+            "updateStatus": {"isUpdateAvailable": False},
+            "serialNumber": "SN123",
+        }
+    ]
+    coordinator = _make_coordinator(hass, api)
+    registry = dr.async_get(hass)
+    device = registry.async_get_or_create(
+        config_entry_id=coordinator.config_entry.entry_id,
+        identifiers={(DOMAIN, PPID)},
+        sw_version="A30P-1.0",
+    )
+
+    await coordinator._async_fetch_data()
+
+    assert registry.async_get(device.id).sw_version == "A30P-2.0"
 
 
 async def test_adjust_poll_interval_speeds_up_after_recent_activity(hass: HomeAssistant) -> None:
@@ -1085,18 +1127,31 @@ async def test_vehicles_not_refetched_when_still_idle_and_fresh(hass: HomeAssist
     api.async_smart_charging_chargers_and_vehicles.assert_not_called()
 
 
-async def test_charges_fetched_same_poll_as_charging_transition(hass: HomeAssistant) -> None:
+@pytest.mark.parametrize(
+    ("previous_state", "current_state", "expect_fetch"),
+    [
+        ("Charging", "SuspendedEV", True),  # stopped - a finalized session may now be listed
+        ("Charging", "Charging", False),  # still charging - nothing new to list yet
+        ("Available", "Charging", False),  # started - nothing new to list yet
+    ],
+)
+async def test_finalized_charge_data_fetched_when_charging_stops(
+    hass: HomeAssistant, previous_state: str, current_state: str, expect_fetch: bool
+) -> None:
+    """/charges and month-to-date charge-statistics both list finalized sessions only."""
     api = _stub_api()
     api.async_list_chargers.return_value = [_charger_raw()]
-    api.async_connectivity_status.return_value = {"chargingState": "Charging"}
+    api.async_connectivity_status.return_value = {"chargingState": current_state}
     coordinator = _make_coordinator(hass, api)
     now = datetime.datetime.now(datetime.timezone.utc)
-    coordinator.data = {PPID: make_charger(charging_state="Available")}
+    coordinator.data = {PPID: make_charger(charging_state=previous_state)}
     coordinator._charges_fetched_at = now  # not otherwise stale
+    coordinator._month_stats_fetched_at[PPID] = now
 
     await coordinator._async_fetch_data()
 
-    api.async_charges.assert_called_once()
+    assert api.async_charges.called is expect_fetch
+    assert api.async_charge_statistics.called is expect_fetch
 
 
 async def test_api3_charges_fetched_same_poll_as_charging_transition(hass: HomeAssistant) -> None:
@@ -1144,12 +1199,9 @@ async def test_force_vehicles_fetch_bypasses_staleness_tier(hass: HomeAssistant)
 
 
 async def test_remote_lock_status_parsed(hass: HomeAssistant) -> None:
-    """offMode: null is a genuine, confirmed-live response shape (unsupported charger model, or
-    unset) - a successful fetch, not treated as missing data. Two separate coordinators here
-    purely for a clean before/after comparison; unlike firmware/tariffs, remote_lock is fetched
-    every poll, not staleness-cached (see test_firmware_and_tariffs_not_refetched_within_
-    staleness_window's assertion on async_get_remote_lock_status.call_count) - a lock/unlock
-    write should be reflected the moment the next poll runs."""
+    """offMode: null is a genuine, confirmed-live response shape (unsupported charger model) - a
+    successful fetch, not treated as missing data. Two separate coordinators here purely for a
+    clean before/after comparison."""
     api = _stub_api()
     api.async_list_chargers.return_value = [_charger_raw()]
     api.async_get_remote_lock_status.return_value = {"offMode": None}
@@ -1161,3 +1213,20 @@ async def test_remote_lock_status_parsed(hass: HomeAssistant) -> None:
     api.async_get_remote_lock_status.return_value = {"offMode": True}
     result = await _make_coordinator(hass, api)._async_fetch_data()
     assert result[PPID].remote_lock_off_mode is True
+
+
+@pytest.mark.parametrize(("off_mode", "expected_calls"), [(None, 1), (True, 2), (False, 2)])
+async def test_remote_lock_polled_every_poll_only_once_set(
+    hass: HomeAssistant, off_mode: bool | None, expected_calls: int
+) -> None:
+    """A charger reporting offMode: null (unsupported) is re-checked on the slow
+    cadence; one with a real lock state is polled every poll so app-side changes show up."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_get_remote_lock_status.return_value = {"offMode": off_mode}
+    coordinator = _make_coordinator(hass, api)
+
+    await coordinator._async_fetch_data()
+    await coordinator._async_fetch_data()
+
+    assert api.async_get_remote_lock_status.call_count == expected_calls

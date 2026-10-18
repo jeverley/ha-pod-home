@@ -65,7 +65,7 @@
           "preparing": "Preparing",
           "finishing": "Finishing",
           "reserved": "Reserved",
-          "unavailable": "Unavailable",
+          "disabled": "Disabled",
           "finished": "Finished",
           "fault": "Fault"
         }
@@ -93,9 +93,6 @@
       "cable_connected": { "name": "Cable status" },
       "vehicle_charging": { "name": "Charging" },
       "vehicle_plugged_in": { "name": "Plugged in" }
-    },
-    "update": {
-      "firmware": { "name": "Firmware" }
     },
     "number": {
       "vehicle_target_charge": { "name": "Target charge" }

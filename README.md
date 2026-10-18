@@ -46,6 +46,8 @@ Each table's **Category** column is the same grouping Home Assistant's own devic
 
 ### Charger device
 
+The charger's firmware version shows on its device page, under Device info.
+
 | Entity              | Category      | Type           | Notes |
 | -------------------- | ------------- | -------------- | ----- |
 | Status                | Sensors       | Sensor         | High-level status derived from the charger's wire state (Charging, Paused, Available, Finished, etc.) |
@@ -58,7 +60,6 @@ Each table's **Category** column is the same grouping Home Assistant's own devic
 | Electricity rate       | Sensors       | Sensor         | Current tariff rate, computed from your configured tariff windows - not mode-gated, applies in Basic Charging too |
 | Boost end time         | Sensors       | Sensor         | When the active boost ends, if any |
 | Cable status           | Sensors       | Binary sensor  | On when a cable is physically connected |
-| Firmware               | Controls      | Update         | See "Known limitations" for what the version number does and doesn't tell you |
 | Schedule               | Controls      | Calendar       | Manual schedule (Basic) or live smart-charging plan (Smart), whichever mode is active |
 | Boost duration         | Controls      | Time           | Local input (hh:mm) for Boost for duration below - no default, resets after each use, shows `unavailable` with cable unplugged |
 | Full charge            | Controls      | Button         | Boost ("Charge Now") to 100%, matching the app |
@@ -137,10 +138,8 @@ first:
 
 ## Known limitations
 
-- **Firmware update version numbers are a placeholder when an update is pending.** The API
-  exposes "update available" as a plain yes/no; no field carrying the actual target version
-  string has been identified yet, so the Update entity's `latest_version` is best-effort, not a
-  real version string, whenever an update is flagged.
+- **Total energy misses charges that finish while Home Assistant is offline for more than 31
+  days** - it counts finished sessions from a rolling 31-day window of charge history.
 - **Dynamic device creation (a charger added to the account appearing without a restart) is
   built but not verified against a second physical charger** - only ever tested against a
   single-charger account.

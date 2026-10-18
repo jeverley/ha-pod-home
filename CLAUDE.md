@@ -103,6 +103,9 @@ now" ([entity-unavailable](https://developers.home-assistant.io/docs/core/integr
 Don't use `unavailable` for a value that's merely inapplicable in the current state (e.g. a
 vehicle sensor while the car's unplugged) — that's `unknown`.
 
+Controls are the exception: they go `unavailable` while their action can't apply (e.g. boost
+with the cable unplugged), as core's Ohme and Wallbox do.
+
 ### Classification/mapping completeness
 
 When a dict or table classifies every value of an existing options list (e.g.

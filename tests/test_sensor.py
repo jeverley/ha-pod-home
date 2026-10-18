@@ -11,12 +11,15 @@ import pytest
 from freezegun import freeze_time
 from homeassistant.core import HomeAssistant
 
-from custom_components.pod_home.const import (
-    CHARGER_STATUS_AVAILABLE,
-    CHARGER_STATUS_CHARGING,
-)
 import custom_components.pod_home.sensor as sensor
-from tests._fixtures import make_charge, make_charger, make_coordinator, make_tariff_window, make_vehicle
+from tests._fixtures import (
+    make_charge,
+    make_charger,
+    make_coordinator,
+    make_firmware,
+    make_tariff_window,
+    make_vehicle,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -53,17 +56,6 @@ async def test_charging_scheme_sensor(hass: HomeAssistant) -> None:
         "status_effective_from": "2026-01-01T00:00:00+00:00",
         "smart_charging_supported": True,
     }
-
-
-async def test_status_sensor_icon_mapping(hass: HomeAssistant) -> None:
-    coordinator = make_coordinator(hass, {PPID: make_charger(charging_state="Charging")})
-    entity = sensor.PodHomeStatusSensor(coordinator, PPID)
-    assert entity.native_value == CHARGER_STATUS_CHARGING
-    assert entity.icon == "mdi:ev-station"
-
-    coordinator.data = {PPID: make_charger(charging_state="Available")}
-    assert entity.native_value == CHARGER_STATUS_AVAILABLE
-    assert entity.icon == "mdi:power-plug-off"
 
 
 async def test_last_charge_sensors_prefer_current_over_latest(hass: HomeAssistant) -> None:
@@ -270,3 +262,11 @@ async def test_rewards_balance_sensor_unavailable_until_first_fetch(hass: HomeAs
         "annual_allowance_gbp": 50.0,
         "payout_threshold_gbp": 10.0,
     }
+
+
+async def test_device_info_leaves_sw_version_to_coordinator(hass: HomeAssistant) -> None:
+    """device_info is re-applied on every entity add, so carrying sw_version would clear the
+    stored version whenever firmware hasn't been fetched yet."""
+    coordinator = make_coordinator(hass, {PPID: make_charger(firmware=make_firmware())})
+    entity = sensor.PodHomeStatusSensor(coordinator, PPID)
+    assert "sw_version" not in entity.device_info

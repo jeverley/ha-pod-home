@@ -15,13 +15,13 @@ from .const import (
     CHARGE_PRIORITY_SCHEDULE,
     CHARGER_STATUS_AVAILABLE,
     CHARGER_STATUS_CHARGING,
+    CHARGER_STATUS_DISABLED,
     CHARGER_STATUS_FAULT,
     CHARGER_STATUS_FINISHED,
     CHARGER_STATUS_FINISHING,
     CHARGER_STATUS_PAUSED,
     CHARGER_STATUS_PREPARING,
     CHARGER_STATUS_RESERVED,
-    CHARGER_STATUS_UNAVAILABLE,
     CHARGING_STATE_AVAILABLE,
     CHARGING_STATE_CABLE_CONNECTED,
     CHARGING_STATE_CHARGING,
@@ -185,7 +185,7 @@ def charger_status(charger: "PodHomeCharger", now_utc: datetime.datetime) -> str
     elif charging_state == CHARGING_STATE_RESERVED:
         result = CHARGER_STATUS_RESERVED
     elif charging_state == CHARGING_STATE_UNAVAILABLE:
-        result = CHARGER_STATUS_UNAVAILABLE
+        result = CHARGER_STATUS_DISABLED
     elif charging_state == CHARGING_STATE_SUSPENDED_EV or _is_finished_sticky(charger, now_utc):
         result = CHARGER_STATUS_FINISHED
     elif charging_state == CHARGING_STATE_SUSPENDED_EVSE:

@@ -66,10 +66,6 @@ class PodHomeConnectivitySensor(PodHomeEntity, BinarySensorEntity):
             return None
         return {"last_seen": charger.last_seen_at}
 
-    @property
-    def icon(self) -> str:
-        return "mdi:cloud-check-variant" if self.is_on else "mdi:cloud-off"
-
 
 class PodHomeCableConnectedSensor(PodHomeEntity, BinarySensorEntity):
     """Whether a cable is plugged in, derived from chargingState."""

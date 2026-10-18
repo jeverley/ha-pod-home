@@ -23,16 +23,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    CHARGER_STATUS_AVAILABLE,
-    CHARGER_STATUS_CHARGING,
-    CHARGER_STATUS_FAULT,
-    CHARGER_STATUS_FINISHED,
-    CHARGER_STATUS_FINISHING,
     CHARGER_STATUS_OPTIONS,
-    CHARGER_STATUS_PAUSED,
-    CHARGER_STATUS_PREPARING,
-    CHARGER_STATUS_RESERVED,
-    CHARGER_STATUS_UNAVAILABLE,
     CHARGING_STATE_OPTIONS,
     DEFAULT_CURRENCY,
     DOMAIN,
@@ -183,20 +174,6 @@ class PodHomeStatusSensor(PodHomeEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = CHARGER_STATUS_OPTIONS
 
-    # HA's icon system maps per numeric range, not per enum value, so per-status icons need
-    # doing manually here (same pattern as PodHomeConnectivitySensor.icon, binary_sensor.py).
-    _STATUS_ICONS = {
-        CHARGER_STATUS_CHARGING: "mdi:ev-station",
-        CHARGER_STATUS_PAUSED: "mdi:pause-circle-outline",
-        CHARGER_STATUS_AVAILABLE: "mdi:power-plug-off",
-        CHARGER_STATUS_PREPARING: "mdi:timer-sand",
-        CHARGER_STATUS_FINISHING: "mdi:progress-check",
-        CHARGER_STATUS_RESERVED: "mdi:calendar-clock",
-        CHARGER_STATUS_UNAVAILABLE: "mdi:alert-circle-outline",
-        CHARGER_STATUS_FINISHED: "mdi:check-circle",
-        CHARGER_STATUS_FAULT: "mdi:alert-circle",
-    }
-
     @property
     def unique_id(self) -> str:
         return f"{DOMAIN}_{self.ppid}_status"
@@ -207,13 +184,6 @@ class PodHomeStatusSensor(PodHomeEntity, SensorEntity):
         if not charger:
             return None
         return charger_status(charger, dt_util.utcnow())
-
-    @property
-    def icon(self) -> str:
-        value = self.native_value
-        if value is None:
-            return "mdi:ev-station"
-        return self._STATUS_ICONS.get(value, "mdi:ev-station")
 
 
 class PodHomeLastChargeDurationSensor(PodHomeEntity, SensorEntity):

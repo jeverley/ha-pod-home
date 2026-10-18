@@ -1,0 +1,28 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "connectivity": {
+        "default": "mdi:cloud-off",
+        "state": {
+          "on": "mdi:cloud-check-variant"
+        }
+      }
+    },
+    "sensor": {
+      "status": {
+        "default": "mdi:ev-station",
+        "state": {
+          "charging": "mdi:battery-charging",
+          "paused": "mdi:pause-circle-outline",
+          "available": "mdi:ev-station",
+          "preparing": "mdi:power-plug",
+          "finishing": "mdi:progress-check",
+          "reserved": "mdi:calendar-clock",
+          "disabled": "mdi:stop-circle-outline",
+          "finished": "mdi:check-circle",
+          "fault": "mdi:alert-circle"
+        }
+      }
+    }
+  }
+}

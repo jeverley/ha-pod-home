@@ -15,19 +15,17 @@ pytestmark = pytest.mark.asyncio
 PPID = "PSL-000001"
 
 
-async def test_connectivity_sensor_on_off_and_icon(hass: HomeAssistant) -> None:
+async def test_connectivity_sensor_on_off(hass: HomeAssistant) -> None:
     last_seen = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
     coordinator = make_coordinator(
         hass, {PPID: make_charger(connection_state="Online", last_seen_at=last_seen)}
     )
     entity = binary_sensor.PodHomeConnectivitySensor(coordinator, PPID)
     assert entity.is_on is True
-    assert entity.icon == "mdi:cloud-check-variant"
     assert entity.extra_state_attributes == {"last_seen": last_seen}
 
     coordinator.data = {PPID: make_charger(connection_state="Offline")}
     assert entity.is_on is False
-    assert entity.icon == "mdi:cloud-off"
 
 
 async def test_cable_connected_sensor_maps_charging_state(hass: HomeAssistant) -> None:

@@ -49,3 +49,10 @@ def test_translation_state_keys_match_const(
         f"(missing from JSON: {sorted(expected - keys)}, "
         f"extra in JSON: {sorted(keys - expected)})"
     )
+
+
+def test_status_icon_state_keys_match_const() -> None:
+    path = ROOT / "custom_components" / "pod_home" / "icons.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    keys = set(_dig(data, ("entity", "sensor", "status", "state")))
+    assert keys == set(const.CHARGER_STATUS_OPTIONS)

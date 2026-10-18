@@ -82,7 +82,7 @@ class PodHomeEntity(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
             manufacturer=MANUFACTURER,
             model=model,
             # ppid ("PSL number") is Pod Point's consumer-facing unit identifier, not the
-            # internal serial (see firmware.serial_number, surfaced on Firmware Version instead).
+            # internal firmware.serial_number.
             serial_number=self.ppid,
         )
 
