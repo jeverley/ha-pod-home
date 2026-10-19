@@ -126,12 +126,12 @@ class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin[str], PodHomeEntity, S
             if not charger.always_on_active:
                 await self.coordinator.api.async_set_always_on(self.ppid, dt_util.utcnow())
                 self._set_optimistic_value(option)
-                await self.coordinator.async_request_refresh_after_write()
+                await self.coordinator.async_request_refresh()
         elif option == CHARGE_PRIORITY_SCHEDULE:
             if charger.always_on_active is not False:
                 await self.coordinator.api.async_delete_charge_override(self.ppid)
                 self._set_optimistic_value(option)
-                await self.coordinator.async_request_refresh_after_write()
+                await self.coordinator.async_request_refresh()
         else:
             raise HomeAssistantError(f"Unrecognized Basic Charging option {option!r}")
 
@@ -144,4 +144,4 @@ class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin[str], PodHomeEntity, S
             )
         await self.coordinator.api.async_set_charge_priority_max_price(self.ppid, max_price)
         self._set_optimistic_value(option)
-        await self.coordinator.async_request_refresh_after_write()
+        await self.coordinator.async_request_refresh()

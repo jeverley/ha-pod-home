@@ -44,8 +44,7 @@ class PodHomeVehicleTargetChargeNumber(
 
     Writes chargeLimitPercent via async_set_vehicle_charge_limit() - a plain percentage, no
     unit conversion, independent of Ready By's own write. PodHomeOptimisticWriteMixin masks
-    native_value's read-your-own-write race, and the write forces the vehicles fetch (its
-    read-back is staleness-tiered, not fetched every poll)."""
+    native_value's read-your-own-write race."""
 
     _attr_translation_key = "vehicle_target_charge"
     _attr_name = "Target charge"
@@ -93,8 +92,5 @@ class PodHomeVehicleTargetChargeNumber(
             )
         except PodHomeAuthError as exc:
             await async_handle_write_auth_error(self.coordinator, exc)
-        # Read-back for this write is the staleness-tiered vehicles fetch, not fetched every
-        # poll - force it so the refresh below actually has a chance to confirm the write.
-        self.coordinator.request_vehicles_fetch()
         self._set_optimistic_value(round(value))
-        await self.coordinator.async_request_refresh_after_write()
+        await self.coordinator.async_request_refresh()

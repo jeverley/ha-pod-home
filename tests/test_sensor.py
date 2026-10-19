@@ -217,6 +217,13 @@ async def test_vehicle_expected_charge_attributes(hass: HomeAssistant) -> None:
     }
 
 
+async def test_vehicle_expected_charge_not_a_battery_level(hass: HomeAssistant) -> None:
+    """A predicted %, not the battery's current level - so not the battery device class."""
+    coordinator = make_coordinator(hass, {PPID: make_charger(vehicle=make_vehicle(id="v1"))})
+    entity = sensor.PodHomeVehicleExpectedChargeSensor(coordinator, "v1")
+    assert entity.device_class is None
+
+
 async def test_expected_charge_available_only_in_smart_charging_mode(hass: HomeAssistant) -> None:
     vehicle = make_vehicle(id="v1")
     coordinator = make_coordinator(

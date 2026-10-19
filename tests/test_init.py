@@ -47,7 +47,6 @@ def _stub_api() -> PodHomeApiClient:
     api.async_get_charge_overrides.return_value = []
     api.async_connectivity_status.return_value = {}
     api.async_smart_schedule_active.return_value = {}
-    api.async_charge_statistics.return_value = {}
     api.async_charger_firmware.return_value = []
     api.async_tariffs.return_value = {}
     api.async_manual_schedules.return_value = {}

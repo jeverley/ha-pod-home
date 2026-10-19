@@ -56,7 +56,6 @@ async def test_start_boost_full_charge_when_no_duration_given(hass: HomeAssistan
     _, kwargs = coordinator.api.async_create_charge_override.call_args
     assert kwargs["end_at"] - kwargs["requested_at"] == datetime.timedelta(hours=12)
     coordinator.async_request_refresh.assert_awaited_once()
-    assert coordinator._last_write_at is not None
 
 
 async def test_start_boost_auth_error_triggers_refresh_and_clean_failure(
@@ -133,7 +132,6 @@ async def test_cancel_boost_deletes_the_active_override(hass: HomeAssistant) -> 
 
     coordinator.api.async_delete_charge_override.assert_awaited_once_with(PPID)
     coordinator.async_request_refresh.assert_awaited_once()
-    assert coordinator._last_write_at is not None
 
 
 async def test_cancel_boost_rejects_when_nothing_active(hass: HomeAssistant) -> None:

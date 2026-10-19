@@ -19,6 +19,7 @@ from homeassistant.util import dt as dt_util
 # TEMPORARY: vendored copy, see __init__.py's import comment.
 from .podpoint_mobile_api import PodHomeApiClient, PodHomeApiError, PodHomeAuthError
 from .const import (
+    CHARGING_STATE_CABLE_CONNECTED,
     CHARGING_STATE_CHARGING,
     CHARGING_STATE_OPTIONS,
     CHARGING_STATE_SUSPENDED_EV,
@@ -44,10 +45,13 @@ _LOGGER = logging.getLogger(__name__)
 # /charges lookback - 31 calendar days, since its from/to dates are both inclusive.
 RECENT_CHARGES_LOOKBACK = datetime.timedelta(days=30)
 
-# Adaptive polling constants.
+# Adaptive polling constants. Polls are timed from the latest charger check-in (lastSeenAt):
+# the charger checks in at most every 5 minutes, more often around a plug-in or charging ending.
 FAST_POLL_INTERVAL = datetime.timedelta(seconds=60)
 SLOW_POLL_INTERVAL = datetime.timedelta(seconds=300)
-RECENT_CHANGE_WINDOW = datetime.timedelta(seconds=360)
+# Fast polling runs this long after a plug-in, until charging starts.
+PLUG_IN_FAST_POLL_WINDOW = datetime.timedelta(minutes=5)
+CHECK_IN_BUFFER = datetime.timedelta(seconds=5)
 # How far back _charging_state_transitions_by_ppid keeps entries - bounds an otherwise
 # unbounded-over-uptime list; a real charging session never spans this long.
 CHARGING_STATE_TRANSITION_RETENTION = datetime.timedelta(days=2)
@@ -55,11 +59,11 @@ CHARGING_STATE_TRANSITION_RETENTION = datetime.timedelta(days=2)
 # Firmware/tariffs rarely change; re-checked on this cadence.
 FIRMWARE_TARIFF_REFRESH_INTERVAL = datetime.timedelta(hours=6)
 
-# Month-to-date charge-statistics and /charges list a session once its cable is unplugged: fetched
-# on the first poll after an unplug (see _cable_unplugged_since_last_poll), otherwise on this
-# slower cadence as a fallback for late finalization or non-session-driven changes (e.g. a
-# billing correction).
-CHARGE_STATS_REFRESH_INTERVAL = datetime.timedelta(minutes=30)
+# /charges lists a session once its cable is unplugged: fetched every poll for
+# CHARGES_AFTER_UNPLUG_WINDOW after an unplug (see _cable_unplugged_since_last_poll), otherwise on
+# CHARGES_SAFETY_REFRESH_INTERVAL as a safety net for a missed unplug or a billing correction.
+CHARGES_AFTER_UNPLUG_WINDOW = datetime.timedelta(minutes=30)
+CHARGES_SAFETY_REFRESH_INTERVAL = datetime.timedelta(hours=6)
 
 # How long a session api3 has closed but /charges hasn't listed yet stays the current charge.
 API3_UNLISTED_SESSION_HOLD = datetime.timedelta(hours=24)
@@ -67,14 +71,6 @@ API3_UNLISTED_SESSION_HOLD = datetime.timedelta(hours=24)
 # api3's session/pod-id mapping (see async_create_api3_session()'s docstring) - account-level,
 # rarely changes, same cadence as firmware/tariffs above.
 API3_ACCOUNT_REFRESH_INTERVAL = datetime.timedelta(hours=6)
-
-# Linked-vehicle data (battery/range/odometer/charge-rate/etc, from
-# async_smart_charging_chargers_and_vehicles) refresh cadence: every poll while a vehicle is
-# actively charging, CHARGE_STATS_REFRESH_INTERVAL while plugged in but not charging, this
-# faster interval while fully unplugged (the one case the vehicle itself might be moving). Tier
-# is decided from THIS poll's own freshly-fetched charger-side cable-connected state (a
-# connectivity preflight in _async_fetch_data, run before this decision).
-VEHICLE_REFRESH_INTERVAL = datetime.timedelta(minutes=5)
 
 # A connection-level failure (couldn't reach mobile-api.pod-point.com at all - PodHomeApiError
 # with status 0) on GET /chargers below, the one call whose failure is fatal to the whole poll,
@@ -405,6 +401,8 @@ def _parse_charge_overrides(
 class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharger]]):
     """Polls mobile-api.pod-point.com and builds a PodHomeCharger per ppid."""
 
+    config_entry: "PodHomeConfigEntry"
+
     def __init__(
         self,
         hass: HomeAssistant,
@@ -439,16 +437,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # first successful fetch.
         self.rewards: PodHomeRewards | None = None
         self._rewards_fetched_at: datetime.datetime | None = None
-        # Linked-vehicle data (battery/range/odometer/charge state) - one account-wide call,
-        # re-fetched every poll only while something's charging (see VEHICLE_REFRESH_INTERVAL
-        # above). Cached across skipped polls so a charger's `vehicle` field doesn't go
-        # stale-empty just because this poll skipped the fetch.
+        # Linked-vehicle data (battery/range/odometer/charge state) - one account-wide call, every
+        # poll. Kept across a failed fetch.
         self._vehicle_by_ppid: dict[str, PodHomeVehicle] = {}
-        self._vehicles_fetched_at: datetime.datetime | None = None
-        # Set by a write whose read-back depends on vehicle data (Target Charge, Ready By) so
-        # the refresh it triggers actually re-fetches vehicles instead of skipping a tier that
-        # isn't due yet - see request_vehicles_fetch() and PodHomeOptimisticWriteMixin.
-        self._force_vehicles_fetch: bool = False
         # Per-charger data that rarely changes - fetched on FIRMWARE_TARIFF_REFRESH_INTERVAL and
         # cached, not gathered every poll. Retried sooner while still missing.
         self._firmware_by_ppid: dict[str, PodHomeFirmware] = {}
@@ -461,8 +452,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self._status_effective_from_fetched_at: dict[str, datetime.datetime] = {}
         # offMode from GET /remote-lock/{ppid}: True locked, False unlocked, None unsupported by
         # this charger model (confirmed on a Solo 3; whether a supported model can also report
-        # None is unconfirmed). Fetched every poll alongside preferences/
-        # charge_overrides below once known to be set, otherwise on FIRMWARE_TARIFF_REFRESH_INTERVAL.
+        # None is unconfirmed). Fetched every poll alongside preferences/charge_overrides below
+        # once known to be set, otherwise on FIRMWARE_TARIFF_REFRESH_INTERVAL.
         self._remote_lock_off_mode_by_ppid: dict[str, bool | None] = {}
         self._remote_lock_fetched_at: dict[str, datetime.datetime] = {}
         # Fetched every poll alongside connectivity.
@@ -473,12 +464,14 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # No separate staleness tracking - piggybacks on the tariffs fetch/cache below, since
         # it's parsed from that same already-fetched response, not a second API call.
         self._smart_charging_supported_by_ppid: dict[str, bool | None] = {}
-        # Month-to-date charge-statistics - see CHARGE_STATS_REFRESH_INTERVAL for cadence.
-        self._month_stats_by_ppid: dict[str, tuple[float | None, int | None]] = {}
-        self._month_stats_fetched_at: dict[str, datetime.datetime] = {}
+        # The last successful /charges response's entries - Month energy/cost are summed from
+        # these each poll. None until the first successful fetch.
+        self._charge_entries: list[tuple[str, dict[str, Any], dict[str, Any]]] | None = None
         # /charges (latest_charge) is one account-wide call, not per-ppid, so its own staleness
-        # is tracked as a single timestamp - see CHARGE_STATS_REFRESH_INTERVAL for cadence.
+        # is tracked as a single timestamp - see CHARGES_SAFETY_REFRESH_INTERVAL for cadence.
         self._charges_fetched_at: datetime.datetime | None = None
+        # Last observed unplug on any charger - see CHARGES_AFTER_UNPLUG_WINDOW.
+        self._unplugged_at: datetime.datetime | None = None
         # Merged across polls and persisted in the sticky Store, so a charge older than
         # RECENT_CHARGES_LOOKBACK survives restarts.
         self._latest_charge_by_ppid: dict[str, PodHomeCharge] = {}
@@ -504,16 +497,12 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # The live in-progress charge, if any (one account-wide call, filtered per-ppid by api3
         # pod id) - see _async_refresh_account_level_data for cadence.
         self._current_charge_by_ppid: dict[str, PodHomeCharge] = {}
-        # False until api3 charges succeed, and after any failure - makes session data due.
-        self._api3_charges_fetched = False
+        # False after a failed api3 charges fetch - retried every poll until it succeeds.
+        self._api3_charges_ok = True
         self._warned_keys: set[str] = set()
-        # Wall-clock time WE observed each charger's lastSeenAt last change - not the
-        # lastSeenAt value itself, which is the charger's own clock. Drives adaptive polling.
-        self._last_seen_changed_at: dict[str, datetime.datetime] = {}
-        # Wall-clock time of the most recent control-entity write, any ppid - also drives
-        # adaptive polling, so whatever changed gets detected sooner regardless of prior charger
-        # activity. See mark_recent_write()/async_request_refresh_after_write().
-        self._last_write_at: datetime.datetime | None = None
+        # Wall-clock time WE observed each charger being plugged in, kept until it charges or is
+        # unplugged. Drives adaptive polling.
+        self._plugged_in_at: dict[str, datetime.datetime] = {}
         # Per-ppid (lastSeenAt, chargingState) pairs, recorded on genuine change - see
         # _record_charging_state_transition()/_confirmed_override_events()/_effective_now().
         self._charging_state_transitions_by_ppid: dict[
@@ -536,25 +525,6 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # Live PodHomeBoostDurationTime instances, keyed by ppid, used by button.py to reset the
         # entity after a boost.
         self.boost_duration_entities: dict[str, Any] = {}
-
-    def request_vehicles_fetch(self) -> None:
-        """Bypass the vehicle-fetch staleness tier on the very next poll - called by write paths
-        (Target Charge, Ready By) whose read-back depends on vehicle data, so the refresh they
-        trigger right after actually re-fetches it instead of waiting out the current tier. One
-        forced attempt only - reset once _async_fetch_data has acted on it, whether or not that
-        fetch itself succeeds."""
-        self._force_vehicles_fetch = True
-
-    def mark_recent_write(self) -> None:
-        """Speeds up polling immediately after any control entity's write, regardless of prior
-        charger activity - see _async_adjust_poll_interval()."""
-        self._last_write_at = dt_util.utcnow()
-
-    async def async_request_refresh_after_write(self) -> None:
-        """Every write call site uses this instead of async_request_refresh() directly, so
-        marking the write as recent can't be forgotten at an individual call site."""
-        self.mark_recent_write()
-        await self.async_request_refresh()
 
     async def async_load_sticky_state(self) -> None:
         """Restore Status's sticky timestamps, each charger's latest charge and the Total Energy
@@ -806,7 +776,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         }
         self._api3_account_fetched_at = now
 
-    async def _async_refresh_api3_charges(self, api3_user_id: int, now: datetime.datetime) -> None:
+    async def _async_refresh_api3_charges(self, api3_user_id: int, now: datetime.datetime) -> bool:
         """Refresh the live in-progress charge per ppid, from api3's charges endpoint - filtered
         by _api3_pod_id_by_ppid, since the endpoint returns every one of the account's pods'
         charges together, not scoped to one charger. Non-fatal. Entries come back newest-first,
@@ -815,15 +785,13 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         holds. An open entry's duration is derived separately, see _current_charge_duration().
 
         `api3_user_id` is passed in already-narrowed by the caller (self._api3_user_id, only
-        called once it's confirmed set)."""
+        called once it's confirmed set). Returns whether the fetch succeeded."""
         try:
             charges_resp = await self.api.async_api3_charges(api3_user_id)
         except PodHomeApiError as exc:
             self._warn_once("api3_charges", f"Couldn't fetch api3 charges (non-fatal): {exc}")
-            self._api3_charges_fetched = False
-            return
+            return False
         self._clear_warning("api3_charges")
-        self._api3_charges_fetched = True
 
         pod_id_to_ppid = {pod_id: ppid for ppid, pod_id in self._api3_pod_id_by_ppid.items()}
         current_by_ppid: dict[str, PodHomeCharge] = {}
@@ -864,6 +832,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         else:
             self._clear_warning("api3_charges_unmatched")
         self._current_charge_by_ppid = current_by_ppid
+        return True
 
     @staticmethod
     def _parse_api3_charge(entry: dict[str, Any]) -> PodHomeCharge | None:
@@ -901,6 +870,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             finished.started_at is None
             or finished.ended_at is None
             or now - finished.ended_at >= API3_UNLISTED_SESSION_HOLD
+            # Ended before tracking started: Total energy won't count it once listed either.
+            or finished.ended_at <= self._total_started_at_by_ppid.get(ppid, now)
         ):
             return False
         latest = self._latest_charge_by_ppid.get(ppid)
@@ -911,6 +882,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         )
 
     async def _async_update_data(self) -> dict[str, PodHomeCharger]:
+        # A failed poll keeps this; a successful one replaces it with the check-in-aligned delay.
+        self.update_interval = self._base_poll_interval(dt_util.utcnow())
         try:
             return await self._async_fetch_data()
         except PodHomeAuthError as exc:
@@ -946,10 +919,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
     async def _async_fetch_connectivity(
         self, chargers_raw: list[dict[str, Any]]
     ) -> dict[str, dict[str, Any]]:
-        """Connectivity fetched for every charger up front, before deciding the vehicles/
-        `/charges` cadence tiers below, so a charging-state transition promotes those tiers
-        THIS poll. Missing-ppid entries are silently skipped here; the per-charger loop still
-        logs its own warning for them once."""
+        """Connectivity fetched for every charger up front, so this poll's charging state and
+        unplug decide the api3 and `/charges` fetches below. Missing-ppid entries are silently
+        skipped here; the per-charger loop still logs its own warning for them once."""
         ppids: list[str] = []
         for raw in chargers_raw:
             raw_ppid = raw.get("ppid")
@@ -973,80 +945,52 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # one.
         return dict(zip(ppids, cast("list[dict[str, Any]]", connectivity_results)))
 
-    def _vehicles_stale(
-        self, connectivity_by_ppid: dict[str, dict[str, Any]], any_charging_this_poll: bool, now: datetime.datetime
-    ) -> bool:
-        """Picks the linked-vehicle fetch's staleness-tier cadence from this poll's connectivity
-        plus last poll's vehicle-side charging state, then applies any one-shot forced fetch
-        (a write's own request_vehicles_fetch(), consumed here regardless of what it decides)."""
-        # Cable-connected covers every state meaning a car is physically plugged in, not just
-        # Charging - an unrecognized chargingState is treated as connected here.
-        any_cable_connected_this_poll = any(
-            not is_momentarily_unplugged(connectivity.get("chargingState"))
-            for connectivity in connectivity_by_ppid.values()
-        )
-        # Vehicle-side is_charging from last poll also promotes the fast tier.
-        any_vehicle_charging_last_poll = any(
-            charger.vehicle is not None and charger.vehicle.is_charging
-            for charger in (self.data or {}).values()
-        )
-        if any_charging_this_poll or any_vehicle_charging_last_poll:
-            vehicles_stale = True
-        elif any_cable_connected_this_poll:
-            vehicles_stale = self._value_stale(
-                self._vehicles_fetched_at, now, CHARGE_STATS_REFRESH_INTERVAL
-            )
-        else:
-            vehicles_stale = self._value_stale(
-                self._vehicles_fetched_at, now, VEHICLE_REFRESH_INTERVAL
-            )
-        vehicles_stale = vehicles_stale or self._force_vehicles_fetch
-        self._force_vehicles_fetch = False
-        return vehicles_stale
-
     async def _async_preflight_connectivity_and_vehicles(
         self, chargers_raw: list[dict[str, Any]], now: datetime.datetime
     ) -> tuple[dict[str, dict[str, Any]], bool]:
         """Also returns any_charging_this_poll, needed by _async_refresh_account_level_data
         too."""
         connectivity_by_ppid = await self._async_fetch_connectivity(chargers_raw)
-        # Used by both the live api3 charge's and the linked-vehicle fetch's cadence.
+        # Decides the live api3 charge's cadence.
         any_charging_this_poll = any(
             connectivity.get("chargingState") == CHARGING_STATE_CHARGING
             for connectivity in connectivity_by_ppid.values()
         )
         account_preferences_stale = self._value_stale(self._account_preferences_fetched_at, now)
-        vehicles_stale = self._vehicles_stale(connectivity_by_ppid, any_charging_this_poll, now)
 
         # account_preferences and vehicles are independent of each other - gathered together.
-        preflight_calls: dict[str, Any] = {}
-        if account_preferences_stale:
-            preflight_calls["account_preferences"] = self._async_fetch_account_preferences(now)
-        if vehicles_stale:
-            preflight_calls["vehicles"] = self._safe_call(
+        preflight_calls: dict[str, Any] = {
+            "vehicles": self._safe_call(
                 "vehicles", "Couldn't fetch smart-charging vehicles (non-fatal)",
                 self.api.async_smart_charging_chargers_and_vehicles(),
             )
-        if preflight_calls:
-            preflight_results = dict(
-                zip(preflight_calls.keys(), await asyncio.gather(*preflight_calls.values()))
-            )
-            vehicles_raw = preflight_results.get("vehicles")
-            if vehicles_raw:
-                self._vehicle_by_ppid = self._vehicle_per_ppid(vehicles_raw)
-                self._vehicles_fetched_at = now
+        }
+        if account_preferences_stale:
+            preflight_calls["account_preferences"] = self._async_fetch_account_preferences(now)
+        preflight_results = dict(
+            zip(preflight_calls.keys(), await asyncio.gather(*preflight_calls.values()))
+        )
+        vehicles_raw = preflight_results.get("vehicles")
+        if vehicles_raw:
+            self._vehicle_by_ppid = self._vehicle_per_ppid(vehicles_raw)
 
         return connectivity_by_ppid, any_charging_this_poll
 
     async def _async_refresh_account_level_data(
-        self, now: datetime.datetime, any_charging_this_poll: bool, any_unplugged: bool
+        self,
+        now: datetime.datetime,
+        any_charging_this_poll: bool,
+        any_unplugged: bool,
+        month_window_start: datetime.date,
     ) -> None:
         """Refreshes whichever of charges/api3-account-mapping/rewards/the live api3 charge are
         due this poll - account-level, fetched once regardless of charger count. Mutates
         self state directly, matching _async_refresh_rewards() etc."""
-        session_data_due = any_unplugged or self._value_stale(
-            self._charges_fetched_at, now, CHARGE_STATS_REFRESH_INTERVAL
-        )
+        if any_unplugged:
+            self._unplugged_at = now
+        session_data_due = (
+            self._unplugged_at is not None and now - self._unplugged_at < CHARGES_AFTER_UNPLUG_WINDOW
+        ) or self._value_stale(self._charges_fetched_at, now, CHARGES_SAFETY_REFRESH_INTERVAL)
         # api3 account mapping (user_id, ppid->pod_id) - own conservative cadence (it changes
         # essentially never).
         api3_account_stale = self._value_stale(
@@ -1068,25 +1012,66 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # fetched in the same poll, api3 first, so Total energy's live part and the finished
         # session swap in one update.
         api3_user_id = self._api3_user_id
-        if api3_user_id is not None and not self._api3_charges_fetched:
-            session_data_due = True
-        if api3_user_id is not None and (any_charging_this_poll or session_data_due):
-            await self._async_refresh_api3_charges(api3_user_id, now)
-        if session_data_due:
-            await self._async_refresh_charges(now)
+        if api3_user_id is not None and (
+            any_charging_this_poll or session_data_due or not self._api3_charges_ok
+        ):
+            self._api3_charges_ok = await self._async_refresh_api3_charges(api3_user_id, now)
+        if session_data_due and await self._async_refresh_charges(now, month_window_start):
+            self._charges_fetched_at = now
 
-    async def _async_refresh_charges(self, now: datetime.datetime) -> None:
+    async def _async_refresh_charges(
+        self, now: datetime.datetime, month_window_start: datetime.date
+    ) -> bool:
+        """Returns whether the fetch succeeded."""
         today_utc = dt_util.now(datetime.timezone.utc).date()
         charges_raw = await self._safe_call(
             "charges", "Couldn't fetch recent charges (non-fatal)",
-            self.api.async_charges(today_utc - RECENT_CHARGES_LOOKBACK, today_utc),
+            self.api.async_charges(
+                min(today_utc - RECENT_CHARGES_LOOKBACK, month_window_start), today_utc
+            ),
         )
         if not isinstance(charges_raw, dict) or not charges_raw:
-            return
+            return False
         charge_entries = list(self._charge_entries_by_ppid(charges_raw))
+        self._charge_entries = charge_entries
         self._latest_charge_by_ppid.update(self._latest_charge_per_ppid(charge_entries))
-        self._charges_fetched_at = now
-        self._accumulate_total_energy(charge_entries)
+        self._accumulate_total_energy(charge_entries, now)
+        return True
+
+    @staticmethod
+    def _month_window_start(chargers_raw: list[dict[str, Any]]) -> datetime.date:
+        """The day before the earliest charger-local 1st of the month, so /charges covers every
+        session that started in any charger's current month whatever the server's date zone."""
+        month_starts = [
+            dt_util.now(resolve_timezone(raw.get("timezone"))).date().replace(day=1)
+            for raw in chargers_raw
+        ]
+        return min(month_starts) - datetime.timedelta(days=1)
+
+    def _month_to_date_totals(
+        self, ppid: str, tz: datetime.tzinfo | None, month_start_local: datetime.date
+    ) -> tuple[float | None, int | None]:
+        """Energy (kWh) and cost (minor units) of this charger's finalized sessions that started
+        this local calendar month - the month the app attributes each session to."""
+        if self._charge_entries is None:
+            return None, None
+        energy: float | None = 0.0
+        cost: int | None = 0
+        for entry_ppid, entry, _charger in self._charge_entries:
+            started_at = _parse_dt(entry.get("startedAt"))
+            if (
+                entry_ppid != ppid
+                or entry.get("endedAt") is None
+                or started_at is None
+                or started_at.astimezone(tz or dt_util.get_default_time_zone()).date()
+                < month_start_local
+            ):
+                continue
+            entry_energy = entry.get("energyTotal")
+            entry_cost = (entry.get("cost") or {}).get("amount")
+            energy = None if energy is None or entry_energy is None else energy + entry_energy
+            cost = None if cost is None or entry_cost is None else cost + entry_cost
+        return (None if energy is None else round(energy, 3)), cost
 
     async def _async_fetch_data(self) -> dict[str, PodHomeCharger]:
         try:
@@ -1119,7 +1104,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                 self._total_energy_store.async_delay_save(
                     self._total_energy_state_for_storage, STICKY_STATE_SAVE_DELAY
                 )
-                self._async_adjust_poll_interval()
+                self._async_adjust_poll_interval(self.data)
                 return self.data
             return {}
         self._clear_warning("empty_chargers")
@@ -1128,7 +1113,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             self._cable_unplugged_since_last_poll(ppid, connectivity.get("chargingState"))
             for ppid, connectivity in connectivity_by_ppid.items()
         )
-        await self._async_refresh_account_level_data(now, any_charging_this_poll, any_unplugged)
+        await self._async_refresh_account_level_data(
+            now, any_charging_this_poll, any_unplugged, self._month_window_start(chargers_raw)
+        )
 
         result: dict[str, PodHomeCharger] = {}
         for raw in chargers_raw:
@@ -1143,7 +1130,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             self._total_energy_state_for_storage, STICKY_STATE_SAVE_DELAY
         )
 
-        self._async_adjust_poll_interval()
+        self._async_adjust_poll_interval(result)
         return result
 
     def _cable_unplugged_since_last_poll(self, ppid: str, charging_state: str | None) -> bool:
@@ -1159,34 +1146,25 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
     def _sync_device_sw_versions(self, chargers: dict[str, PodHomeCharger]) -> None:
         """Keep each charger's device registry sw_version in step with its firmware."""
         registry = dr.async_get(self.hass)
+        device_by_ppid = {
+            identifier: device
+            for device in dr.async_entries_for_config_entry(registry, self.config_entry.entry_id)
+            for domain, identifier in device.identifiers
+            if domain == DOMAIN
+        }
         for ppid, charger in chargers.items():
             sw_version = charger.firmware.manifest_id if charger.firmware else None
-            if sw_version is None:
-                continue
-            device = registry.async_get_device(identifiers={(DOMAIN, ppid)})
-            if device is not None and device.sw_version != sw_version:
+            device = device_by_ppid.get(ppid)
+            if sw_version is not None and device is not None and device.sw_version != sw_version:
                 registry.async_update_device(device.id, sw_version=sw_version)
 
     async def _async_fetch_stale_per_charger_data(
-        self,
-        ppid: str,
-        now: datetime.datetime,
-        month_start_local: datetime.date,
-        today_local: datetime.date,
-        cable_unplugged: bool,
+        self, ppid: str, now: datetime.datetime
     ) -> None:
-        """Fetches whichever of month-to-date stats/firmware/tariffs/manual-schedules/
-        delegated-control-detail are due this poll for this ppid, gathered together. Each
-        cached independently, so a partial-failure poll still keeps whichever succeeded."""
+        """Fetches whichever of firmware/tariffs/manual-schedules/delegated-control-detail are
+        due this poll for this ppid, gathered together. Each cached independently, so a
+        partial-failure poll still keeps whichever succeeded."""
         stale_calls: dict[str, Any] = {}
-        if cable_unplugged or self._stale(
-            self._month_stats_fetched_at, ppid, now, CHARGE_STATS_REFRESH_INTERVAL
-        ):
-            stale_calls["charge_stats"] = self._safe_call(
-                f"charge_stats:{ppid}",
-                f"Couldn't fetch month-to-date charge statistics for {ppid} (non-fatal)",
-                self.api.async_charge_statistics(ppid, month_start_local, today_local),
-            )
         if self._stale(self._firmware_fetched_at, ppid, now):
             stale_calls["firmware"] = self._safe_call(
                 f"firmware:{ppid}",
@@ -1215,14 +1193,6 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         if not stale_calls:
             return
         results = dict(zip(stale_calls.keys(), await asyncio.gather(*stale_calls.values())))
-
-        # Gate "fetched" on the raw response - a genuinely empty response is still a successful
-        # fetch and must not be retried every poll.
-        charge_stats_raw = results.get("charge_stats")
-        if charge_stats_raw:
-            energy = charge_stats_raw.get("energy") or {}
-            self._month_stats_by_ppid[ppid] = (energy.get("totalUsage"), energy.get("cost"))
-            self._month_stats_fetched_at[ppid] = now
 
         # Only stamp fetched_at once parsing actually produced something, so a
         # bad/unexpected response gets retried next poll.
@@ -1259,19 +1229,21 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
 
     def _record_charging_state_transition(
         self, ppid: str, charging_state: str | None, last_seen_at: datetime.datetime | None
-    ) -> None:
+    ) -> bool:
         """Records (lastSeenAt, chargingState) whenever chargingState differs from the last
         recorded entry - anchored on the charger's own lastSeenAt, not our poll time
         (chargingState has no timestamp of its own). Feeds _confirmed_override_events()/
-        _effective_now() below."""
+        _effective_now() below. Returns whether a transition was recorded."""
         if charging_state is None or last_seen_at is None:
-            return
+            return False
         transitions = self._charging_state_transitions_by_ppid.setdefault(ppid, [])
-        if not transitions or transitions[-1][1] != charging_state:
-            transitions.append((last_seen_at, charging_state))
-            cutoff = last_seen_at - CHARGING_STATE_TRANSITION_RETENTION
-            while transitions and transitions[0][0] < cutoff:
-                transitions.pop(0)
+        if transitions and transitions[-1][1] == charging_state:
+            return False
+        transitions.append((last_seen_at, charging_state))
+        cutoff = last_seen_at - CHARGING_STATE_TRANSITION_RETENTION
+        while transitions and transitions[0][0] < cutoff:
+            transitions.pop(0)
+        return True
 
     @staticmethod
     def _has_confirmed_energy(current_charge: PodHomeCharge) -> bool:
@@ -1435,8 +1407,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         scheme's own schedule (+ any active override) if available - see
         current_charging_seconds() in helpers.py. Returns self._current_charge_by_ppid's
         current value for this ppid unchanged (including None) if there's no live session, its
-        started_at isn't known yet, or it's a finished session awaiting /charges. Also writes the result back into that same dict, not
-        just the returned value."""
+        started_at isn't known yet, or it's a finished session awaiting /charges. Also writes the
+        result back into that same dict, not just the returned value."""
         current_charge = self._current_charge_by_ppid.get(ppid)
         if (
             current_charge is None
@@ -1584,15 +1556,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             ppid, now, delegated_control_status, charging_state
         )
 
-        await self._async_fetch_stale_per_charger_data(
-            ppid,
-            now,
-            month_start_local,
-            today_local,
-            self._cable_unplugged_since_last_poll(ppid, charging_state),
-        )
+        await self._async_fetch_stale_per_charger_data(ppid, now)
 
-        month_energy, month_cost = self._month_stats_by_ppid.get(ppid, (None, None))
+        month_energy, month_cost = self._month_to_date_totals(ppid, tz, month_start_local)
 
         # First time this ppid's been seen with no persisted running total yet - start
         # tracking from now (see PodHomeTotalEnergySensor's docstring, sensor.py). Set once.
@@ -1600,16 +1566,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             self._total_started_at_by_ppid[ppid] = now
 
         last_seen_at = _parse_dt(status.get("lastSeenAt"))
-        previous = self.data.get(ppid) if self.data else None
-        if (
-            ppid not in self._last_seen_changed_at
-            or last_seen_at != (previous.last_seen_at if previous else None)
-        ):
-            self._last_seen_changed_at[ppid] = dt_util.utcnow()
-
         latest_charge = self._latest_charge_by_ppid.get(ppid)
 
-        self._record_charging_state_transition(ppid, charging_state, last_seen_at)
+        self._track_plug_in(ppid, charging_state, last_seen_at)
         current_charge = self._current_charge_duration(
             ppid, now, tz, delegated_control_status, smart_schedule_windows
         )
@@ -1651,25 +1610,57 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             always_on_active=override_state.always_on_active if override_state else None,
         )
 
-    def _async_adjust_poll_interval(self) -> None:
-        """Speed up or slow down future polls based on how recently any charger's lastSeenAt
-        changed, or a control-entity write happened. Takes effect from the next scheduled poll."""
-        now = dt_util.utcnow()
-        recent = any(
-            now - changed_at <= RECENT_CHANGE_WINDOW
-            for changed_at in self._last_seen_changed_at.values()
-        ) or (
-            self._last_write_at is not None and now - self._last_write_at <= RECENT_CHANGE_WINDOW
+    def _track_plug_in(
+        self, ppid: str, charging_state: str | None, last_seen_at: datetime.datetime | None
+    ) -> None:
+        """Record chargingState and keep _plugged_in_at from a plug-in until charging starts or
+        the cable is unplugged."""
+        transitions = self._charging_state_transitions_by_ppid.get(ppid)
+        previous_state = transitions[-1][1] if transitions else None
+        if (
+            self._record_charging_state_transition(ppid, charging_state, last_seen_at)
+            and CHARGING_STATE_CABLE_CONNECTED.get(previous_state or "") is False
+            and CHARGING_STATE_CABLE_CONNECTED.get(charging_state or "") is True
+        ):
+            self._plugged_in_at[ppid] = dt_util.utcnow()
+        if charging_state is not None and (
+            charging_state == CHARGING_STATE_CHARGING
+            or CHARGING_STATE_CABLE_CONNECTED.get(charging_state) is not True
+        ):
+            self._plugged_in_at.pop(ppid, None)
+
+    def _base_poll_interval(self, now: datetime.datetime) -> datetime.timedelta:
+        """FAST_POLL_INTERVAL within PLUG_IN_FAST_POLL_WINDOW of a plug-in that hasn't started
+        charging yet, otherwise SLOW_POLL_INTERVAL."""
+        awaiting_charge = any(
+            now - plugged_in_at <= PLUG_IN_FAST_POLL_WINDOW
+            for plugged_in_at in self._plugged_in_at.values()
         )
-        new_interval = FAST_POLL_INTERVAL if recent else SLOW_POLL_INTERVAL
-        if new_interval != self.update_interval:
-            _LOGGER.debug(
-                "Switching poll interval to %s (%s activity in the last %s)",
-                new_interval,
-                "recent" if recent else "no recent",
-                RECENT_CHANGE_WINDOW,
-            )
-            self.update_interval = new_interval
+        return FAST_POLL_INTERVAL if awaiting_charge else SLOW_POLL_INTERVAL
+
+    def _async_adjust_poll_interval(self, chargers: dict[str, PodHomeCharger]) -> None:
+        """Set the delay to the next poll: _base_poll_interval() counted from the latest charger
+        check-in (plus CHECK_IN_BUFFER) when that's still ahead, else from now."""
+        now = dt_util.utcnow()
+        interval = self._base_poll_interval(now)
+        upcoming = [
+            charger.last_seen_at + interval + CHECK_IN_BUFFER - now
+            for charger in chargers.values()
+            if charger.last_seen_at is not None
+        ]
+        upcoming = [delay for delay in upcoming if delay > datetime.timedelta(0)]
+        new_interval = (
+            # HA can fire a poll up to a second early, leaving a sub-second delay.
+            max(min(min(upcoming), interval + CHECK_IN_BUFFER), CHECK_IN_BUFFER)
+            if upcoming
+            else interval
+        )
+        _LOGGER.debug(
+            "Next poll in %s (%s)",
+            new_interval,
+            "awaiting charge after plug-in" if interval == FAST_POLL_INTERVAL else "idle",
+        )
+        self.update_interval = new_interval
 
     @staticmethod
     def _charge_entries_by_ppid(
@@ -1719,7 +1710,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         return latest
 
     def _accumulate_total_energy(
-        self, charge_entries: list[tuple[str, dict[str, Any], dict[str, Any]]]
+        self,
+        charge_entries: list[tuple[str, dict[str, Any], dict[str, Any]]],
+        now: datetime.datetime,
     ) -> None:
         """Incrementally add newly-finalized charges to the persisted running total, per ppid -
         reuses the already-parsed charge_entries _latest_charge_per_ppid() also consumes. Only
@@ -1740,9 +1733,12 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             if ended_at is None:
                 continue  # still open - counted live via current_charge instead, not here
 
-            watermark = watermarks_before.get(ppid)
-            if watermark is not None and ended_at <= watermark:
-                continue  # already counted on an earlier poll
+            # Counting starts at tracking start: sessions that ended before it aren't added.
+            watermark = (
+                watermarks_before.get(ppid) or self._total_started_at_by_ppid.get(ppid) or now
+            )
+            if ended_at <= watermark:
+                continue  # already counted, or ended before tracking started
 
             charge_id = entry.get("id")
             if charge_id is not None:

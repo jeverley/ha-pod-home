@@ -85,7 +85,7 @@ class PodHomeBoostFullChargeButton(PodHomeEntity, ButtonEntity):
             )
         except PodHomeAuthError as exc:
             await async_handle_write_auth_error(self.coordinator, exc)
-        await self.coordinator.async_request_refresh_after_write()
+        await self.coordinator.async_request_refresh()
 
 
 class PodHomeBoostDurationButton(PodHomeEntity, ButtonEntity):
@@ -119,7 +119,7 @@ class PodHomeBoostDurationButton(PodHomeEntity, ButtonEntity):
             )
         except PodHomeAuthError as exc:
             await async_handle_write_auth_error(self.coordinator, exc)
-        await self.coordinator.async_request_refresh_after_write()
+        await self.coordinator.async_request_refresh()
         # pod_home owns both entities - see time.py's PodHomeBoostDurationTime.async_reset().
         duration_entity = self.coordinator.boost_duration_entities.get(self.ppid)
         if duration_entity is not None:
@@ -151,4 +151,4 @@ class PodHomeCancelBoostButton(PodHomeEntity, ButtonEntity):
             await self.coordinator.api.async_delete_charge_override(self.ppid)
         except PodHomeAuthError as exc:
             await async_handle_write_auth_error(self.coordinator, exc)
-        await self.coordinator.async_request_refresh_after_write()
+        await self.coordinator.async_request_refresh()
