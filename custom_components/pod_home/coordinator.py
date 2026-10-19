@@ -59,9 +59,10 @@ CHARGING_STATE_TRANSITION_RETENTION = datetime.timedelta(days=2)
 # Firmware/tariffs rarely change; re-checked on this cadence.
 FIRMWARE_TARIFF_REFRESH_INTERVAL = datetime.timedelta(hours=6)
 
-# /charges lists a session once its cable is unplugged: fetched every poll for
-# CHARGES_AFTER_UNPLUG_WINDOW after an unplug (see _cable_unplugged_since_last_poll), otherwise on
-# CHARGES_SAFETY_REFRESH_INTERVAL as a safety net for a missed unplug or a billing correction.
+# /charges lists a session once its cable is unplugged: fetched every poll after an unplug (see
+# _cable_unplugged_since_last_poll) until it lists that charger's newest closed api3 session, for
+# at most CHARGES_AFTER_UNPLUG_WINDOW, otherwise on CHARGES_SAFETY_REFRESH_INTERVAL as a safety net for a
+# missed unplug or a billing correction.
 CHARGES_AFTER_UNPLUG_WINDOW = datetime.timedelta(minutes=30)
 CHARGES_SAFETY_REFRESH_INTERVAL = datetime.timedelta(hours=6)
 
@@ -470,8 +471,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # /charges (latest_charge) is one account-wide call, not per-ppid, so its own staleness
         # is tracked as a single timestamp - see CHARGES_SAFETY_REFRESH_INTERVAL for cadence.
         self._charges_fetched_at: datetime.datetime | None = None
-        # Last observed unplug on any charger - see CHARGES_AFTER_UNPLUG_WINDOW.
-        self._unplugged_at: datetime.datetime | None = None
+        # Each charger's last observed unplug, cleared once its session is listed - see
+        # CHARGES_AFTER_UNPLUG_WINDOW.
+        self._unplugged_at_by_ppid: dict[str, datetime.datetime] = {}
         # Merged across polls and persisted in the sticky Store, so a charge older than
         # RECENT_CHARGES_LOOKBACK survives restarts.
         self._latest_charge_by_ppid: dict[str, PodHomeCharge] = {}
@@ -497,6 +499,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # The live in-progress charge, if any (one account-wide call, filtered per-ppid by api3
         # pod id) - see _async_refresh_account_level_data for cadence.
         self._current_charge_by_ppid: dict[str, PodHomeCharge] = {}
+        # Each charger's newest closed api3 session, from the last successful api3 charges fetch.
+        self._api3_newest_finished_by_ppid: dict[str, PodHomeCharge] = {}
         # False after a failed api3 charges fetch - retried every poll until it succeeds.
         self._api3_charges_ok = True
         self._warned_keys: set[str] = set()
@@ -680,22 +684,27 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             return {}
 
     async def _fetch_smart_schedule(self, ppid: str) -> dict[str, Any]:
-        """Like _safe_call, but a 404 with one of these error codes is an expected, common state,
-        not a real problem - logged at debug, not warning. Any other failure still goes through
-        the normal _warn_once path.
+        """Like _safe_call, but one of these error responses is an expected, common state, not a
+        real problem - logged at debug, not warning. Any other failure still goes through the
+        normal _warn_once path.
 
-        - NO_ACTIVE_CHARGING_SESSION: nothing currently plugged in/scheduled.
-        - AFTER_INTENT_TIME: fires once the current Ready By target has passed, before a new one
-          is set."""
+        - 404 NO_ACTIVE_CHARGING_SESSION: nothing currently plugged in/scheduled.
+        - 404 AFTER_INTENT_TIME: fires once the current Ready By target has passed, before a new
+          one is set.
+        - 412 NO_READY_BY_TIME: briefly, right after a plug-in."""
         key = f"smart_schedule:{ppid}"
-        expected_404_errors = ("NO_ACTIVE_CHARGING_SESSION", "AFTER_INTENT_TIME")
+        expected_errors = {
+            (404, "NO_ACTIVE_CHARGING_SESSION"),
+            (404, "AFTER_INTENT_TIME"),
+            (412, "NO_READY_BY_TIME"),
+        }
         try:
             result = await self.api.async_smart_schedule_active(ppid)
             self._clear_warning(key)
             return result or {}
         except PodHomeApiError as exc:
-            if exc.status == 404 and isinstance(exc.body, dict) and exc.body.get("error") in (
-                expected_404_errors
+            if isinstance(exc.body, dict) and (exc.status, exc.body.get("error")) in (
+                expected_errors
             ):
                 _LOGGER.debug("No active smart schedule for %s (%s): %s", ppid, exc.body.get("error"), exc)
                 return {}
@@ -832,6 +841,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         else:
             self._clear_warning("api3_charges_unmatched")
         self._current_charge_by_ppid = current_by_ppid
+        self._api3_newest_finished_by_ppid = newest_finished_by_ppid
         return True
 
     @staticmethod
@@ -980,17 +990,22 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self,
         now: datetime.datetime,
         any_charging_this_poll: bool,
-        any_unplugged: bool,
+        unplugged_ppids: set[str],
         month_window_start: datetime.date,
     ) -> None:
         """Refreshes whichever of charges/api3-account-mapping/rewards/the live api3 charge are
         due this poll - account-level, fetched once regardless of charger count. Mutates
         self state directly, matching _async_refresh_rewards() etc."""
-        if any_unplugged:
-            self._unplugged_at = now
-        session_data_due = (
-            self._unplugged_at is not None and now - self._unplugged_at < CHARGES_AFTER_UNPLUG_WINDOW
-        ) or self._value_stale(self._charges_fetched_at, now, CHARGES_SAFETY_REFRESH_INTERVAL)
+        for ppid in unplugged_ppids:
+            self._unplugged_at_by_ppid[ppid] = now
+        self._unplugged_at_by_ppid = {
+            ppid: unplugged_at
+            for ppid, unplugged_at in self._unplugged_at_by_ppid.items()
+            if now - unplugged_at < CHARGES_AFTER_UNPLUG_WINDOW
+        }
+        session_data_due = bool(self._unplugged_at_by_ppid) or self._value_stale(
+            self._charges_fetched_at, now, CHARGES_SAFETY_REFRESH_INTERVAL
+        )
         # api3 account mapping (user_id, ppid->pod_id) - own conservative cadence (it changes
         # essentially never).
         api3_account_stale = self._value_stale(
@@ -1016,8 +1031,36 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             any_charging_this_poll or session_data_due or not self._api3_charges_ok
         ):
             self._api3_charges_ok = await self._async_refresh_api3_charges(api3_user_id, now)
-        if session_data_due and await self._async_refresh_charges(now, month_window_start):
+        charges_fetched = session_data_due and await self._async_refresh_charges(
+            now, month_window_start
+        )
+        if charges_fetched:
             self._charges_fetched_at = now
+        if charges_fetched and api3_user_id is not None and self._api3_charges_ok:
+            self._current_charge_by_ppid = {
+                ppid: charge
+                for ppid, charge in self._current_charge_by_ppid.items()
+                if charge.ended_at is None or self._awaiting_charges_listing(ppid, charge, now)
+            }
+            for ppid in [p for p in self._unplugged_at_by_ppid if self._session_listed(p)]:
+                del self._unplugged_at_by_ppid[ppid]
+
+    def _session_listed(self, ppid: str) -> bool:
+        """Whether /charges lists this charger's newest closed api3 session, with none open."""
+        open_charge = self._current_charge_by_ppid.get(ppid)
+        finished = self._api3_newest_finished_by_ppid.get(ppid)
+        latest = self._latest_charge_by_ppid.get(ppid)
+        if (
+            (open_charge is not None and open_charge.ended_at is None)
+            or finished is None
+            or finished.started_at is None
+            or latest is None
+            or latest.started_at is None
+        ):
+            return False
+        return latest.started_at > finished.started_at or same_session_start(
+            latest.started_at, finished.started_at
+        )
 
     async def _async_refresh_charges(
         self, now: datetime.datetime, month_window_start: datetime.date
@@ -1109,12 +1152,13 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             return {}
         self._clear_warning("empty_chargers")
 
-        any_unplugged = any(
-            self._cable_unplugged_since_last_poll(ppid, connectivity.get("chargingState"))
+        unplugged_ppids = {
+            ppid
             for ppid, connectivity in connectivity_by_ppid.items()
-        )
+            if self._cable_unplugged_since_last_poll(ppid, connectivity.get("chargingState"))
+        }
         await self._async_refresh_account_level_data(
-            now, any_charging_this_poll, any_unplugged, self._month_window_start(chargers_raw)
+            now, any_charging_this_poll, unplugged_ppids, self._month_window_start(chargers_raw)
         )
 
         result: dict[str, PodHomeCharger] = {}

@@ -609,6 +609,26 @@ def _api3_session_stubs(api, *, started_at: datetime.datetime) -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("status", "error", "expect_warning"),
+    [
+        (404, "NO_ACTIVE_CHARGING_SESSION", False),
+        (404, "AFTER_INTENT_TIME", False),
+        (412, "NO_READY_BY_TIME", False),
+        (412, "SOMETHING_ELSE", True),
+    ],
+)
+async def test_expected_smart_schedule_errors_not_warned(
+    hass: HomeAssistant, status: int, error: str, expect_warning: bool
+) -> None:
+    api = _stub_api()
+    api.async_smart_schedule_active.side_effect = PodHomeApiError(status, {"error": error})
+    coordinator = _make_coordinator(hass, api)
+
+    assert await coordinator._fetch_smart_schedule(PPID) == {}
+    assert (f"smart_schedule:{PPID}" in coordinator._warned_keys) is expect_warning
+
+
 async def test_current_charge_duration_refined_from_smart_schedule(hass: HomeAssistant) -> None:
     """Smart Charging: duration comes from the CHARGING window(s) actually in the schedule, not
     the full time-since-session-start (which would include any paused time)."""
@@ -1489,9 +1509,9 @@ async def test_charges_safety_refresh_every_six_hours(
     assert api.async_api3_charges.called is expect_fetch
 
 
-async def test_charges_fetched_every_poll_for_30_minutes_after_unplug(hass: HomeAssistant) -> None:
-    """After an unplug /charges is fetched every poll for 30 minutes, then back to the 6-hour
-    safety net."""
+async def test_charges_fetched_after_unplug_until_session_listed(hass: HomeAssistant) -> None:
+    """After an unplug /charges is fetched every poll until it lists the session api3 closed,
+    then back to the 6-hour safety net."""
     coordinator, poll, _ = _session_end_scenario(hass)
     api = coordinator.api
     fetched: list[bool] = []
@@ -1511,10 +1531,62 @@ async def test_charges_fetched_every_poll_for_30_minutes_after_unplug(hass: Home
     await poll_at("2026-09-24T05:28:00Z", [_PREVIOUS_SESSION])
     await poll_at("2026-09-24T05:31:00Z", [_PREVIOUS_SESSION])
     await poll_at("2026-09-24T05:36:00Z", [_SESSION, _PREVIOUS_SESSION])  # listed
-    await poll_at("2026-09-24T06:10:00Z", [_SESSION, _PREVIOUS_SESSION])  # window over
+    await poll_at("2026-09-24T05:41:00Z", [_SESSION, _PREVIOUS_SESSION])  # stopped
 
     assert fetched == [True, True, True, True, False]
     assert coordinator.data[PPID].latest_charge.energy_total == 64
+
+
+@pytest.mark.parametrize(
+    ("api3_after_unplug", "charges", "api3_mapping"),
+    [
+        (_API3_OPEN, [_SESSION, _PREVIOUS_SESSION], "ok"),  # api3 not closed yet
+        (_API3_CLOSED, [_PREVIOUS_SESSION], "ok"),  # closed but never listed
+        (_API3_CLOSED, [_SESSION, _PREVIOUS_SESSION], "no_session"),  # no api3 at all
+        (_API3_CLOSED, [_SESSION, _PREVIOUS_SESSION], "no_pods"),  # api3 can't match the charger
+    ],
+)
+async def test_charges_fetched_for_whole_window_until_listing_confirmed(
+    hass: HomeAssistant, api3_after_unplug: dict, charges: list[dict], api3_mapping: str
+) -> None:
+    """Until /charges is seen listing the charger's closed api3 session, it keeps refreshing
+    for the full 30 minutes after an unplug."""
+    coordinator, poll, _ = _session_end_scenario(hass)
+    api = coordinator.api
+    if api3_mapping == "no_session":
+        api.async_create_api3_session.side_effect = PodHomeApiError(500, {})
+    elif api3_mapping == "no_pods":
+        api.async_api3_pods.return_value = {"pods": []}
+    coordinator._total_started_at_by_ppid[PPID] = datetime.datetime(
+        2026, 9, 1, tzinfo=datetime.timezone.utc
+    )
+    with freeze_time("2026-09-24T05:00:00Z"):
+        await poll("Charging", _API3_OPEN, [_PREVIOUS_SESSION])
+    fetched: list[bool] = []
+    for moment in ("05:26", "05:31", "05:36", "06:10"):
+        before = api.async_charges.await_count
+        with freeze_time(f"2026-09-24T{moment}:00Z"):
+            await poll("Available", api3_after_unplug, charges)
+        fetched.append(api.async_charges.await_count > before)
+
+    assert fetched == [True, True, True, False]
+
+
+async def test_one_chargers_open_session_doesnt_extend_anothers_window(
+    hass: HomeAssistant,
+) -> None:
+    """Each charger's unplug window ends when its own session is listed."""
+    coordinator = _make_coordinator(hass, _stub_api())
+    now = datetime.datetime(2026, 9, 24, 5, 30, tzinfo=datetime.timezone.utc)
+    started = datetime.datetime(2026, 9, 23, 19, 25, 34, tzinfo=datetime.timezone.utc)
+    coordinator._api3_newest_finished_by_ppid = {
+        PPID: make_charge(started_at=started, ended_at=now)
+    }
+    coordinator._latest_charge_by_ppid[PPID] = make_charge(started_at=started)
+    coordinator._current_charge_by_ppid = {"PSL-OTHER": make_charge(ended_at=None)}
+
+    assert coordinator._session_listed(PPID) is True
+    assert coordinator._session_listed("PSL-OTHER") is False
 
 
 async def test_session_ended_before_tracking_start_not_held(hass: HomeAssistant) -> None:
