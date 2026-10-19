@@ -547,7 +547,7 @@ class PodHomeVehicleExpectedChargeSensor(PodHomeVehicleEntity, SensorEntity):
 
     _attr_translation_key = "vehicle_expected_charge"
     _attr_name = "Expected charge"
-    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_icon = "mdi:battery-clock"
     _attr_native_unit_of_measurement = PERCENTAGE
 
     @property
