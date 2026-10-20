@@ -590,7 +590,7 @@ async def test_api3_charges_unmatched_pod_id_warns_and_stays_empty(hass: HomeAss
     assert coordinator._current_charge_by_ppid == {}
 
 
-def _api3_session_stubs(api, *, started_at: datetime.datetime) -> None:
+def _api3_session_stubs(api, *, started_at: datetime.datetime, kwh_used: float = 1.0) -> None:
     """Shared setup for the current_charge duration-refinement tests below - a single open
     api3 charge for PPID, started at `started_at`."""
     api.async_create_api3_session.return_value = {"sessions": {"user_id": 999}}
@@ -601,7 +601,7 @@ def _api3_session_stubs(api, *, started_at: datetime.datetime) -> None:
                 "id": 1,
                 "ends_at": None,
                 "starts_at": started_at.isoformat(),
-                "kwh_used": 1.0,
+                "kwh_used": kwh_used,
                 "pod": {"id": 555},
                 "billing_event": {},
             }
@@ -722,6 +722,7 @@ def _smart_session_api(now: datetime.datetime) -> PodHomeApiClient:
     api = _stub_api()
     api.async_list_chargers.return_value = [_charger_raw(delegatedControl={"status": "ACTIVE"})]
     api.async_connectivity_status.return_value = {"chargingState": "Charging"}
+    api.async_charges.return_value = {"data": {"charges": []}}
     session_start = now - datetime.timedelta(hours=2)
     _api3_session_stubs(api, started_at=session_start)
     api.async_smart_schedule_active.return_value = {
@@ -736,38 +737,143 @@ def _smart_session_api(now: datetime.datetime) -> PodHomeApiClient:
     return api
 
 
-@pytest.mark.parametrize(("frozen_before_restart", "expected"), [(True, 3600), (False, None)])
-async def test_frozen_current_charge_duration_survives_restart(
-    hass: HomeAssistant, frozen_before_restart: bool, expected: int | None
-) -> None:
-    """A duration frozen once the smart schedule has ended is restored after a restart; one
-    still counting from the schedule isn't, since charging may have continued meanwhile."""
-    now = datetime.datetime.now(datetime.timezone.utc)
-    api = _smart_session_api(now)
-    coordinator = _make_coordinator(hass, api)
-    coordinator.data = await coordinator._async_fetch_data()  # counted from the schedule
-    api.async_smart_schedule_active.return_value = {}  # schedule over
-    if frozen_before_restart:
-        coordinator._charges_fetched_at = None  # session data due - refetches api3
-        coordinator.data = await coordinator._async_fetch_data()
-    await coordinator._sticky_store.async_save(coordinator._sticky_state_for_storage())
+_SCHEDULE_OVER: dict = {}
 
+
+async def _restart(coordinator: PodHomeDataUpdateCoordinator) -> PodHomeDataUpdateCoordinator:
+    """Save the sticky state and load it into a fresh coordinator on the same config entry."""
+    await coordinator._sticky_store.async_save(coordinator._sticky_state_for_storage())
     restarted = PodHomeDataUpdateCoordinator(
-        hass, coordinator.config_entry, api, email="driver@example.com", password="x"
+        hass=coordinator.hass, config_entry=coordinator.config_entry, api=coordinator.api,
+        email="driver@example.com", password="x",
     )
     await restarted.async_load_sticky_state()
+    return restarted
+
+
+@pytest.mark.parametrize(
+    ("state_after", "seen_after", "kwh_after", "schedule_after", "expected"),
+    [
+        # B: not charging, energy unchanged - nothing happened while down.
+        ("SuspendedEV", datetime.timedelta(hours=2), 1.0, False, 3600),
+        # C/E: energy rose, not charging now, check-ins missed - stopped unseen.
+        ("SuspendedEV", datetime.timedelta(hours=2), 2.0, True, None),
+        # G: energy rose but no check-in was missed - the stop is as precise as ever.
+        ("SuspendedEV", datetime.timedelta(minutes=3), 2.0, True, 3600),
+        # F: still charging - counted from the schedule.
+        ("Charging", datetime.timedelta(hours=2), 2.0, True, 3600),
+    ],
+)
+async def test_live_charge_duration_after_restart(
+    hass: HomeAssistant,
+    state_after: str,
+    seen_after: datetime.timedelta,
+    kwh_after: float,
+    schedule_after: bool,
+    expected: int | None,
+) -> None:
+    """Smart Charging session, its one window ended an hour ago, charger last seen stopped now:
+    duration 3600 before a restart. After it, depending on what happened while down."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    api = _smart_session_api(now)
+    schedule = api.async_smart_schedule_active.return_value
+    api.async_connectivity_status.return_value = {
+        "chargingState": "SuspendedEV", "lastSeenAt": now.isoformat(),
+    }
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = await coordinator._async_fetch_data()
+    assert coordinator.data[PPID].current_charge.duration == 3600
+
+    restarted = await _restart(coordinator)
+    api.async_connectivity_status.return_value = {
+        "chargingState": state_after, "lastSeenAt": (now + seen_after).isoformat(),
+    }
+    _api3_session_stubs(api, started_at=now - datetime.timedelta(hours=2), kwh_used=kwh_after)
+    api.async_smart_schedule_active.return_value = schedule if schedule_after else _SCHEDULE_OVER
+
     result = await restarted._async_fetch_data()
 
     assert result[PPID].current_charge.duration == expected
 
 
+async def test_observed_stop_survives_restart(hass: HomeAssistant) -> None:
+    """D: a stop seen before the restart still caps the duration recomputed after it, and the
+    energy delivered right up to the stop isn't mistaken for charging while down."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    api = _smart_session_api(now)
+    api.async_smart_schedule_active.return_value = {
+        "schedule": [
+            {
+                "type": "CHARGING",
+                "fromTimestamp": (now - datetime.timedelta(hours=2)).isoformat(),
+                "toTimestamp": (now + datetime.timedelta(hours=1)).isoformat(),
+            }
+        ]
+    }
+    stopped_at = now - datetime.timedelta(hours=1)
+    api.async_connectivity_status.return_value = {
+        "chargingState": "Charging",
+        "lastSeenAt": (stopped_at - datetime.timedelta(minutes=5)).isoformat(),
+    }
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = await coordinator._async_fetch_data()
+    api.async_connectivity_status.return_value = {
+        "chargingState": "SuspendedEV", "lastSeenAt": stopped_at.isoformat(),
+    }
+    session_start = now - datetime.timedelta(hours=2)
+    _api3_session_stubs(api, started_at=session_start, kwh_used=1.2)  # final energy at the stop
+    coordinator.data = await coordinator._async_fetch_data()
+
+    restarted = await _restart(coordinator)
+    api.async_connectivity_status.return_value = {  # a later check-in, still stopped
+        "chargingState": "SuspendedEV", "lastSeenAt": now.isoformat(),
+    }
+    result = await restarted._async_fetch_data()
+
+    assert result[PPID].current_charge.duration == 3600
+
+
+async def test_api3_fetched_on_the_poll_after_charging_stops(hass: HomeAssistant) -> None:
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw()]
+    api.async_charges.return_value = {"data": {"charges": []}}
+    _api3_session_stubs(api, started_at=datetime.datetime.now(datetime.timezone.utc))
+    coordinator = _make_coordinator(hass, api)
+    api.async_connectivity_status.return_value = {"chargingState": "Charging"}
+    coordinator.data = await coordinator._async_fetch_data()
+    fetched = api.async_api3_charges.await_count
+
+    api.async_connectivity_status.return_value = {"chargingState": "SuspendedEV"}
+    coordinator.data = await coordinator._async_fetch_data()
+    assert api.async_api3_charges.await_count == fetched + 1
+    coordinator.data = await coordinator._async_fetch_data()
+    assert api.async_api3_charges.await_count == fetched + 1
+
+
+async def test_corrupt_saved_timestamps_dont_block_setup(hass: HomeAssistant) -> None:
+    coordinator = _make_coordinator(hass, _stub_api())
+    await coordinator._sticky_store.async_save(
+        {
+            "charging_state_transitions": {PPID: [[1700000000, "Charging"]]},
+            "last_seen_at": {PPID: 1700000000},
+            "duration_unknown": {PPID: 5},
+        }
+    )
+
+    await coordinator.async_load_sticky_state()
+
+    assert coordinator._charging_state_transitions_by_ppid == {}
+    assert coordinator._last_seen_at_by_ppid == {}
+    assert coordinator._duration_unknown_by_ppid == {}
+
+
 async def test_restored_charge_rejects_non_integer_duration(hass: HomeAssistant) -> None:
     coordinator = _make_coordinator(hass, _stub_api())
     restored = coordinator._parse_charge_dict({PPID: {"id": "c1", "duration": "3600"}})
-    frozen = coordinator._parse_frozen_durations({PPID: {"id": "c1", "duration": "3600"}})
+    snapshots = coordinator._parse_duration_snapshots({PPID: {"id": "c1", "duration": "3600"}})
 
     assert restored[PPID].duration is None
-    assert frozen == {}
+    assert snapshots == {}
 
 
 async def test_current_charge_duration_unknown_when_nothing_to_refine_against_in_basic_mode(
