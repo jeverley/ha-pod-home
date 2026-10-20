@@ -7,7 +7,7 @@ coordinator's own parsing/staleness/error-handling logic, in isolation from conf
 from __future__ import annotations
 
 import datetime
-from unittest.mock import AsyncMock, create_autospec, patch
+from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -32,35 +32,21 @@ from custom_components.pod_home.podpoint_mobile_api import (
 )
 from custom_components.pod_home.helpers import select_last_charge
 import custom_components.pod_home.sensor as sensor
-from tests._fixtures import make_charge, make_charger
+from tests._fixtures import charger_raw, make_charge, make_charger, make_stub_api
 
 pytestmark = pytest.mark.asyncio
 
 PPID = "PSL-000001"
 
 
-def _stub_api() -> PodHomeApiClient:
-    """A fully-autospecced client with benign defaults for every call the coordinator might
-    make on any given poll - individual tests override only what they care about."""
-    api = create_autospec(PodHomeApiClient, instance=True)
-    api.async_list_chargers.return_value = []
-    api.async_get_users.return_value = {}
-    api.async_smart_charging_chargers_and_vehicles.return_value = []
-    api.async_charges.return_value = {}
-    api.async_create_api3_session.return_value = {}
-    api.async_api3_pods.return_value = {}
-    api.async_api3_charges.return_value = {}
-    api.async_reward_wallet.return_value = {"rewards": {}, "allowance": {}, "payments": {}}
-    api.async_smart_charging_preferences.return_value = {}
-    api.async_get_charge_overrides.return_value = []
-    api.async_connectivity_status.return_value = {}
-    api.async_smart_schedule_active.return_value = {}
-    api.async_charger_firmware.return_value = []
-    api.async_tariffs.return_value = {}
-    api.async_manual_schedules.return_value = {}
-    api.async_delegated_control.return_value = {}
-    api.async_get_remote_lock_status.return_value = {}
-    return api
+@pytest.fixture
+def api() -> PodHomeApiClient:
+    return make_stub_api()
+
+
+@pytest.fixture
+def coordinator(hass: HomeAssistant, api: PodHomeApiClient) -> PodHomeDataUpdateCoordinator:
+    return _make_coordinator(hass, api)
 
 
 def _make_coordinator(hass: HomeAssistant, api: PodHomeApiClient) -> PodHomeDataUpdateCoordinator:
@@ -71,21 +57,9 @@ def _make_coordinator(hass: HomeAssistant, api: PodHomeApiClient) -> PodHomeData
     )
 
 
-def _charger_raw(**overrides) -> dict:
-    raw = {
-        "ppid": PPID,
-        "unitId": 12345,
-        "timezone": "Europe/London",
-        "modelInfo": {"style": "solo3", "colour": "black", "architecture": "3.0"},
-        "delegatedControl": {"status": "INACTIVE"},
-    }
-    raw.update(overrides)
-    return raw
-
-
-async def test_first_refresh_parses_charger_basic_mode(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
+async def test_first_refresh_parses_charger_basic_mode(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     api.async_connectivity_status.return_value = {
         "chargingState": "Available",
         "connectionState": "Online",
@@ -132,7 +106,6 @@ async def test_first_refresh_parses_charger_basic_mode(hass: HomeAssistant) -> N
         }
     }
 
-    coordinator = _make_coordinator(hass, api)
     result = await coordinator._async_fetch_data()
 
     assert set(result) == {PPID}
@@ -158,10 +131,11 @@ async def test_first_refresh_parses_charger_basic_mode(hass: HomeAssistant) -> N
     assert charger.smart_schedule_windows is None
 
 
-async def test_smart_mode_fetches_smart_schedule(hass: HomeAssistant) -> None:
-    api = _stub_api()
+async def test_smart_mode_fetches_smart_schedule(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     api.async_list_chargers.return_value = [
-        _charger_raw(delegatedControl={"status": "ACTIVE"})
+        charger_raw(delegatedControl={"status": "ACTIVE"})
     ]
     api.async_smart_schedule_active.return_value = {
         "schedule": [
@@ -174,7 +148,6 @@ async def test_smart_mode_fetches_smart_schedule(hass: HomeAssistant) -> None:
         ]
     }
 
-    coordinator = _make_coordinator(hass, api)
     result = await coordinator._async_fetch_data()
 
     api.async_smart_schedule_active.assert_called_once_with(PPID)
@@ -184,17 +157,17 @@ async def test_smart_mode_fetches_smart_schedule(hass: HomeAssistant) -> None:
     assert windows[0].tariff_rate == "OFF_PEAK"
 
 
-async def test_empty_chargers_first_poll_returns_empty(hass: HomeAssistant) -> None:
-    api = _stub_api()  # async_list_chargers already defaults to []
-    coordinator = _make_coordinator(hass, api)
+async def test_empty_chargers_first_poll_returns_empty(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
+    api.async_list_chargers.return_value = []
     result = await coordinator._async_fetch_data()
     assert result == {}
 
 
-async def test_empty_chargers_keeps_previous_data(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
-    coordinator = _make_coordinator(hass, api)
+async def test_empty_chargers_keeps_previous_data(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     first = await coordinator._async_fetch_data()
     coordinator.data = first  # DataUpdateCoordinator normally does this after a successful poll
 
@@ -206,10 +179,9 @@ async def test_empty_chargers_keeps_previous_data(hass: HomeAssistant) -> None:
 
 async def test_empty_chargers_still_saves_state_and_adjusts_poll_interval(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
-    coordinator = _make_coordinator(hass, api)
     coordinator.data = await coordinator._async_fetch_data()
 
     api.async_list_chargers.return_value = []
@@ -230,13 +202,15 @@ async def test_empty_chargers_still_saves_state_and_adjusts_poll_interval(
     [(datetime.timedelta(minutes=1), FAST_POLL_INTERVAL), (None, SLOW_POLL_INTERVAL)],
 )
 async def test_failed_poll_retries_at_base_interval(
-    hass: HomeAssistant, changed_ago: datetime.timedelta | None, expected: datetime.timedelta
+    hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
+    changed_ago: datetime.timedelta | None,
+    expected: datetime.timedelta,
 ) -> None:
     """A check-in-aligned delay of a few seconds isn't reused to retry a failing API, and an
     idle outage retries at the slow interval."""
-    api = _stub_api()
     api.async_list_chargers.side_effect = PodHomeApiError(500, {})
-    coordinator = _make_coordinator(hass, api)
     coordinator.update_interval = datetime.timedelta(seconds=7)
     if changed_ago is not None:
         coordinator._plugged_in_at[PPID] = dt_util.utcnow() - changed_ago
@@ -247,50 +221,49 @@ async def test_failed_poll_retries_at_base_interval(
     assert coordinator.update_interval == expected
 
 
-async def test_auth_error_raises_config_entry_auth_failed(hass: HomeAssistant) -> None:
-    api = _stub_api()
+async def test_auth_error_raises_config_entry_auth_failed(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     api.async_list_chargers.side_effect = PodHomeAuthError("token expired")
-    coordinator = _make_coordinator(hass, api)
     with pytest.raises(ConfigEntryAuthFailed):
         await coordinator._async_update_data()
 
 
-async def test_connection_error_retries_then_raises_update_failed(hass: HomeAssistant) -> None:
-    api = _stub_api()
+async def test_connection_error_retries_then_raises_update_failed(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     api.async_list_chargers.side_effect = PodHomeApiError(0, "connection refused")
-    coordinator = _make_coordinator(hass, api)
     with patch("custom_components.pod_home.coordinator.asyncio.sleep", AsyncMock()):
         with pytest.raises(UpdateFailed):
             await coordinator._async_fetch_data()
     assert api.async_list_chargers.call_count == 3  # CONNECTION_RETRY_ATTEMPTS
 
 
-async def test_http_error_raises_immediately_without_retry(hass: HomeAssistant) -> None:
-    api = _stub_api()
+async def test_http_error_raises_immediately_without_retry(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     api.async_list_chargers.side_effect = PodHomeApiError(500, "server error")
-    coordinator = _make_coordinator(hass, api)
     with pytest.raises(UpdateFailed):
         await coordinator._async_fetch_data()
     assert api.async_list_chargers.call_count == 1  # a genuine HTTP error is not retried
 
 
-async def test_boost_end_at_parsed_from_charge_overrides(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
+async def test_boost_end_at_parsed_from_charge_overrides(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     future = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1))
     api.async_get_charge_overrides.return_value = [
         {"requestedAt": "2026-01-01T00:00:00Z", "endAt": future.isoformat(), "deletedAt": None}
     ]
 
-    coordinator = _make_coordinator(hass, api)
     result = await coordinator._async_fetch_data()
 
     assert result[PPID].boost_end_at == future
 
 
-async def test_deleted_charge_override_not_current_boost(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
+async def test_deleted_charge_override_not_current_boost(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     future = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1))
     api.async_get_charge_overrides.return_value = [
         {
@@ -300,23 +273,21 @@ async def test_deleted_charge_override_not_current_boost(hass: HomeAssistant) ->
         }
     ]
 
-    coordinator = _make_coordinator(hass, api)
     result = await coordinator._async_fetch_data()
 
     assert result[PPID].boost_end_at is None
 
 
-async def test_always_on_active_from_endat_less_charge_override(hass: HomeAssistant) -> None:
+async def test_always_on_active_from_endat_less_charge_override(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     """An indefinite override (no endAt at all) is Basic Charging's "Always on" mode, not a
     boost - confirmed live, distinct from test_boost_end_at_parsed_from_charge_overrides above,
     which always carries a real endAt."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
     api.async_get_charge_overrides.return_value = [
         {"requestedAt": "2026-01-01T00:00:00Z"}
     ]
 
-    coordinator = _make_coordinator(hass, api)
     result = await coordinator._async_fetch_data()
 
     assert result[PPID].always_on_active is True
@@ -325,27 +296,25 @@ async def test_always_on_active_from_endat_less_charge_override(hass: HomeAssist
 
 async def test_always_on_active_none_when_charge_overrides_never_fetched(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
     """Distinct from confirmed True/False - a charge-overrides fetch that's never succeeded
     leaves always_on_active unknown, not silently False."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
     api.async_get_charge_overrides.side_effect = PodHomeApiError(500, "server error")
 
-    coordinator = _make_coordinator(hass, api)
     result = await coordinator._async_fetch_data()
 
     assert result[PPID].always_on_active is None
 
 
-async def test_deleted_endat_less_override_is_not_always_on(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
+async def test_deleted_endat_less_override_is_not_always_on(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     api.async_get_charge_overrides.return_value = [
         {"requestedAt": "2026-01-01T00:00:00Z", "deletedAt": "2026-01-01T00:05:00Z"}
     ]
 
-    coordinator = _make_coordinator(hass, api)
     result = await coordinator._async_fetch_data()
 
     assert result[PPID].always_on_active is False
@@ -353,16 +322,16 @@ async def test_deleted_endat_less_override_is_not_always_on(hass: HomeAssistant)
 
 async def test_firmware_and_tariffs_not_refetched_within_staleness_window(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
     """Firmware/tariffs/manual_schedules/delegated_control are cached on
     FIRMWARE_TARIFF_REFRESH_INTERVAL - a second poll immediately after the first must not
     re-fetch them."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
     # Each needs a genuinely parseable (non-empty) response for its _fetched_at to actually get
     # stamped - the coordinator deliberately does NOT cache an empty/unparseable response (see
     # its own comment: "a bad/unexpected response gets retried next poll"), so an empty-dict
-    # default (as most _stub_api() calls use) would legitimately keep re-fetching every poll.
+    # default (as most make_stub_api() calls use) would legitimately keep re-fetching every poll.
     api.async_charger_firmware.return_value = [
         {"versionInfo": {"manifestId": "A"}, "updateStatus": {}, "serialNumber": "S"}
     ]
@@ -375,7 +344,6 @@ async def test_firmware_and_tariffs_not_refetched_within_staleness_window(
     }
     api.async_delegated_control.return_value = {"statusEffectiveFrom": "2026-01-01T00:00:00Z"}
 
-    coordinator = _make_coordinator(hass, api)
     await coordinator._async_fetch_data()
     assert api.async_charger_firmware.call_count == 1
     assert api.async_tariffs.call_count == 1
@@ -396,9 +364,9 @@ async def test_firmware_and_tariffs_not_refetched_within_staleness_window(
 
 async def test_accumulate_total_energy_sums_finalized_charges_once_each(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
     now = datetime.datetime(2026, 1, 2, tzinfo=datetime.timezone.utc)
     coordinator._total_started_at_by_ppid[PPID] = datetime.datetime(
         2025, 12, 31, tzinfo=datetime.timezone.utc
@@ -425,19 +393,19 @@ async def test_accumulate_total_energy_sums_finalized_charges_once_each(
     assert coordinator._total_energy_kwh_by_ppid[PPID] == 8.0
 
 
-async def test_accumulate_total_energy_skips_still_open_sessions(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
+async def test_accumulate_total_energy_skips_still_open_sessions(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     entries = [(PPID, {"id": "c1", "endedAt": None, "energyTotal": 5.0}, {})]
     coordinator._accumulate_total_energy(entries, datetime.datetime.now(datetime.timezone.utc))
     assert PPID not in coordinator._total_energy_kwh_by_ppid
 
 
-async def test_accumulate_total_energy_starts_at_tracking_start(hass: HomeAssistant) -> None:
+async def test_accumulate_total_energy_starts_at_tracking_start(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     """Sessions that ended before this install started tracking a charger aren't added - a
     first fetch covering past weeks of history counts nothing until a session ends after it."""
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
     first_fetch = datetime.datetime(2026, 1, 10, tzinfo=datetime.timezone.utc)
     history = [(PPID, {"id": "c1", "endedAt": "2026-01-05T01:00:00Z", "energyTotal": 5.0}, {})]
 
@@ -450,9 +418,9 @@ async def test_accumulate_total_energy_starts_at_tracking_start(hass: HomeAssist
     assert coordinator._total_energy_kwh_by_ppid[PPID] == 3.0
 
 
-async def test_sticky_state_round_trips_through_store(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
+async def test_sticky_state_round_trips_through_store(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     now = datetime.datetime(2026, 1, 1, 12, 0, tzinfo=datetime.timezone.utc)
     coordinator._charging_started_at_by_ppid[PPID] = now
     coordinator._total_energy_kwh_by_ppid[PPID] = 42.0
@@ -477,13 +445,12 @@ async def test_sticky_state_round_trips_through_store(hass: HomeAssistant) -> No
     assert coordinator._latest_charge_by_ppid[PPID] == make_charge()
 
 
-async def test_latest_charge_kept_when_outside_lookback_window(hass: HomeAssistant) -> None:
+async def test_latest_charge_kept_when_outside_lookback_window(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     """A restored latest charge older than RECENT_CHARGES_LOOKBACK stays reported when the
     /charges window has no entries for that charger."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
     api.async_charges.return_value = {"data": {"charges": []}}
-    coordinator = _make_coordinator(hass, api)
     coordinator._latest_charge_by_ppid[PPID] = make_charge()
 
     result = await coordinator._async_fetch_data()
@@ -492,9 +459,9 @@ async def test_latest_charge_kept_when_outside_lookback_window(hass: HomeAssista
     assert result[PPID].latest_charge == make_charge()
 
 
-async def test_firmware_version_synced_to_device_registry(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
+async def test_firmware_version_synced_to_device_registry(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     api.async_charger_firmware.return_value = [
         {
             "versionInfo": {"manifestId": "A30P-2.0"},
@@ -502,7 +469,6 @@ async def test_firmware_version_synced_to_device_registry(hass: HomeAssistant) -
             "serialNumber": "SN123",
         }
     ]
-    coordinator = _make_coordinator(hass, api)
     registry = dr.async_get(hass)
     device = registry.async_get_or_create(
         config_entry_id=coordinator.config_entry.entry_id,
@@ -515,9 +481,9 @@ async def test_firmware_version_synced_to_device_registry(hass: HomeAssistant) -
     assert registry.async_get(device.id).sw_version == "A30P-2.0"
 
 
-async def test_adjust_poll_interval_speeds_up_after_plug_in(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
+async def test_adjust_poll_interval_speeds_up_after_plug_in(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     coordinator.update_interval = SLOW_POLL_INTERVAL
     coordinator._plugged_in_at[PPID] = datetime.datetime.now(datetime.timezone.utc)
     coordinator._async_adjust_poll_interval({})
@@ -526,9 +492,9 @@ async def test_adjust_poll_interval_speeds_up_after_plug_in(hass: HomeAssistant)
 
 async def test_adjust_poll_interval_slows_down_after_window(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
     coordinator.update_interval = FAST_POLL_INTERVAL
     coordinator._plugged_in_at[PPID] = datetime.datetime(
         2020, 1, 1, tzinfo=datetime.timezone.utc
@@ -537,8 +503,9 @@ async def test_adjust_poll_interval_slows_down_after_window(
     assert coordinator.update_interval == SLOW_POLL_INTERVAL
 
 
-async def test_api3_charges_matched_to_ppid_via_pod_id(hass: HomeAssistant) -> None:
-    api = _stub_api()
+async def test_api3_charges_matched_to_ppid_via_pod_id(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     api.async_create_api3_session.return_value = {"sessions": {"user_id": 999}}
     api.async_api3_pods.return_value = {"pods": [{"ppid": PPID, "unit_id": 555}]}
     api.async_api3_charges.return_value = {
@@ -554,7 +521,6 @@ async def test_api3_charges_matched_to_ppid_via_pod_id(hass: HomeAssistant) -> N
         ]
     }
 
-    coordinator = _make_coordinator(hass, api)
     now = datetime.datetime(2026, 1, 1, 11, 0, tzinfo=datetime.timezone.utc)
     await coordinator._async_refresh_api3_account(now)
     await coordinator._async_refresh_api3_charges(coordinator._api3_user_id, now)
@@ -564,8 +530,9 @@ async def test_api3_charges_matched_to_ppid_via_pod_id(hass: HomeAssistant) -> N
     assert coordinator._current_charge_by_ppid[PPID].duration is None
 
 
-async def test_api3_charges_unmatched_pod_id_warns_and_stays_empty(hass: HomeAssistant) -> None:
-    api = _stub_api()
+async def test_api3_charges_unmatched_pod_id_warns_and_stays_empty(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     api.async_create_api3_session.return_value = {"sessions": {"user_id": 999}}
     api.async_api3_pods.return_value = {"pods": [{"ppid": PPID, "unit_id": 555}]}
     api.async_api3_charges.return_value = {
@@ -581,7 +548,6 @@ async def test_api3_charges_unmatched_pod_id_warns_and_stays_empty(hass: HomeAss
         ]
     }
 
-    coordinator = _make_coordinator(hass, api)
     now = datetime.datetime(2026, 1, 1, 12, 0, tzinfo=datetime.timezone.utc)
     await coordinator._async_refresh_api3_account(now)
     await coordinator._async_refresh_api3_charges(coordinator._api3_user_id, now)
@@ -619,21 +585,25 @@ def _api3_session_stubs(api, *, started_at: datetime.datetime, kwh_used: float =
     ],
 )
 async def test_expected_smart_schedule_errors_not_warned(
-    hass: HomeAssistant, status: int, error: str, expect_warning: bool
+    hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
+    status: int,
+    error: str,
+    expect_warning: bool,
 ) -> None:
-    api = _stub_api()
     api.async_smart_schedule_active.side_effect = PodHomeApiError(status, {"error": error})
-    coordinator = _make_coordinator(hass, api)
 
     assert await coordinator._fetch_smart_schedule(PPID) == {}
     assert (f"smart_schedule:{PPID}" in coordinator._warned_keys) is expect_warning
 
 
-async def test_current_charge_duration_refined_from_smart_schedule(hass: HomeAssistant) -> None:
+async def test_current_charge_duration_refined_from_smart_schedule(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     """Smart Charging: duration comes from the CHARGING window(s) actually in the schedule, not
     the full time-since-session-start (which would include any paused time)."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw(delegatedControl={"status": "ACTIVE"})]
+    api.async_list_chargers.return_value = [charger_raw(delegatedControl={"status": "ACTIVE"})]
     api.async_connectivity_status.return_value = {"chargingState": "Charging"}
     now = datetime.datetime.now(datetime.timezone.utc)
     session_start = now - datetime.timedelta(hours=2)
@@ -649,7 +619,6 @@ async def test_current_charge_duration_refined_from_smart_schedule(hass: HomeAss
         ]
     }
 
-    coordinator = _make_coordinator(hass, api)
     result = await coordinator._async_fetch_data()
 
     # Only the 1-hour CHARGING window counts, not the full 2h since session start.
@@ -658,19 +627,19 @@ async def test_current_charge_duration_refined_from_smart_schedule(hass: HomeAss
 
 async def test_current_charge_duration_unknown_on_first_poll_when_schedule_fetch_fails(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
     """Smart Charging: a schedule is known to exist for this scheme (delegated control active),
     but this poll's schedule fetch itself comes back empty and it's the first poll of this
     session - nothing yet to freeze at, so duration is None rather than a guessed value."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw(delegatedControl={"status": "ACTIVE"})]
+    api.async_list_chargers.return_value = [charger_raw(delegatedControl={"status": "ACTIVE"})]
     api.async_connectivity_status.return_value = {"chargingState": "Charging"}
     now = datetime.datetime.now(datetime.timezone.utc)
     session_start = now - datetime.timedelta(hours=2)
     _api3_session_stubs(api, started_at=session_start)
     api.async_smart_schedule_active.return_value = {}
 
-    coordinator = _make_coordinator(hass, api)
     result = await coordinator._async_fetch_data()
 
     assert result[PPID].current_charge.duration is None
@@ -678,13 +647,14 @@ async def test_current_charge_duration_unknown_on_first_poll_when_schedule_fetch
 
 async def test_current_charge_duration_freezes_when_schedule_unavailable(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
     """Smart Charging: a poll where the schedule can't be refined against (charger paused
     between windows, or a transient fetch gap) freezes the last known duration rather than
     recomputing time-since-session-start, which would overcount by the paused time and keep
     growing every poll while genuinely not charging."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw(delegatedControl={"status": "ACTIVE"})]
+    api.async_list_chargers.return_value = [charger_raw(delegatedControl={"status": "ACTIVE"})]
     api.async_connectivity_status.return_value = {"chargingState": "Charging"}
     now = datetime.datetime.now(datetime.timezone.utc)
     session_start = now - datetime.timedelta(hours=2)
@@ -700,7 +670,6 @@ async def test_current_charge_duration_freezes_when_schedule_unavailable(
         ]
     }
 
-    coordinator = _make_coordinator(hass, api)
     coordinator.data = await coordinator._async_fetch_data()  # commit, as a real refresh would
     assert coordinator._current_charge_by_ppid[PPID].duration == 3600
 
@@ -719,8 +688,8 @@ async def test_current_charge_duration_freezes_when_schedule_unavailable(
 def _smart_session_api(now: datetime.datetime) -> PodHomeApiClient:
     """Smart Charging, an api3 session that started 2 hours ago, and a schedule whose one
     charging window ended an hour ago."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw(delegatedControl={"status": "ACTIVE"})]
+    api = make_stub_api()
+    api.async_list_chargers.return_value = [charger_raw(delegatedControl={"status": "ACTIVE"})]
     api.async_connectivity_status.return_value = {"chargingState": "Charging"}
     api.async_charges.return_value = {"data": {"charges": []}}
     session_start = now - datetime.timedelta(hours=2)
@@ -833,12 +802,11 @@ async def test_observed_stop_survives_restart(hass: HomeAssistant) -> None:
     assert result[PPID].current_charge.duration == 3600
 
 
-async def test_api3_fetched_on_the_poll_after_charging_stops(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
+async def test_api3_fetched_on_the_poll_after_charging_stops(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     api.async_charges.return_value = {"data": {"charges": []}}
     _api3_session_stubs(api, started_at=datetime.datetime.now(datetime.timezone.utc))
-    coordinator = _make_coordinator(hass, api)
     api.async_connectivity_status.return_value = {"chargingState": "Charging"}
     coordinator.data = await coordinator._async_fetch_data()
     fetched = api.async_api3_charges.await_count
@@ -851,7 +819,7 @@ async def test_api3_fetched_on_the_poll_after_charging_stops(hass: HomeAssistant
 
 
 async def test_corrupt_saved_timestamps_dont_block_setup(hass: HomeAssistant) -> None:
-    coordinator = _make_coordinator(hass, _stub_api())
+    coordinator = _make_coordinator(hass, make_stub_api())
     await coordinator._sticky_store.async_save(
         {
             "charging_state_transitions": {PPID: [[1700000000, "Charging"]]},
@@ -868,7 +836,7 @@ async def test_corrupt_saved_timestamps_dont_block_setup(hass: HomeAssistant) ->
 
 
 async def test_restored_charge_rejects_non_integer_duration(hass: HomeAssistant) -> None:
-    coordinator = _make_coordinator(hass, _stub_api())
+    coordinator = _make_coordinator(hass, make_stub_api())
     restored = coordinator._parse_charge_dict({PPID: {"id": "c1", "duration": "3600"}})
     snapshots = coordinator._parse_duration_snapshots({PPID: {"id": "c1", "duration": "3600"}})
 
@@ -878,17 +846,17 @@ async def test_restored_charge_rejects_non_integer_duration(hass: HomeAssistant)
 
 async def test_current_charge_duration_unknown_when_nothing_to_refine_against_in_basic_mode(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
     """Basic Charging with genuinely nothing to refine against (no manual schedule ever fetched,
-    no active override - _stub_api()'s defaults) leaves duration None. See the two tests below
+    no active override - make_stub_api()'s defaults) leaves duration None. See the two tests below
     for Basic Charging WITH schedule/override data, which refines properly."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw(delegatedControl={"status": "INACTIVE"})]
+    api.async_list_chargers.return_value = [charger_raw(delegatedControl={"status": "INACTIVE"})]
     now = datetime.datetime.now(datetime.timezone.utc)
     session_start = now - datetime.timedelta(hours=2)
     _api3_session_stubs(api, started_at=session_start)
 
-    coordinator = _make_coordinator(hass, api)
     result = await coordinator._async_fetch_data()
 
     assert result[PPID].current_charge.duration is None
@@ -896,12 +864,13 @@ async def test_current_charge_duration_unknown_when_nothing_to_refine_against_in
 
 async def test_current_charge_duration_refined_from_manual_schedule_in_basic_mode(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
     """Basic Charging: duration comes from the manual schedule's own active window(s), not the
     full time-since-session-start (which would include any off-schedule time)."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw(delegatedControl={"status": "INACTIVE"})]
-    tz = ZoneInfo("Europe/London")  # matches _charger_raw()'s default timezone
+    api.async_list_chargers.return_value = [charger_raw(delegatedControl={"status": "INACTIVE"})]
+    tz = ZoneInfo("Europe/London")  # matches charger_raw()'s default timezone
     now = datetime.datetime.now(datetime.timezone.utc)
     session_start = now - datetime.timedelta(hours=2)
     _api3_session_stubs(api, started_at=session_start)
@@ -922,7 +891,6 @@ async def test_current_charge_duration_refined_from_manual_schedule_in_basic_mod
         ]
     }
 
-    coordinator = _make_coordinator(hass, api)
     result = await coordinator._async_fetch_data()
 
     duration = result[PPID].current_charge.duration
@@ -931,12 +899,13 @@ async def test_current_charge_duration_refined_from_manual_schedule_in_basic_mod
 
 async def test_current_charge_duration_refined_from_override_in_basic_mode(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
     """Basic Charging: an Always On override that already existed before this session began
     (survived a cable unplug/replug, say) is trusted from session_start directly - not gated by
     the manual schedule, and not waiting on a fresh confirmation since it predates the session."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw(delegatedControl={"status": "INACTIVE"})]
+    api.async_list_chargers.return_value = [charger_raw(delegatedControl={"status": "INACTIVE"})]
     now = datetime.datetime.now(datetime.timezone.utc)
     session_start = now - datetime.timedelta(hours=2)
     _api3_session_stubs(api, started_at=session_start)
@@ -945,7 +914,6 @@ async def test_current_charge_duration_refined_from_override_in_basic_mode(
         {"requestedAt": override_start.isoformat()}  # Always On - no endAt at all
     ]
 
-    coordinator = _make_coordinator(hass, api)
     result = await coordinator._async_fetch_data()
 
     duration = result[PPID].current_charge.duration
@@ -956,12 +924,13 @@ async def test_current_charge_duration_refined_from_override_in_basic_mode(
 
 async def test_current_charge_duration_keeps_a_cancelled_boosts_contribution(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
     """Basic Charging, no manual schedule: a boost created and confirmed this session, then
     cancelled (deletedAt set), still contributes its real ~30-minute confirmed-to-cancelled span
     to duration - not 0 (nothing currently active) and not extended to endAt (never reached)."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw(delegatedControl={"status": "INACTIVE"})]
+    api.async_list_chargers.return_value = [charger_raw(delegatedControl={"status": "INACTIVE"})]
     now = datetime.datetime.now(datetime.timezone.utc)
     session_start = now - datetime.timedelta(hours=2)
     _api3_session_stubs(api, started_at=session_start)
@@ -979,7 +948,6 @@ async def test_current_charge_duration_keeps_a_cancelled_boosts_contribution(
         }
     ]
 
-    coordinator = _make_coordinator(hass, api)
     result = await coordinator._async_fetch_data()
 
     duration = result[PPID].current_charge.duration
@@ -989,9 +957,9 @@ async def test_current_charge_duration_keeps_a_cancelled_boosts_contribution(
 
 async def test_record_charging_state_transition_dedups_consecutive_same_state(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
     t1 = datetime.datetime(2026, 1, 1, 10, 0, tzinfo=datetime.timezone.utc)
     t2 = datetime.datetime(2026, 1, 1, 10, 1, tzinfo=datetime.timezone.utc)
     coordinator._record_charging_state_transition(PPID, "Charging", t1)
@@ -1007,18 +975,18 @@ async def test_record_charging_state_transition_dedups_consecutive_same_state(
 
 async def test_record_charging_state_transition_ignores_missing_data(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
     now = datetime.datetime.now(datetime.timezone.utc)
     coordinator._record_charging_state_transition(PPID, None, now)
     coordinator._record_charging_state_transition(PPID, "Charging", None)
     assert coordinator._charging_state_transitions_by_ppid.get(PPID, []) == []
 
 
-async def test_has_confirmed_energy(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
+async def test_has_confirmed_energy(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     assert coordinator._has_confirmed_energy(make_charge(energy_total=1.2)) is True
     assert coordinator._has_confirmed_energy(make_charge(energy_total=0)) is False
     assert coordinator._has_confirmed_energy(make_charge(energy_total=None)) is False
@@ -1026,9 +994,9 @@ async def test_has_confirmed_energy(hass: HomeAssistant) -> None:
 
 async def test_confirmed_override_events_drops_unconfirmed_fresh_override(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
     session_start = datetime.datetime(2026, 1, 1, 10, 0, tzinfo=datetime.timezone.utc)
     start = session_start + datetime.timedelta(minutes=10)
     end = start + datetime.timedelta(hours=1)
@@ -1040,9 +1008,9 @@ async def test_confirmed_override_events_drops_unconfirmed_fresh_override(
 
 async def test_confirmed_override_events_uses_confirmed_transition_as_start(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
     session_start = datetime.datetime(2026, 1, 1, 10, 0, tzinfo=datetime.timezone.utc)
     start = session_start + datetime.timedelta(minutes=10)
     end = start + datetime.timedelta(hours=1)
@@ -1055,9 +1023,9 @@ async def test_confirmed_override_events_uses_confirmed_transition_as_start(
 
 async def test_confirmed_override_events_trusts_pre_session_override(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
     session_start = datetime.datetime(2026, 1, 1, 10, 0, tzinfo=datetime.timezone.utc)
     start = session_start - datetime.timedelta(hours=2)  # predates the session
     end = session_start + datetime.timedelta(hours=1)
@@ -1069,13 +1037,13 @@ async def test_confirmed_override_events_trusts_pre_session_override(
 
 async def test_confirmed_override_events_start_exactly_at_session_start(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
     """The `start < session_start` boundary is exclusive - an override starting exactly at
     session_start is NOT pre-existing, so it still needs a confirmed Charging transition (unlike
     one that predates session_start, see test_confirmed_override_events_trusts_pre_session_override
     above)."""
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
     session_start = datetime.datetime(2026, 1, 1, 10, 0, tzinfo=datetime.timezone.utc)
     end = session_start + datetime.timedelta(hours=1)
     # No transitions recorded - not trusted, so dropped.
@@ -1092,12 +1060,12 @@ async def test_confirmed_override_events_start_exactly_at_session_start(
 
 async def test_confirmed_override_events_trusts_when_already_charging_at_start(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
     """An override created while the charger is already Charging (e.g. a boost extending an
     in-progress charge) is trusted from its own start immediately - chargingState won't record a
     fresh transition if it was already Charging and stays that way."""
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
     session_start = datetime.datetime(2026, 1, 1, 10, 0, tzinfo=datetime.timezone.utc)
     already_charging_at = session_start + datetime.timedelta(minutes=5)
     start = session_start + datetime.timedelta(minutes=20)
@@ -1110,9 +1078,9 @@ async def test_confirmed_override_events_trusts_when_already_charging_at_start(
     ) == [(start, end, "Boost")]
 
 
-async def test_effective_now_uncapped_when_currently_charging(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
+async def test_effective_now_uncapped_when_currently_charging(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     now = datetime.datetime.now(datetime.timezone.utc)
     coordinator._charging_state_transitions_by_ppid[PPID] = [
         (now - datetime.timedelta(minutes=5), "Charging"),
@@ -1120,9 +1088,9 @@ async def test_effective_now_uncapped_when_currently_charging(hass: HomeAssistan
     assert coordinator._effective_now(PPID, now) == now
 
 
-async def test_effective_now_capped_when_not_currently_charging(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
+async def test_effective_now_capped_when_not_currently_charging(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     now = datetime.datetime.now(datetime.timezone.utc)
     stopped_at = now - datetime.timedelta(minutes=10)
     coordinator._charging_state_transitions_by_ppid[PPID] = [
@@ -1132,24 +1100,25 @@ async def test_effective_now_capped_when_not_currently_charging(hass: HomeAssist
     assert coordinator._effective_now(PPID, now) == stopped_at
 
 
-async def test_effective_now_uncapped_with_no_transitions_yet(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    coordinator = _make_coordinator(hass, api)
+async def test_effective_now_uncapped_with_no_transitions_yet(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     now = datetime.datetime.now(datetime.timezone.utc)
     assert coordinator._effective_now(PPID, now) == now
 
 
 async def test_current_charge_duration_schedule_start_trusted_end_freezes_on_observed_stop(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
     """Reconstructs the scenario proven from a real HA history export: a schedule window opens
     well before chargingState actually reaches Charging - the front-edge gap is NOT suppressed
     (schedule starts are trusted, unlike a fresh override) - then once chargingState is observed
     leaving Charging (the vehicle finishing), duration freezes at that point instead of
     continuing to climb for as long as the window nominally stays open."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw(delegatedControl={"status": "INACTIVE"})]
-    tz = ZoneInfo("Europe/London")  # matches _charger_raw()'s default timezone
+    api.async_list_chargers.return_value = [charger_raw(delegatedControl={"status": "INACTIVE"})]
+    tz = ZoneInfo("Europe/London")  # matches charger_raw()'s default timezone
     now = datetime.datetime.now(datetime.timezone.utc)
     session_start = now - datetime.timedelta(hours=2)
     _api3_session_stubs(api, started_at=session_start)
@@ -1174,7 +1143,6 @@ async def test_current_charge_duration_schedule_start_trusted_end_freezes_on_obs
         ]
     }
 
-    coordinator = _make_coordinator(hass, api)
     coordinator.data = await coordinator._async_fetch_data()  # commit, as a real refresh would
     # The whole 2h session - trusted from session_start, not clipped to when Charging was
     # actually confirmed (11 minutes in).
@@ -1196,12 +1164,13 @@ async def test_current_charge_duration_schedule_start_trusted_end_freezes_on_obs
 
 async def test_current_charge_duration_unknown_while_never_confirmed_energy(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
     """A vehicle that never actually draws power this session (already fully charged, say)
     stays at an honest None throughout, even with a schedule window open the whole time -
     not a guessed 0 or a value derived purely from the window being open."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw(delegatedControl={"status": "INACTIVE"})]
+    api.async_list_chargers.return_value = [charger_raw(delegatedControl={"status": "INACTIVE"})]
     tz = ZoneInfo("Europe/London")
     now = datetime.datetime.now(datetime.timezone.utc)
     session_start = now - datetime.timedelta(hours=2)
@@ -1222,7 +1191,6 @@ async def test_current_charge_duration_unknown_while_never_confirmed_energy(
         ]
     }
 
-    coordinator = _make_coordinator(hass, api)
     coordinator.data = await coordinator._async_fetch_data()
     assert coordinator._current_charge_by_ppid[PPID].duration is None
 
@@ -1233,11 +1201,11 @@ async def test_current_charge_duration_unknown_while_never_confirmed_energy(
 
 async def test_vehicle_parsed_from_smart_charging_chargers_and_vehicles(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
     """Shape below matches a real captured response (vehicles/currentIntent/intents.details
     nesting) - cross-checked against scratch/output locally, not copied from it."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
     api.async_smart_charging_chargers_and_vehicles.return_value = [
         {
             "ppid": PPID,
@@ -1283,7 +1251,6 @@ async def test_vehicle_parsed_from_smart_charging_chargers_and_vehicles(
         }
     ]
 
-    coordinator = _make_coordinator(hass, api)
     result = await coordinator._async_fetch_data()
 
     vehicle = result[PPID].vehicle
@@ -1311,13 +1278,15 @@ async def test_vehicle_parsed_from_smart_charging_chargers_and_vehicles(
     ],
 )
 async def test_finalized_charge_data_fetched_when_cable_unplugged(
-    hass: HomeAssistant, previous_state: str, current_state: str, expect_fetch: bool
+    hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
+    previous_state: str,
+    current_state: str,
+    expect_fetch: bool,
 ) -> None:
     """/charges lists a session once its cable is unplugged."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
     api.async_connectivity_status.return_value = {"chargingState": current_state}
-    coordinator = _make_coordinator(hass, api)
     now = datetime.datetime.now(datetime.timezone.utc)
     coordinator.data = {PPID: make_charger(charging_state=previous_state)}
     coordinator._charges_fetched_at = now  # not otherwise stale
@@ -1327,11 +1296,10 @@ async def test_finalized_charge_data_fetched_when_cable_unplugged(
     assert api.async_charges.called is expect_fetch
 
 
-async def test_api3_charges_fetched_same_poll_as_charging_transition(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
+async def test_api3_charges_fetched_same_poll_as_charging_transition(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     api.async_connectivity_status.return_value = {"chargingState": "Charging"}
-    coordinator = _make_coordinator(hass, api)
     now = datetime.datetime.now(datetime.timezone.utc)
     coordinator.data = {PPID: make_charger(charging_state="Available")}
     coordinator._api3_user_id = 123  # only fetched at all once this is known
@@ -1345,17 +1313,17 @@ async def test_api3_charges_fetched_same_poll_as_charging_transition(hass: HomeA
 
 @pytest.mark.parametrize("charges_fetched_ago", [None, datetime.timedelta(minutes=5)])
 async def test_api3_and_charges_fetched_together_outside_charging(
-    hass: HomeAssistant, charges_fetched_ago: datetime.timedelta | None
+    hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
+    charges_fetched_ago: datetime.timedelta | None
 ) -> None:
     """Outside charging, api3 is fetched only alongside /charges, and first - so a session api3
     already shows closed is never dropped from Total energy before /charges lists it."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
     api.async_connectivity_status.return_value = {"chargingState": "Available"}
     calls: list[str] = []
     api.async_api3_charges.side_effect = lambda *a, **k: calls.append("api3") or {}
     api.async_charges.side_effect = lambda *a, **k: calls.append("charges") or {}
-    coordinator = _make_coordinator(hass, api)
     now = datetime.datetime.now(datetime.timezone.utc)
     coordinator.data = {PPID: make_charger(charging_state="Available")}
     coordinator._api3_user_id = 123
@@ -1368,12 +1336,11 @@ async def test_api3_and_charges_fetched_together_outside_charging(
     assert calls == (["api3", "charges"] if charges_fetched_ago is None else [])
 
 
-async def test_connectivity_fetched_once_per_ppid_per_poll(hass: HomeAssistant) -> None:
+async def test_connectivity_fetched_once_per_ppid_per_poll(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     """Guards against the connectivity preflight and the per-charger loop both fetching it -
     same total call count as before the same-poll restructuring, just resolved earlier."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
-    coordinator = _make_coordinator(hass, api)
 
     await coordinator._async_fetch_data()
 
@@ -1384,14 +1351,14 @@ async def test_remote_lock_status_parsed(hass: HomeAssistant) -> None:
     """offMode: null is a genuine, confirmed-live response shape (unsupported charger model) - a
     successful fetch, not treated as missing data. Two separate coordinators here purely for a
     clean before/after comparison."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
+    api = make_stub_api()
+    api.async_list_chargers.return_value = [charger_raw()]
     api.async_get_remote_lock_status.return_value = {"offMode": None}
     result = await _make_coordinator(hass, api)._async_fetch_data()
     assert result[PPID].remote_lock_off_mode is None
 
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
+    api = make_stub_api()
+    api.async_list_chargers.return_value = [charger_raw()]
     api.async_get_remote_lock_status.return_value = {"offMode": True}
     result = await _make_coordinator(hass, api)._async_fetch_data()
     assert result[PPID].remote_lock_off_mode is True
@@ -1399,14 +1366,15 @@ async def test_remote_lock_status_parsed(hass: HomeAssistant) -> None:
 
 @pytest.mark.parametrize(("off_mode", "expected_calls"), [(None, 1), (True, 2), (False, 2)])
 async def test_remote_lock_polled_every_poll_only_once_set(
-    hass: HomeAssistant, off_mode: bool | None, expected_calls: int
+    hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
+    off_mode: bool | None,
+    expected_calls: int,
 ) -> None:
     """A charger reporting offMode: null (unsupported) is re-checked on the slow
     cadence; one with a real lock state is polled every poll so app-side changes show up."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
     api.async_get_remote_lock_status.return_value = {"offMode": off_mode}
-    coordinator = _make_coordinator(hass, api)
 
     await coordinator._async_fetch_data()
     await coordinator._async_fetch_data()
@@ -1441,8 +1409,8 @@ _API3_CLOSED = {
 def _session_end_scenario(hass: HomeAssistant):
     """A coordinator plus a poll(charging_state, api3_entry, charges) helper that records Total
     energy after each poll - for walking one session through its end."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
+    api = make_stub_api()
+    api.async_list_chargers.return_value = [charger_raw()]
     api.async_create_api3_session.return_value = {"sessions": {"user_id": 999}}
     api.async_api3_pods.return_value = {"pods": [{"ppid": PPID, "unit_id": 555}]}
     coordinator = _make_coordinator(hass, api)
@@ -1493,15 +1461,14 @@ async def test_total_energy_held_while_charges_lags_api3(hass: HomeAssistant) ->
     assert totals == [63.7, 64, 64]
 
 
-async def test_api3_charges_failure_retried_without_charges(hass: HomeAssistant) -> None:
+async def test_api3_charges_failure_retried_without_charges(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     """A failed api3 charges fetch is retried next poll on its own; /charges stays on its
     schedule."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
     api.async_connectivity_status.return_value = {"chargingState": "Available"}
     api.async_api3_charges.side_effect = [PodHomeApiError(500, {}), {"charges": []}]
     api.async_charges.return_value = {"data": {"charges": []}}
-    coordinator = _make_coordinator(hass, api)
     coordinator.data = {PPID: make_charger(charging_state="Available")}
     coordinator._api3_user_id = 123
 
@@ -1523,19 +1490,19 @@ async def test_api3_charges_failure_retried_without_charges(hass: HomeAssistant)
 )
 async def test_finished_api3_session_held_only_until_listed(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
     latest_started_at: datetime.datetime | None,
     ended_ago: int,
     expect_held: bool,
 ) -> None:
     ended_at = datetime.datetime(2026, 9, 24, 5, 25, 39, tzinfo=datetime.timezone.utc)
-    api = _stub_api()
     api.async_api3_charges.return_value = {
         "charges": [
             {"id": 1, "starts_at": "2026-09-23T19:25:34Z", "ends_at": ended_at.isoformat(),
              "kwh_used": 64, "pod": {"id": 555}},
         ]
     }
-    coordinator = _make_coordinator(hass, api)
     coordinator._api3_pod_id_by_ppid = {PPID: 555}
     coordinator._total_started_at_by_ppid[PPID] = ended_at - datetime.timedelta(days=30)
     if latest_started_at is not None:
@@ -1554,11 +1521,11 @@ def _charge_entry(started_at: str, energy: float, cost: int, ppid: str = PPID) -
 
 
 @freeze_time("2026-10-18T12:00:00Z")
-async def test_month_totals_summed_from_charges_by_local_start(hass: HomeAssistant) -> None:
+async def test_month_totals_summed_from_charges_by_local_start(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     """Month energy/cost sum the sessions that started this charger-local calendar month - the
     attribution the app uses."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
     api.async_charges.return_value = {
         "data": {
             "charges": [
@@ -1570,7 +1537,6 @@ async def test_month_totals_summed_from_charges_by_local_start(hass: HomeAssista
             ]
         }
     }
-    coordinator = _make_coordinator(hass, api)
 
     result = await coordinator._async_fetch_data()
 
@@ -1582,9 +1548,9 @@ async def test_month_totals_summed_from_charges_by_local_start(hass: HomeAssista
 
 
 @freeze_time("2026-10-18T12:00:00Z")
-async def test_month_cost_unknown_when_an_entry_has_no_cost(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
+async def test_month_cost_unknown_when_an_entry_has_no_cost(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     api.async_charges.return_value = {
         "data": {
             "charges": [
@@ -1593,7 +1559,6 @@ async def test_month_cost_unknown_when_an_entry_has_no_cost(hass: HomeAssistant)
             ]
         }
     }
-    coordinator = _make_coordinator(hass, api)
 
     result = await coordinator._async_fetch_data()
 
@@ -1601,11 +1566,10 @@ async def test_month_cost_unknown_when_an_entry_has_no_cost(hass: HomeAssistant)
     assert result[PPID].month_cost_amount is None
 
 
-async def test_month_totals_unknown_until_charges_fetched(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
+async def test_month_totals_unknown_until_charges_fetched(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     api.async_charges.side_effect = PodHomeApiError(500, {})
-    coordinator = _make_coordinator(hass, api)
 
     result = await coordinator._async_fetch_data()
 
@@ -1614,11 +1578,10 @@ async def test_month_totals_unknown_until_charges_fetched(hass: HomeAssistant) -
 
 
 @freeze_time("2026-10-31T12:00:00Z")
-async def test_charges_window_reaches_before_local_month_start(hass: HomeAssistant) -> None:
+async def test_charges_window_reaches_before_local_month_start(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     """On the 31st, today - 30 is the 1st itself - the window still starts the day before."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
-    coordinator = _make_coordinator(hass, api)
 
     await coordinator._async_fetch_data()
 
@@ -1628,12 +1591,11 @@ async def test_charges_window_reaches_before_local_month_start(hass: HomeAssista
 
 
 @freeze_time("2026-11-01T00:30:00Z")
-async def test_month_totals_reset_at_local_midnight_without_refetch(hass: HomeAssistant) -> None:
+async def test_month_totals_reset_at_local_midnight_without_refetch(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     """Totals are recomputed each poll from the stored sessions, so the 1st's local midnight
     resets them even when /charges isn't due."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
-    coordinator = _make_coordinator(hass, api)
     coordinator._charge_entries = [
         (PPID, _charge_entry("2026-10-20T20:00:00Z", 30, 300), {"id": PPID})
     ]
@@ -1651,14 +1613,15 @@ async def test_month_totals_reset_at_local_midnight_without_refetch(hass: HomeAs
     [(datetime.timedelta(minutes=45), False), (datetime.timedelta(hours=6), True)],
 )
 async def test_charges_safety_refresh_every_six_hours(
-    hass: HomeAssistant, fetched_ago: datetime.timedelta, expect_fetch: bool
+    hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
+    fetched_ago: datetime.timedelta,
+    expect_fetch: bool,
 ) -> None:
     """With no unplug and nothing awaiting listing, /charges and api3 are only re-fetched on
     the 6-hour safety net."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
     api.async_connectivity_status.return_value = {"chargingState": "Available"}
-    coordinator = _make_coordinator(hass, api)
     coordinator.data = {PPID: make_charger(charging_state="Available")}
     coordinator._api3_user_id = 123
     coordinator._charges_fetched_at = datetime.datetime.now(datetime.timezone.utc) - fetched_ago
@@ -1736,7 +1699,7 @@ async def test_one_chargers_open_session_doesnt_extend_anothers_window(
     hass: HomeAssistant,
 ) -> None:
     """Each charger's unplug window ends when its own session is listed."""
-    coordinator = _make_coordinator(hass, _stub_api())
+    coordinator = _make_coordinator(hass, make_stub_api())
     now = datetime.datetime(2026, 9, 24, 5, 30, tzinfo=datetime.timezone.utc)
     started = datetime.datetime(2026, 9, 23, 19, 25, 34, tzinfo=datetime.timezone.utc)
     coordinator._api3_newest_finished_by_ppid = {
@@ -1749,13 +1712,13 @@ async def test_one_chargers_open_session_doesnt_extend_anothers_window(
     assert coordinator._session_listed("PSL-OTHER") is False
 
 
-async def test_session_ended_before_tracking_start_not_held(hass: HomeAssistant) -> None:
+async def test_session_ended_before_tracking_start_not_held(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     """A fresh install whose api3 shows a session closed before tracking started: holding it
     would count it live, then drop it once /charges lists it (the baseline skips it)."""
     ended_at = datetime.datetime(2026, 9, 24, 5, 25, 39, tzinfo=datetime.timezone.utc)
-    api = _stub_api()
     api.async_api3_charges.return_value = {"charges": [_API3_CLOSED]}
-    coordinator = _make_coordinator(hass, api)
     coordinator._api3_pod_id_by_ppid = {PPID: 555}
 
     await coordinator._async_refresh_api3_charges(999, ended_at + datetime.timedelta(minutes=30))
@@ -1769,7 +1732,7 @@ async def test_month_totals_fall_back_to_ha_time_zone(hass: HomeAssistant) -> No
     previous = dt_util.get_default_time_zone()
     dt_util.set_default_time_zone(ZoneInfo("America/Los_Angeles"))
     try:
-        coordinator = _make_coordinator(hass, _stub_api())
+        coordinator = _make_coordinator(hass, make_stub_api())
         coordinator._charge_entries = [
             # 23:30 on 30 September in Los Angeles - still 1 October in UTC.
             (PPID, _charge_entry("2026-10-01T06:30:00Z", 10, 100), {"id": PPID}),
@@ -1784,13 +1747,12 @@ async def test_month_totals_fall_back_to_ha_time_zone(hass: HomeAssistant) -> No
 
 async def test_api3_failure_while_charging_retries_after_charging_stops(
     hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
 ) -> None:
     """A failed api3 fetch on the last charging poll still gets retried once charging stops."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
     api.async_charges.return_value = {"data": {"charges": []}}
     api.async_api3_charges.side_effect = [PodHomeApiError(500, {}), {"charges": []}]
-    coordinator = _make_coordinator(hass, api)
     coordinator._api3_user_id = 123
     coordinator._charges_fetched_at = datetime.datetime.now(datetime.timezone.utc)
     coordinator.data = {PPID: make_charger(charging_state="Charging")}
@@ -1803,11 +1765,10 @@ async def test_api3_failure_while_charging_retries_after_charging_stops(
     assert api.async_api3_charges.await_count == 2
 
 
-async def test_vehicles_fetched_every_poll(hass: HomeAssistant) -> None:
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
+async def test_vehicles_fetched_every_poll(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     api.async_connectivity_status.return_value = {"chargingState": "Available"}
-    coordinator = _make_coordinator(hass, api)
 
     coordinator.data = await coordinator._async_fetch_data()
     await coordinator._async_fetch_data()
@@ -1840,7 +1801,7 @@ async def test_poll_timed_from_latest_check_in(
     plugged_in_ago: datetime.timedelta | None,
     expected_delay: datetime.timedelta,
 ) -> None:
-    coordinator = _make_coordinator(hass, _stub_api())
+    coordinator = _make_coordinator(hass, make_stub_api())
     now = datetime.datetime(2026, 10, 18, 12, 0, tzinfo=datetime.timezone.utc)
     if plugged_in_ago is not None:
         coordinator._plugged_in_at[PPID] = now - plugged_in_ago
@@ -1850,12 +1811,11 @@ async def test_poll_timed_from_latest_check_in(
     assert coordinator.update_interval == expected_delay
 
 
-async def test_missing_charging_state_doesnt_trigger_fast_polling(hass: HomeAssistant) -> None:
+async def test_missing_charging_state_doesnt_trigger_fast_polling(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     """A poll whose connectivity call failed (no chargingState) doesn't make the next reading
     look like a plug-in."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
-    coordinator = _make_coordinator(hass, api)
     api.async_connectivity_status.return_value = {
         "chargingState": "Available", "lastSeenAt": "2026-10-18T11:00:00Z",
     }
@@ -1886,11 +1846,11 @@ async def test_missing_charging_state_doesnt_trigger_fast_polling(hass: HomeAssi
     ],
 )
 async def test_fast_polling_only_while_awaiting_charge_after_plug_in(
-    hass: HomeAssistant, states: list[str], expect_fast: bool
+    hass: HomeAssistant,
+    api: PodHomeApiClient,
+    coordinator: PodHomeDataUpdateCoordinator,
+    states: list[str], expect_fast: bool
 ) -> None:
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
-    coordinator = _make_coordinator(hass, api)
     for minute, state in enumerate(states):
         api.async_connectivity_status.return_value = {
             "chargingState": state, "lastSeenAt": f"2026-10-18T12:0{minute}:00Z",
@@ -1904,12 +1864,11 @@ async def test_fast_polling_only_while_awaiting_charge_after_plug_in(
     assert coordinator.update_interval == expected
 
 
-async def test_routine_check_ins_alone_dont_keep_polling_fast(hass: HomeAssistant) -> None:
+async def test_routine_check_ins_alone_dont_keep_polling_fast(
+    hass: HomeAssistant, api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
     """lastSeenAt advancing every few minutes is routine - only a plug-in switches to fast
     polling."""
-    api = _stub_api()
-    api.async_list_chargers.return_value = [_charger_raw()]
-    coordinator = _make_coordinator(hass, api)
     api.async_connectivity_status.return_value = {
         "chargingState": "Available", "lastSeenAt": "2026-10-18T11:50:00Z",
     }

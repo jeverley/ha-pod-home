@@ -4,7 +4,7 @@ end-to-end against a mocked API client rather than a live account.
 """
 from __future__ import annotations
 
-from unittest.mock import create_autospec, patch
+from unittest.mock import patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
@@ -14,45 +14,13 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.pod_home.const import CONF_EMAIL, CONF_PASSWORD, DOMAIN
 from custom_components.pod_home.coordinator import PodHomeDataUpdateCoordinator
-from custom_components.pod_home.podpoint_mobile_api import PodHomeApiClient, PodHomeAuthError
+from custom_components.pod_home.podpoint_mobile_api import PodHomeAuthError
+from tests._fixtures import make_stub_api
 
 pytestmark = pytest.mark.asyncio
 
 USER_INPUT = {CONF_EMAIL: "driver@example.com", CONF_PASSWORD: "hunter2"}
 PPID = "PSL-000001"
-
-
-def _stub_api() -> PodHomeApiClient:
-    """Minimal autospecced client - enough for one full, successful first refresh in Basic mode,
-    so a real async_setup_entry (coordinator construction + first refresh + every platform's
-    setup) can run end-to-end without touching a live account."""
-    api = create_autospec(PodHomeApiClient, instance=True)
-    api.async_list_chargers.return_value = [
-        {
-            "ppid": PPID,
-            "unitId": 12345,
-            "timezone": "Europe/London",
-            "modelInfo": {"style": "solo3", "colour": "black", "architecture": "3.0"},
-            "delegatedControl": {"status": "INACTIVE"},
-        }
-    ]
-    api.async_get_users.return_value = {}
-    api.async_smart_charging_chargers_and_vehicles.return_value = []
-    api.async_charges.return_value = {}
-    api.async_create_api3_session.return_value = {}
-    api.async_api3_pods.return_value = {}
-    api.async_api3_charges.return_value = {}
-    api.async_reward_wallet.return_value = {"rewards": {}, "allowance": {}, "payments": {}}
-    api.async_smart_charging_preferences.return_value = {}
-    api.async_get_charge_overrides.return_value = []
-    api.async_connectivity_status.return_value = {}
-    api.async_smart_schedule_active.return_value = {}
-    api.async_charger_firmware.return_value = []
-    api.async_tariffs.return_value = {}
-    api.async_manual_schedules.return_value = {}
-    api.async_delegated_control.return_value = {}
-    api.async_get_remote_lock_status.return_value = {}
-    return api
 
 
 @pytest.fixture(autouse=True)
@@ -68,7 +36,7 @@ async def test_async_setup_entry_real_first_refresh_succeeds(hass: HomeAssistant
     entry = MockConfigEntry(domain=DOMAIN, data=USER_INPUT)
     entry.add_to_hass(hass)
 
-    api = _stub_api()
+    api = make_stub_api()
     with patch("custom_components.pod_home.PodHomeApiClient", return_value=api):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -91,7 +59,7 @@ async def test_async_setup_entry_auth_failure_does_not_load(hass: HomeAssistant)
     entry = MockConfigEntry(domain=DOMAIN, data=USER_INPUT)
     entry.add_to_hass(hass)
 
-    api = _stub_api()
+    api = make_stub_api()
     api.async_list_chargers.side_effect = PodHomeAuthError("token expired")
     with patch("custom_components.pod_home.PodHomeApiClient", return_value=api):
         assert not await hass.config_entries.async_setup(entry.entry_id)

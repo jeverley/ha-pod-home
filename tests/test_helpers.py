@@ -1,63 +1,52 @@
-"""Offline coverage for helpers.py's pure functions (no Home Assistant needed - see
-_pod_home_loader.py). Uses SimpleNamespace stand-ins for PodHomeCharger/PodHomeCharge/etc.
-(defined in coordinator.py, which does import Home Assistant) rather than the real dataclasses -
-every function under test only does attribute access, so a duck-typed namespace with just the
-fields each function reads is enough, and keeps this file free of the same HA-import problem
-_pod_home_loader.py works around for helpers.py itself.
-"""
+"""helpers.py's pure functions, with hand-built charger/charge/schedule data - no API or
+coordinator involved."""
 from __future__ import annotations
 
 import datetime
-import sys
-from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent))
-from _pod_home_loader import const, helpers  # noqa: E402 - path insert must happen first
+from custom_components.pod_home import const, helpers
+from tests._fixtures import (
+    make_charge,
+    make_charger,
+    make_manual_window,
+    make_smart_window,
+    make_tariff_window,
+)
 
 
 def _charger(**overrides):
-    defaults = dict(
-        charging_state=None,
-        charging_started_at=None,
-        cable_unplugged_at=None,
-        charge_finished_at=None,
+    return make_charger(
+        **{
+            "charging_state": None,
+            "charging_started_at": None,
+            "cable_unplugged_at": None,
+            "charge_finished_at": None,
+            **overrides,
+        }
     )
-    defaults.update(overrides)
-    return SimpleNamespace(**defaults)
 
 
 def _charge(**overrides):
-    defaults = dict(started_at=None, ended_at=None)
-    defaults.update(overrides)
-    return SimpleNamespace(**defaults)
+    return make_charge(**{"started_at": None, "ended_at": None, **overrides})
 
 
 def _tariff_window(price):
-    return SimpleNamespace(price=price)
-
-
-def _manual_window(**overrides):
-    defaults = dict(
-        uid="w1", start_day=1, start_time="00:30:00", end_day=1, end_time="05:30:00",
-        is_active=True,
-    )
-    defaults.update(overrides)
-    return SimpleNamespace(**defaults)
+    return make_tariff_window(price=price)
 
 
 def _smart_window(**overrides):
-    defaults = dict(
-        type=const.SMART_SCHEDULE_TYPE_CHARGING,
-        timestamp=None,
-        from_timestamp=None,
-        to_timestamp=None,
-        tariff_rate=None,
+    return make_smart_window(
+        **{
+            "type": const.SMART_SCHEDULE_TYPE_CHARGING,
+            "timestamp": None,
+            "from_timestamp": None,
+            "to_timestamp": None,
+            "tariff_rate": None,
+            **overrides,
+        }
     )
-    defaults.update(overrides)
-    return SimpleNamespace(**defaults)
 
 
 UTC = datetime.timezone.utc
@@ -404,7 +393,7 @@ def test_max_price_for_charging_priority_unrecognized_label_or_no_data():
 
 
 def test_expand_manual_schedule_events_simple_same_day_window():
-    windows = [_manual_window(start_day=1, start_time="00:30:00", end_day=1, end_time="05:30:00")]
+    windows = [make_manual_window(start_day=1, start_time="00:30:00", end_day=1, end_time="05:30:00")]
     # 2026-01-05 is a Monday (isoweekday 1).
     events = helpers.expand_manual_schedule_events(
         windows, datetime.date(2026, 1, 5), datetime.date(2026, 1, 6), UTC
@@ -417,7 +406,7 @@ def test_expand_manual_schedule_events_simple_same_day_window():
 
 
 def test_expand_manual_schedule_events_inactive_window_produces_nothing():
-    windows = [_manual_window(is_active=False)]
+    windows = [make_manual_window(is_active=False)]
     events = helpers.expand_manual_schedule_events(
         windows, datetime.date(2026, 1, 5), datetime.date(2026, 1, 6), UTC
     )
@@ -426,7 +415,7 @@ def test_expand_manual_schedule_events_inactive_window_produces_nothing():
 
 def test_expand_manual_schedule_events_crosses_midnight():
     # Starts Monday 22:00, ends Tuesday 02:00 (same start_day/end_day, end_time <= start_time).
-    windows = [_manual_window(start_day=1, start_time="22:00:00", end_day=1, end_time="02:00:00")]
+    windows = [make_manual_window(start_day=1, start_time="22:00:00", end_day=1, end_time="02:00:00")]
     events = helpers.expand_manual_schedule_events(
         windows, datetime.date(2026, 1, 5), datetime.date(2026, 1, 6), UTC
     )
@@ -439,7 +428,7 @@ def test_expand_manual_schedule_events_crosses_midnight():
 def test_expand_manual_schedule_events_week_boundary_wrap_caught():
     """A window starting the day before range_start should still produce an event if it overlaps
     the range (the "start a day early" cursor logic)."""
-    windows = [_manual_window(start_day=7, start_time="23:00:00", end_day=1, end_time="01:00:00")]
+    windows = [make_manual_window(start_day=7, start_time="23:00:00", end_day=1, end_time="01:00:00")]
     # 2026-01-04 is a Sunday (isoweekday 7); range starts the next day (Monday).
     events = helpers.expand_manual_schedule_events(
         windows, datetime.date(2026, 1, 5), datetime.date(2026, 1, 6), UTC
@@ -451,7 +440,7 @@ def test_expand_manual_schedule_events_week_boundary_wrap_caught():
 
 
 def test_expand_manual_schedule_events_missing_fields_skipped():
-    windows = [_manual_window(start_day=None), _manual_window(start_time=None)]
+    windows = [make_manual_window(start_day=None), make_manual_window(start_time=None)]
     events = helpers.expand_manual_schedule_events(
         windows, datetime.date(2026, 1, 5), datetime.date(2026, 1, 6), UTC
     )

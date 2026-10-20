@@ -1,9 +1,5 @@
-"""Shared factory functions for constructing real coordinator.py dataclasses with sensible
-defaults, for entity/coordinator tests in the HA-enabled tests/ tree. Prefer these over
-SimpleNamespace (used only by tests/test_helpers.py, which can't import coordinator.py at all -
-see that file's own docstring) since the real dataclasses are importable here and give
-type-accurate fixtures that won't silently drift from a renamed/added field.
-"""
+"""Shared factories for the test suite: real coordinator.py dataclasses with sensible
+defaults, and an autospecced API client stub."""
 from __future__ import annotations
 
 import datetime
@@ -26,6 +22,46 @@ from custom_components.pod_home.coordinator import (
 from custom_components.pod_home.podpoint_mobile_api import PodHomeApiClient
 
 UTC = datetime.timezone.utc
+
+
+STUB_PPID = "PSL-000001"
+
+
+def charger_raw(**overrides) -> dict:
+    """One GET /chargers entry, in Basic Charging mode."""
+    raw = {
+        "ppid": STUB_PPID,
+        "unitId": 12345,
+        "timezone": "Europe/London",
+        "modelInfo": {"style": "solo3", "colour": "black", "architecture": "3.0"},
+        "delegatedControl": {"status": "INACTIVE"},
+    }
+    raw.update(overrides)
+    return raw
+
+
+def make_stub_api() -> PodHomeApiClient:
+    """An autospecced client where every call succeeds for one charger with nothing going on -
+    tests override only what they care about, including any failure."""
+    api = create_autospec(PodHomeApiClient, instance=True)
+    api.async_list_chargers.return_value = [charger_raw()]
+    api.async_get_users.return_value = {}
+    api.async_smart_charging_chargers_and_vehicles.return_value = []
+    api.async_charges.return_value = {"data": {"charges": []}}
+    api.async_create_api3_session.return_value = {}
+    api.async_api3_pods.return_value = {}
+    api.async_api3_charges.return_value = {"charges": []}
+    api.async_reward_wallet.return_value = {"rewards": {}, "allowance": {}, "payments": {}}
+    api.async_smart_charging_preferences.return_value = {}
+    api.async_get_charge_overrides.return_value = []
+    api.async_connectivity_status.return_value = {}
+    api.async_smart_schedule_active.return_value = {}
+    api.async_charger_firmware.return_value = []
+    api.async_tariffs.return_value = {}
+    api.async_manual_schedules.return_value = {}
+    api.async_delegated_control.return_value = {}
+    api.async_get_remote_lock_status.return_value = {}
+    return api
 
 
 def make_coordinator(
