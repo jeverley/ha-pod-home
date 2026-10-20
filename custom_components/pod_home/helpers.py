@@ -35,7 +35,6 @@ from .const import (
     CHARGING_STATE_UNAVAILABLE,
     DELEGATED_CONTROL_ACTIVE,
     DELEGATED_CONTROL_INACTIVE,
-    DELEGATED_CONTROL_PENDING,
     SCHEDULE_MODE_BASIC_CHARGING,
     SCHEDULE_MODE_SMART_CHARGING,
     SMART_SCHEDULE_TYPE_CHARGING,
@@ -171,7 +170,8 @@ def charger_status(charger: "PodHomeCharger", now_utc: datetime.datetime) -> str
     """Derive a small, user-meaningful Status from chargingState and the sticky
     charging_started_at/cable_unplugged_at/charge_finished_at timestamps the coordinator
     maintains. Every chargingState passes through as its own value (CHARGER_STATUS_* in
-    const.py), except: Pending overrides everything but Charging/Fault while _is_pending() holds;
+    const.py), except: Pending overrides Available/SuspendedEVSE/SuspendedEV/Preparing/Finishing
+    while _is_pending() holds;
     Finished overrides SuspendedEVSE/SuspendedEV/Preparing/Finishing while
     _is_finished_sticky() holds; SuspendedEVSE otherwise defaults to Paused; unrecognized/Unknown
     resolves to unknown.
@@ -183,14 +183,14 @@ def charger_status(charger: "PodHomeCharger", now_utc: datetime.datetime) -> str
         result = CHARGER_STATUS_FAULT
     elif charging_state == CHARGING_STATE_CHARGING:
         result = CHARGER_STATUS_CHARGING
-    elif _is_pending(charger):
-        result = CHARGER_STATUS_PENDING
-    elif charging_state == CHARGING_STATE_AVAILABLE:
-        result = CHARGER_STATUS_AVAILABLE
     elif charging_state == CHARGING_STATE_RESERVED:
         result = CHARGER_STATUS_RESERVED
     elif charging_state == CHARGING_STATE_UNAVAILABLE:
         result = CHARGER_STATUS_DISABLED
+    elif _is_pending(charger):
+        result = CHARGER_STATUS_PENDING
+    elif charging_state == CHARGING_STATE_AVAILABLE:
+        result = CHARGER_STATUS_AVAILABLE
     elif charging_state == CHARGING_STATE_SUSPENDED_EV or _is_finished_sticky(charger, now_utc):
         result = CHARGER_STATUS_FINISHED
     elif charging_state == CHARGING_STATE_SUSPENDED_EVSE:
@@ -206,14 +206,14 @@ def charger_status(charger: "PodHomeCharger", now_utc: datetime.datetime) -> str
 
 
 def _is_pending(charger: "PodHomeCharger") -> bool:
-    """Whether Pod Point holds a request the charger hasn't checked in to receive yet: an
-    override requested after its last check-in, or a Charging Scheme change (PENDING - not yet
-    seen live)."""
-    if charger.delegated_control_status == DELEGATED_CONTROL_PENDING:
-        return True
+    """Whether the active boost/Always On override was requested after the charger's last
+    check-in, so the charger hasn't received it yet."""
     requested_at = charger.override_requested_at
-    return requested_at is not None and (
-        charger.last_seen_at is None or requested_at > charger.last_seen_at
+    return (
+        requested_at is not None
+        and charger.charging_state is not None
+        and charger.last_seen_at is not None
+        and requested_at > charger.last_seen_at
     )
 
 

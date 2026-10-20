@@ -317,8 +317,8 @@ class PodHomeCharger:
     # kept separate from boost_end_at, not folded in, since the two are different mechanisms.
     # None when charge-overrides has never successfully fetched for this ppid.
     always_on_active: bool | None
-    # requestedAt of the active boost or Always On override - see
-    # PodHomeChargeOverrideState.requested_at. None when there isn't one.
+    # requestedAt of the newest boost or Always On entry still in effect. None when there isn't
+    # one.
     override_requested_at: datetime.datetime | None
 
 

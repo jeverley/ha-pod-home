@@ -114,7 +114,7 @@ CHARGER_STATUS_RESERVED = "reserved"
 CHARGER_STATUS_DISABLED = "disabled"
 CHARGER_STATUS_FINISHED = "finished"
 CHARGER_STATUS_FAULT = "fault"
-# A request Pod Point has recorded that the charger hasn't checked in to receive yet.
+# A boost/Always On request the charger hasn't checked in to receive yet.
 CHARGER_STATUS_PENDING = "pending"
 
 CHARGER_STATUS_OPTIONS = [

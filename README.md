@@ -50,7 +50,7 @@ The charger's firmware version shows on its device page, under Device info.
 
 | Entity              | Category      | Type           | Notes |
 | -------------------- | ------------- | -------------- | ----- |
-| Status                | Sensors       | Sensor         | High-level status derived from the charger's wire state (Charging, Paused, Available, Finished, Pending while the charger hasn't yet picked up a boost or mode change, etc.) |
+| Status                | Sensors       | Sensor         | High-level status derived from the charger's wire state (Charging, Paused, Available, Finished, Pending while the charger hasn't yet picked up a boost, etc.) |
 | Last charge duration   | Sensors       | Sensor         | Duration of the most recent charge - live if one is in progress, else the last finished one |
 | Last charge energy     | Sensors       | Sensor         | Per-session snapshot - don't add to the Energy Dashboard |
 | Last charge cost       | Sensors       | Sensor         | Per-session snapshot - don't add to the Energy Dashboard |
