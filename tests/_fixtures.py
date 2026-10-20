@@ -194,6 +194,7 @@ def make_charger(**overrides) -> PodHomeCharger:
         smart_charging_supported=None,
         remote_lock_off_mode=None,
         always_on_active=False,
+        override_requested_at=None,
     )
     defaults.update(overrides)
     return PodHomeCharger(**defaults)

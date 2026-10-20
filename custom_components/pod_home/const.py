@@ -114,6 +114,8 @@ CHARGER_STATUS_RESERVED = "reserved"
 CHARGER_STATUS_DISABLED = "disabled"
 CHARGER_STATUS_FINISHED = "finished"
 CHARGER_STATUS_FAULT = "fault"
+# A boost/Always On request the charger hasn't checked in to receive yet.
+CHARGER_STATUS_PENDING = "pending"
 
 CHARGER_STATUS_OPTIONS = [
     CHARGER_STATUS_CHARGING,
@@ -125,6 +127,7 @@ CHARGER_STATUS_OPTIONS = [
     CHARGER_STATUS_DISABLED,
     CHARGER_STATUS_FINISHED,
     CHARGER_STATUS_FAULT,
+    CHARGER_STATUS_PENDING,
 ]
 
 # vehicle.chargeState.powerDeliveryState. Not used to derive Status (see charger_status() in

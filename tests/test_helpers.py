@@ -250,6 +250,34 @@ def test_charger_status_finished_sticky_cleared_by_unplug():
     assert helpers.charger_status(charger, now) == const.CHARGER_STATUS_PAUSED
 
 
+@pytest.mark.parametrize(
+    ("charging_state", "requested_offset", "last_seen_known", "expected"),
+    [
+        # Boost requested after the last check-in: the charger hasn't received it yet.
+        ("SuspendedEVSE", datetime.timedelta(minutes=1), True, "pending"),
+        ("Available", datetime.timedelta(minutes=1), True, "pending"),
+        # The charger has checked in since - it has the request, whatever it did with it.
+        ("SuspendedEVSE", -datetime.timedelta(minutes=1), True, "paused"),
+        # Charging, Fault, Disabled and Reserved still win.
+        ("Charging", datetime.timedelta(minutes=1), True, "charging"),
+        ("Faulted", datetime.timedelta(minutes=1), True, "fault"),
+        ("Unavailable", datetime.timedelta(minutes=1), True, "disabled"),
+        ("Reserved", datetime.timedelta(minutes=1), True, "reserved"),
+        # Connectivity unknown: unknown, not pending.
+        (None, datetime.timedelta(minutes=1), False, None),
+        ("SuspendedEVSE", datetime.timedelta(minutes=1), False, "paused"),
+    ],
+)
+def test_charger_status_pending(charging_state, requested_offset, last_seen_known, expected):
+    last_seen = datetime.datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    charger = _charger(
+        charging_state=charging_state,
+        last_seen_at=last_seen if last_seen_known else None,
+        override_requested_at=last_seen + requested_offset,
+    )
+    assert helpers.charger_status(charger, last_seen) == expected
+
+
 def test_charger_status_no_finished_at_never_sticky():
     now = datetime.datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
     charger = _charger(charging_state=const.CHARGING_STATE_SUSPENDED_EVSE, charge_finished_at=None)

@@ -67,7 +67,8 @@
           "reserved": "Reserved",
           "disabled": "Disabled",
           "finished": "Finished",
-          "fault": "Fault"
+          "fault": "Fault",
+          "pending": "Pending"
         }
       },
       "last_charge_duration": { "name": "Last charge duration" },
