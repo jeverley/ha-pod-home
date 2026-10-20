@@ -20,7 +20,8 @@
           "reserved": "mdi:calendar-clock",
           "disabled": "mdi:stop-circle-outline",
           "finished": "mdi:check-circle",
-          "fault": "mdi:alert-circle"
+          "fault": "mdi:alert-circle",
+          "pending": "mdi:timer-sand"
         }
       }
     }

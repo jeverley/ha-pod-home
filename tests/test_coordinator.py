@@ -257,6 +257,25 @@ async def test_boost_end_at_parsed_from_charge_overrides(
     assert result[PPID].boost_end_at == future
 
 
+async def test_override_requested_at_is_newest_active_entry(
+    api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
+    """Expired and deleted entries don't count, however recent."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    active = now - datetime.timedelta(minutes=2)
+    api.async_get_charge_overrides.return_value = [
+        {"requestedAt": active.isoformat(), "endAt": (now + datetime.timedelta(hours=1)).isoformat()},
+        {"requestedAt": (now - datetime.timedelta(minutes=1)).isoformat(),
+         "endAt": (now + datetime.timedelta(hours=1)).isoformat(),
+         "deletedAt": now.isoformat()},
+        {"requestedAt": now.isoformat(), "endAt": (now - datetime.timedelta(seconds=1)).isoformat()},
+    ]
+
+    result = await coordinator._async_fetch_data()
+
+    assert result[PPID].override_requested_at == active
+
+
 async def test_deleted_charge_override_not_current_boost(
     api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
 ) -> None:

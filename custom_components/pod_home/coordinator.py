@@ -317,6 +317,9 @@ class PodHomeCharger:
     # kept separate from boost_end_at, not folded in, since the two are different mechanisms.
     # None when charge-overrides has never successfully fetched for this ppid.
     always_on_active: bool | None
+    # requestedAt of the active boost or Always On override - see
+    # PodHomeChargeOverrideState.requested_at. None when there isn't one.
+    override_requested_at: datetime.datetime | None
 
 
 class _DurationSnapshot(NamedTuple):
@@ -360,6 +363,8 @@ class PodHomeChargeOverrideState:
     boost_end_at: datetime.datetime | None
     # Whether any non-deleted entry has no endAt at all.
     always_on_active: bool
+    # requestedAt of the newest non-deleted boost or Always On entry still in effect.
+    requested_at: datetime.datetime | None
     # Every override entry's real coverage interval (requestedAt -> earliest of endAt/deletedAt/
     # now) that could overlap the current session - deleted (cancelled) entries included, since
     # a cancelled override still charged for real up to when it was cancelled. Feeds the live
@@ -380,6 +385,7 @@ def _parse_charge_overrides(
     regardless."""
     best: tuple[datetime.datetime, datetime.datetime] | None = None
     always_on_active = False
+    newest_requested_at: datetime.datetime | None = None
     override_events: list[tuple[datetime.datetime, datetime.datetime, str]] = []
     for raw_entry in charge_overrides_raw:
         entry = _safe_dict(raw_entry)
@@ -398,10 +404,14 @@ def _parse_charge_overrides(
         # Current override state - deleted entries never count towards this.
         if deleted_at is not None:
             continue
+        if end_at is not None and end_at <= now:
+            continue
+        if requested_at is not None and (
+            newest_requested_at is None or requested_at > newest_requested_at
+        ):
+            newest_requested_at = requested_at
         if end_at is None:
             always_on_active = True
-            continue
-        if end_at <= now:
             continue
         resolved_requested_at = requested_at or end_at
         if best is None or resolved_requested_at > best[0]:
@@ -410,6 +420,7 @@ def _parse_charge_overrides(
     return PodHomeChargeOverrideState(
         boost_end_at=best[1] if best else None,
         always_on_active=always_on_active,
+        requested_at=newest_requested_at,
         override_events=override_events,
     )
 
@@ -1770,6 +1781,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             smart_charging_supported=self._smart_charging_supported_by_ppid.get(ppid),
             remote_lock_off_mode=self._remote_lock_off_mode_by_ppid.get(ppid),
             always_on_active=override_state.always_on_active if override_state else None,
+            override_requested_at=override_state.requested_at if override_state else None,
         )
 
     def _check_restart_gap(
