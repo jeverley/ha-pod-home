@@ -11,7 +11,7 @@ import pytest
 from podpoint_mobile_api.auth import PodHomeAuth
 from podpoint_mobile_api.exceptions import PodHomeAuthError
 
-from ._fakes import FakeResponse, FakeSession, RaisesClientError
+from ._fakes import FakeResponse, FakeSession, RaisesClientError, RaisesTimeout
 
 
 def _auth(session: FakeSession) -> PodHomeAuth:
@@ -101,6 +101,16 @@ async def test_rejected_sign_in_raises_auth_error() -> None:
 
 async def test_transient_network_error_during_sign_in_is_marked_transient() -> None:
     session = FakeSession([RaisesClientError()])
+    auth = _auth(session)
+
+    with pytest.raises(PodHomeAuthError) as exc_info:
+        await auth.async_get_id_token()
+
+    assert exc_info.value.transient is True
+
+
+async def test_sign_in_timeout_is_marked_transient() -> None:
+    session = FakeSession([RaisesTimeout()])
     auth = _auth(session)
 
     with pytest.raises(PodHomeAuthError) as exc_info:

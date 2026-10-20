@@ -45,6 +45,17 @@ class RaisesClientError:
         return None
 
 
+class RaisesTimeout:
+    """An async context manager that raises TimeoutError on entry - simulates a request that
+    exceeded its timeout."""
+
+    async def __aenter__(self) -> "RaisesTimeout":
+        raise TimeoutError
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        return None
+
+
 class FakeSession:
     """Scripted aiohttp.ClientSession - each call to get/post/request pops the next entry off
     `responses`, ignoring the actual URL/params/json/data/headers passed."""

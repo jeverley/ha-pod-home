@@ -12,7 +12,7 @@ from podpoint_mobile_api.auth import PodHomeAuth
 from podpoint_mobile_api.client import PodHomeApiClient
 from podpoint_mobile_api.exceptions import PodHomeApiError, PodHomeAuthError
 
-from ._fakes import FakeResponse, FakeSession, RaisesClientError
+from ._fakes import FakeResponse, FakeSession, RaisesClientError, RaisesTimeout
 
 
 def _client(session: FakeSession) -> PodHomeApiClient:
@@ -59,6 +59,24 @@ async def test_get_connection_failure_raises_api_error_status_zero() -> None:
         await client.async_list_chargers()
 
     assert exc_info.value.status == 0
+
+
+async def test_get_timeout_raises_api_error_status_zero() -> None:
+    client = _client(FakeSession([RaisesTimeout()]))
+
+    with pytest.raises(PodHomeApiError) as exc_info:
+        await client.async_list_chargers()
+
+    assert exc_info.value.status == 0
+
+
+async def test_requests_carry_a_total_timeout() -> None:
+    session = FakeSession([FakeResponse(200, [])])
+
+    await _client(session).async_list_chargers()
+
+    _method, _args, kwargs = session.calls[0]
+    assert kwargs["timeout"].total == 30
 
 
 async def test_write_401_raises_auth_error() -> None:

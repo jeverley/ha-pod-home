@@ -12,6 +12,7 @@ from .const import (
     FIREBASE_API_KEY,
     FIREBASE_REFRESH_URL,
     FIREBASE_SIGN_IN_URL,
+    REQUEST_TIMEOUT_SECONDS,
     TOKEN_REFRESH_MARGIN,
 )
 from .exceptions import PodHomeAuthError
@@ -117,14 +118,15 @@ class PodHomeAuth:
                     "password": self._password,
                     "returnSecureToken": True,
                 },
+                timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT_SECONDS),
             ) as resp:
                 body = await resp.json(content_type=None)
                 if resp.status != 200:
                     err = (body or {}).get("error", body)
                     raise PodHomeAuthError(f"Firebase sign-in failed: {err}")
-        except aiohttp.ClientError as exc:
+        except (aiohttp.ClientError, TimeoutError) as exc:
             raise PodHomeAuthError(
-                f"Firebase sign-in request failed: {exc}", transient=True
+                f"Firebase sign-in request failed: {str(exc) or type(exc).__name__}", transient=True
             ) from exc
 
         self._apply_token_response(body)
@@ -138,14 +140,15 @@ class PodHomeAuth:
                     "grant_type": "refresh_token",
                     "refresh_token": self._refresh_token,
                 },
+                timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT_SECONDS),
             ) as resp:
                 body = await resp.json(content_type=None)
                 if resp.status != 200:
                     err = (body or {}).get("error", body)
                     raise PodHomeAuthError(f"Firebase token refresh failed: {err}")
-        except aiohttp.ClientError as exc:
+        except (aiohttp.ClientError, TimeoutError) as exc:
             raise PodHomeAuthError(
-                f"Firebase token refresh request failed: {exc}", transient=True
+                f"Firebase token refresh request failed: {str(exc) or type(exc).__name__}", transient=True
             ) from exc
 
         # Refresh response uses snake_case keys, unlike sign-in.

@@ -12,5 +12,8 @@ FIREBASE_REFRESH_URL = "https://securetoken.googleapis.com/v1/token"
 # Refresh proactively this long before the token's reported expiry.
 TOKEN_REFRESH_MARGIN = timedelta(minutes=5)
 
+# Total time allowed for any single HTTP request, including reading the response.
+REQUEST_TIMEOUT_SECONDS = 30
+
 # --- mobile-api.pod-point.com ---
 MOBILE_API_BASE_URL = "https://mobile-api.pod-point.com"

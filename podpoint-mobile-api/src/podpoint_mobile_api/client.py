@@ -12,7 +12,7 @@ from typing import Any, cast
 import aiohttp
 
 from .auth import PodHomeAuth
-from .const import MOBILE_API_BASE_URL
+from .const import MOBILE_API_BASE_URL, REQUEST_TIMEOUT_SECONDS
 from .exceptions import PodHomeApiError, PodHomeAuthError
 
 
@@ -57,6 +57,7 @@ class PodHomeApiClient:
                 params=params,
                 json=json_body,
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT_SECONDS),
             ) as resp:
                 body = await self._read_body(resp)
                 if resp.status in (401, 403):
@@ -64,8 +65,8 @@ class PodHomeApiClient:
                 if resp.status >= 400:
                     raise PodHomeApiError(resp.status, body)
                 return resp.status, body
-        except aiohttp.ClientError as exc:
-            raise PodHomeApiError(0, str(exc)) from exc
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise PodHomeApiError(0, str(exc) or type(exc).__name__) from exc
 
     async def _async_get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         _status, body = await self._async_request("GET", path, params=params)
