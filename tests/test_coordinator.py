@@ -716,6 +716,60 @@ async def test_current_charge_duration_freezes_when_schedule_unavailable(
     assert result[PPID].current_charge.duration == 3600
 
 
+def _smart_session_api(now: datetime.datetime) -> PodHomeApiClient:
+    """Smart Charging, an api3 session that started 2 hours ago, and a schedule whose one
+    charging window ended an hour ago."""
+    api = _stub_api()
+    api.async_list_chargers.return_value = [_charger_raw(delegatedControl={"status": "ACTIVE"})]
+    api.async_connectivity_status.return_value = {"chargingState": "Charging"}
+    session_start = now - datetime.timedelta(hours=2)
+    _api3_session_stubs(api, started_at=session_start)
+    api.async_smart_schedule_active.return_value = {
+        "schedule": [
+            {
+                "type": "CHARGING",
+                "fromTimestamp": session_start.isoformat(),
+                "toTimestamp": (now - datetime.timedelta(hours=1)).isoformat(),
+            }
+        ]
+    }
+    return api
+
+
+@pytest.mark.parametrize(("frozen_before_restart", "expected"), [(True, 3600), (False, None)])
+async def test_frozen_current_charge_duration_survives_restart(
+    hass: HomeAssistant, frozen_before_restart: bool, expected: int | None
+) -> None:
+    """A duration frozen once the smart schedule has ended is restored after a restart; one
+    still counting from the schedule isn't, since charging may have continued meanwhile."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    api = _smart_session_api(now)
+    coordinator = _make_coordinator(hass, api)
+    coordinator.data = await coordinator._async_fetch_data()  # counted from the schedule
+    api.async_smart_schedule_active.return_value = {}  # schedule over
+    if frozen_before_restart:
+        coordinator._charges_fetched_at = None  # session data due - refetches api3
+        coordinator.data = await coordinator._async_fetch_data()
+    await coordinator._sticky_store.async_save(coordinator._sticky_state_for_storage())
+
+    restarted = PodHomeDataUpdateCoordinator(
+        hass, coordinator.config_entry, api, email="driver@example.com", password="x"
+    )
+    await restarted.async_load_sticky_state()
+    result = await restarted._async_fetch_data()
+
+    assert result[PPID].current_charge.duration == expected
+
+
+async def test_restored_charge_rejects_non_integer_duration(hass: HomeAssistant) -> None:
+    coordinator = _make_coordinator(hass, _stub_api())
+    restored = coordinator._parse_charge_dict({PPID: {"id": "c1", "duration": "3600"}})
+    frozen = coordinator._parse_frozen_durations({PPID: {"id": "c1", "duration": "3600"}})
+
+    assert restored[PPID].duration is None
+    assert frozen == {}
+
+
 async def test_current_charge_duration_unknown_when_nothing_to_refine_against_in_basic_mode(
     hass: HomeAssistant,
 ) -> None:

@@ -317,6 +317,11 @@ class PodHomeCharger:
     always_on_active: bool | None
 
 
+def _is_int(value: object) -> bool:
+    """Whether value is an int (bools excluded)."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _parse_dt(value: str | None) -> datetime.datetime | None:
     """Parse an ISO-8601 timestamp. Always returns a timezone-aware datetime (assumes UTC if
     the string has no offset), so a naive value never propagates into a comparison later."""
@@ -499,6 +504,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # The live in-progress charge, if any (one account-wide call, filtered per-ppid by api3
         # pod id) - see _async_refresh_account_level_data for cadence.
         self._current_charge_by_ppid: dict[str, PodHomeCharge] = {}
+        # Each charger's frozen open-session duration as (session id, seconds), persisted so it
+        # survives a restart - see _derive_charging_seconds().
+        self._frozen_duration_by_ppid: dict[str, tuple[str, int]] = {}
         # Each charger's newest closed api3 session, from the last successful api3 charges fetch.
         self._api3_newest_finished_by_ppid: dict[str, PodHomeCharge] = {}
         # False after a failed api3 charges fetch - retried every poll until it succeeds.
@@ -545,6 +553,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             self._cable_unplugged_at_by_ppid = self._parse_sticky_dict(data.get("cable_unplugged_at"))
             self._charge_finished_at_by_ppid = self._parse_sticky_dict(data.get("charge_finished_at"))
             self._latest_charge_by_ppid = self._parse_charge_dict(data.get("latest_charge"))
+            self._frozen_duration_by_ppid = self._parse_frozen_durations(
+                data.get("frozen_duration")
+            )
 
         try:
             total_data = await self._total_energy_store.async_load()
@@ -590,7 +601,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                 id=value["id"],
                 started_at=_parse_dt(value.get("started_at")),
                 ended_at=_parse_dt(value.get("ended_at")),
-                duration=value.get("duration"),
+                duration=value["duration"] if _is_int(value.get("duration")) else None,
                 energy_total=value.get("energy_total"),
                 cost_amount=value.get("cost_amount"),
                 cost_currency=value.get("cost_currency"),
@@ -598,6 +609,18 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                 unplugged_at=_parse_dt(value.get("unplugged_at")),
             )
         return result
+
+    @staticmethod
+    def _parse_frozen_durations(raw: object) -> dict[str, tuple[str, int]]:
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            ppid: (value["id"], value["duration"])
+            for ppid, value in raw.items()
+            if isinstance(value, dict)
+            and isinstance(value.get("id"), str)
+            and _is_int(value.get("duration"))
+        }
 
     @staticmethod
     def _charge_for_storage(charge: PodHomeCharge) -> dict[str, Any]:
@@ -619,6 +642,10 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             },
             "latest_charge": {
                 p: self._charge_for_storage(c) for p, c in self._latest_charge_by_ppid.items()
+            },
+            "frozen_duration": {
+                p: {"id": session_id, "duration": duration}
+                for p, (session_id, duration) in self._frozen_duration_by_ppid.items()
             },
         }
 
@@ -1425,7 +1452,12 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             override_events=override_events,
         )
         if charging_seconds is not None:
+            self._frozen_duration_by_ppid.pop(ppid, None)
             return charging_seconds
+        frozen = self._frozen_duration_by_ppid.get(ppid)
+        if frozen is not None and frozen[0] == current_charge.id:
+            return frozen[1]
+        self._frozen_duration_by_ppid.pop(ppid, None)
         # current_charging_seconds() only returns None when schedule_events is None AND
         # override_events is empty, so override_events is empty here too -
         # session_has_schedule alone decides freeze vs. fallback below.
@@ -1434,7 +1466,12 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             return None
         previous_charger = self.data.get(ppid) if self.data else None
         previous_charge = previous_charger.current_charge if previous_charger else None
-        if previous_charge is not None and previous_charge.id == current_charge.id:
+        if (
+            previous_charge is not None
+            and previous_charge.id == current_charge.id
+            and previous_charge.duration is not None
+        ):
+            self._frozen_duration_by_ppid[ppid] = (current_charge.id, previous_charge.duration)
             return previous_charge.duration
         # First poll of this session with no refinement yet - unknown.
         return None
