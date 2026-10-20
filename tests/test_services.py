@@ -19,11 +19,10 @@ from custom_components.pod_home.services import (
     SERVICE_START_BOOST,
     async_setup_services,
 )
-from tests._fixtures import make_charger, make_coordinator
+from tests._fixtures import PPID, make_charger, make_coordinator
 
 pytestmark = pytest.mark.asyncio
 
-PPID = "PSL-000001"
 
 
 async def _setup(hass: HomeAssistant, **charger_overrides):

@@ -8,7 +8,7 @@ from unittest.mock import create_autospec
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.pod_home.const import DOMAIN
+from custom_components.pod_home.const import DOMAIN, SMART_SCHEDULE_TYPE_CHARGING
 from custom_components.pod_home.coordinator import (
     PodHomeCharge,
     PodHomeCharger,
@@ -24,13 +24,13 @@ from custom_components.pod_home.podpoint_mobile_api import PodHomeApiClient
 UTC = datetime.timezone.utc
 
 
-STUB_PPID = "PSL-000001"
+PPID = "PSL-000001"
 
 
 def charger_raw(**overrides) -> dict:
     """One GET /chargers entry, in Basic Charging mode."""
     raw = {
-        "ppid": STUB_PPID,
+        "ppid": PPID,
         "unitId": 12345,
         "timezone": "Europe/London",
         "modelInfo": {"style": "solo3", "colour": "black", "architecture": "3.0"},
@@ -67,12 +67,12 @@ def make_stub_api() -> PodHomeApiClient:
 def make_coordinator(
     hass: HomeAssistant, data: dict[str, PodHomeCharger] | None = None
 ) -> PodHomeDataUpdateCoordinator:
-    """A coordinator with a fully-autospecced (unused) API client and `.data` preset directly -
+    """A coordinator with a stub API client and `.data` preset directly -
     for entity tests that only care about reading already-fetched data, not the fetch itself
     (see tests/test_coordinator.py for testing the fetch/parse logic)."""
     entry = MockConfigEntry(domain=DOMAIN, data={"email": "driver@example.com", "password": "x"})
     entry.add_to_hass(hass)
-    api = create_autospec(PodHomeApiClient, instance=True)
+    api = make_stub_api()
     coordinator = PodHomeDataUpdateCoordinator(
         hass, entry, api, email="driver@example.com", password="x"
     )
@@ -119,7 +119,7 @@ def make_manual_window(**overrides) -> PodHomeManualScheduleWindow:
 
 def make_smart_window(**overrides) -> PodHomeSmartScheduleWindow:
     defaults = dict(
-        type="CHARGING",
+        type=SMART_SCHEDULE_TYPE_CHARGING,
         timestamp=None,
         from_timestamp=datetime.datetime(2026, 1, 1, 1, 0, tzinfo=UTC),
         to_timestamp=datetime.datetime(2026, 1, 1, 2, 0, tzinfo=UTC),
@@ -163,7 +163,7 @@ def make_vehicle(**overrides) -> PodHomeVehicle:
 
 def make_charger(**overrides) -> PodHomeCharger:
     defaults = dict(
-        ppid="PSL-000001",
+        ppid=PPID,
         unit_id=12345,
         timezone="Europe/London",
         model_style="solo3",

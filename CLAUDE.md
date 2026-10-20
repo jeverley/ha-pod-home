@@ -162,8 +162,7 @@ runners) - not necessarily any given local machine. Layered checks, cheapest fir
 - A local live-API smoke test (see "Credentials") exercises real API *behavior* — covers
   `podpoint_mobile_api` only, not the coordinator, entities, or config flow.
 - `tests/test_helpers.py` exercises `helpers.py`'s pure functions with hand-built fixture data
-  (`tests/_fixtures.py`) - no API or coordinator involved. The main way to check
-  coordinator/entity-level logic beyond compiling.
+  (`tests/_fixtures.py`) - no API or coordinator involved.
 - `python -m pytest tests/` — the full suite, one unified `pytest-homeassistant-custom-component`
   session (`pip install -r requirements_test.txt` first; dev/test-only, never in
   `manifest.json`). Always use `python -m pytest tests/`, not bare `pytest` — only `-m` puts the

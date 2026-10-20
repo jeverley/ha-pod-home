@@ -9,11 +9,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 import custom_components.pod_home.number as number
-from tests._fixtures import make_charger, make_coordinator, make_vehicle
+from tests._fixtures import PPID, make_charger, make_coordinator, make_vehicle
 
 pytestmark = pytest.mark.asyncio
 
-PPID = "PSL-000001"
 
 
 async def test_target_charge_native_value_and_attributes(hass: HomeAssistant) -> None:

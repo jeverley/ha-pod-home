@@ -15,11 +15,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 import custom_components.pod_home.time as time_platform
-from tests._fixtures import make_charger, make_coordinator, make_vehicle
+from tests._fixtures import PPID, make_charger, make_coordinator, make_vehicle
 
 pytestmark = pytest.mark.asyncio
 
-PPID = "PSL-000001"
 
 
 async def test_ready_by_native_value_from_intent(hass: HomeAssistant) -> None:

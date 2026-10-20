@@ -16,11 +16,10 @@ from homeassistant.helpers import entity_registry as er
 
 import custom_components.pod_home.button as button
 from custom_components.pod_home.const import DOMAIN
-from tests._fixtures import make_charger, make_coordinator
+from tests._fixtures import PPID, make_charger, make_coordinator
 
 pytestmark = pytest.mark.asyncio
 
-PPID = "PSL-000001"
 UTC = datetime.timezone.utc
 
 

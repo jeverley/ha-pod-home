@@ -15,9 +15,8 @@ from custom_components.pod_home.const import (
     CHARGE_PRIORITY_LOWEST_COST,
     CHARGE_PRIORITY_SCHEDULE,
 )
-from tests._fixtures import make_charger, make_coordinator, make_tariff_window
+from tests._fixtures import PPID, make_charger, make_coordinator, make_tariff_window
 
-PPID = "PSL-000001"
 pytestmark = pytest.mark.asyncio
 
 

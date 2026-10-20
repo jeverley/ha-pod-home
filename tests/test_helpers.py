@@ -32,10 +32,6 @@ def _charge(**overrides):
     return make_charge(**{"started_at": None, "ended_at": None, **overrides})
 
 
-def _tariff_window(price):
-    return make_tariff_window(price=price)
-
-
 def _smart_window(**overrides):
     return make_smart_window(
         **{
@@ -315,31 +311,31 @@ def test_select_last_charge_within_tolerance_counts_as_same_session():
 
 
 def test_is_single_rate_tariff_true():
-    windows = [_tariff_window(0.10), _tariff_window(0.10)]
+    windows = [make_tariff_window(price=0.10), make_tariff_window(price=0.10)]
     assert helpers.is_single_rate_tariff(windows) is True
 
 
 def test_is_single_rate_tariff_false():
-    windows = [_tariff_window(0.10), _tariff_window(0.30)]
+    windows = [make_tariff_window(price=0.10), make_tariff_window(price=0.30)]
     assert helpers.is_single_rate_tariff(windows) is False
 
 
-@pytest.mark.parametrize("windows", [None, [], [_tariff_window(None)]])
+@pytest.mark.parametrize("windows", [None, [], [make_tariff_window(price=None)]])
 def test_is_single_rate_tariff_unknown(windows):
     assert helpers.is_single_rate_tariff(windows) is None
 
 
 def test_charge_priority_available_false_on_confirmed_single_rate():
-    windows = [_tariff_window(0.10), _tariff_window(0.10)]
+    windows = [make_tariff_window(price=0.10), make_tariff_window(price=0.10)]
     assert helpers.charge_priority_available(windows) is False
 
 
 def test_charge_priority_available_true_on_multi_rate():
-    windows = [_tariff_window(0.10), _tariff_window(0.30)]
+    windows = [make_tariff_window(price=0.10), make_tariff_window(price=0.30)]
     assert helpers.charge_priority_available(windows) is True
 
 
-@pytest.mark.parametrize("windows", [None, [], [_tariff_window(None)]])
+@pytest.mark.parametrize("windows", [None, [], [make_tariff_window(price=None)]])
 def test_charge_priority_available_true_when_unknown(windows):
     # Not yet known - defaults available, not guessed unavailable.
     assert helpers.charge_priority_available(windows) is True
@@ -351,28 +347,28 @@ def test_charge_priority_label_basic():
 
 
 def test_charging_priority_label_lowest_and_highest():
-    windows = [_tariff_window(0.10), _tariff_window(0.30)]
+    windows = [make_tariff_window(price=0.10), make_tariff_window(price=0.30)]
     assert helpers.charging_priority_label(0.10, windows) == const.CHARGE_PRIORITY_LOWEST_COST
     assert helpers.charging_priority_label(0.30, windows) == const.CHARGE_PRIORITY_COMPLETE_CHARGE
 
 
 def test_charging_priority_label_mid_price_unknown():
-    windows = [_tariff_window(0.10), _tariff_window(0.30)]
+    windows = [make_tariff_window(price=0.10), make_tariff_window(price=0.30)]
     assert helpers.charging_priority_label(0.20, windows) is None
 
 
 def test_charging_priority_label_single_rate_cant_disambiguate():
-    windows = [_tariff_window(0.15), _tariff_window(0.15)]
+    windows = [make_tariff_window(price=0.15), make_tariff_window(price=0.15)]
     assert helpers.charging_priority_label(0.15, windows) is None
 
 
-@pytest.mark.parametrize("max_price,windows", [(None, [_tariff_window(0.1)]), (0.1, None), (0.1, [])])
+@pytest.mark.parametrize("max_price,windows", [(None, [make_tariff_window(price=0.1)]), (0.1, None), (0.1, [])])
 def test_charging_priority_label_missing_data(max_price, windows):
     assert helpers.charging_priority_label(max_price, windows) is None
 
 
 def test_max_price_for_charging_priority_round_trips_charging_priority_label():
-    windows = [_tariff_window(0.10), _tariff_window(0.30)]
+    windows = [make_tariff_window(price=0.10), make_tariff_window(price=0.30)]
     lowest = helpers.max_price_for_charging_priority(const.CHARGE_PRIORITY_LOWEST_COST, windows)
     highest = helpers.max_price_for_charging_priority(const.CHARGE_PRIORITY_COMPLETE_CHARGE, windows)
     assert lowest == 0.10
@@ -382,7 +378,7 @@ def test_max_price_for_charging_priority_round_trips_charging_priority_label():
 
 
 def test_max_price_for_charging_priority_unrecognized_label_or_no_data():
-    windows = [_tariff_window(0.10)]
+    windows = [make_tariff_window(price=0.10)]
     assert helpers.max_price_for_charging_priority("not-a-real-label", windows) is None
     assert helpers.max_price_for_charging_priority(const.CHARGE_PRIORITY_LOWEST_COST, None) is None
 
