@@ -11,11 +11,16 @@ import pytest
 from homeassistant.core import HomeAssistant
 
 import custom_components.pod_home.calendar as calendar
-from tests._fixtures import make_charger, make_coordinator, make_manual_window, make_smart_window
+from tests._fixtures import (
+    PPID,
+    make_charger,
+    make_coordinator,
+    make_manual_window,
+    make_smart_window,
+)
 
 pytestmark = pytest.mark.asyncio
 
-PPID = "PSL-000001"
 UTC = datetime.timezone.utc
 
 

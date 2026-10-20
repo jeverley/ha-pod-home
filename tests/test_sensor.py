@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant
 
 import custom_components.pod_home.sensor as sensor
 from tests._fixtures import (
+    PPID,
     make_charge,
     make_charger,
     make_coordinator,
@@ -23,7 +24,6 @@ from tests._fixtures import (
 
 pytestmark = pytest.mark.asyncio
 
-PPID = "PSL-000001"
 UTC = datetime.timezone.utc
 
 

@@ -15,12 +15,11 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.pod_home.const import CONF_EMAIL, CONF_PASSWORD, DOMAIN
 from custom_components.pod_home.coordinator import PodHomeDataUpdateCoordinator
 from custom_components.pod_home.podpoint_mobile_api import PodHomeAuthError
-from tests._fixtures import make_stub_api
+from tests._fixtures import PPID, make_stub_api
 
 pytestmark = pytest.mark.asyncio
 
 USER_INPUT = {CONF_EMAIL: "driver@example.com", CONF_PASSWORD: "hunter2"}
-PPID = "PSL-000001"
 
 
 @pytest.fixture(autouse=True)

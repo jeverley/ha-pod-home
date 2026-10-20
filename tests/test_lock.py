@@ -10,11 +10,10 @@ from homeassistant.exceptions import HomeAssistantError
 
 import custom_components.pod_home.lock as lock
 from custom_components.pod_home.podpoint_mobile_api import PodHomeApiError
-from tests._fixtures import make_charger, make_coordinator
+from tests._fixtures import PPID, make_charger, make_coordinator
 
 pytestmark = pytest.mark.asyncio
 
-PPID = "PSL-000001"
 
 
 async def test_is_locked_reflects_off_mode(hass: HomeAssistant) -> None:
