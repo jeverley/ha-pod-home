@@ -171,8 +171,8 @@ runners) - not necessarily any given local machine. Layered checks, cheapest fir
   platform) never gets `self.hass` set automatically — assign it manually (`entity.hass = hass`)
   first (see `test_button.py`). `tests/_fixtures.py`'s `make_stub_api()` returns a successful
   response from every call by default; a test opts into any failure explicitly. One test file per
-  module/platform; check a file's own docstring
-  for what it covers rather than expecting this list to enumerate them. **Still not covered**:
+  module/platform; check a file's own docstring for what it covers rather than expecting this
+  list to enumerate them. **Still not covered**:
   dynamic-device creation's `predicate`-gated path — needs a second real charger to exercise
   meaningfully, not just more mocking.
 
