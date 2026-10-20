@@ -161,16 +161,17 @@ runners) - not necessarily any given local machine. Layered checks, cheapest fir
   import check; `podpoint-mobile-api/` has zero HA dependency.
 - A local live-API smoke test (see "Credentials") exercises real API *behavior* — covers
   `podpoint_mobile_api` only, not the coordinator, entities, or config flow.
-- `tests/test_helpers.py` exercises `helpers.py`'s pure functions offline with hand-built fixture
-  data — no HA instance or live account needed (see `tests/_pod_home_loader.py` for how it
-  imports helpers.py/const.py without Home Assistant installed). The main way to check
+- `tests/test_helpers.py` exercises `helpers.py`'s pure functions with hand-built fixture data
+  (`tests/_fixtures.py`) - no API or coordinator involved. The main way to check
   coordinator/entity-level logic beyond compiling.
 - `python -m pytest tests/` — the full suite, one unified `pytest-homeassistant-custom-component`
   session (`pip install -r requirements_test.txt` first; dev/test-only, never in
   `manifest.json`). Always use `python -m pytest tests/`, not bare `pytest` — only `-m` puts the
   repo root on `sys.path`. An entity constructed directly for a test (not through a real
   platform) never gets `self.hass` set automatically — assign it manually (`entity.hass = hass`)
-  first (see `test_button.py`). One test file per module/platform; check a file's own docstring
+  first (see `test_button.py`). `tests/_fixtures.py`'s `make_stub_api()` returns a successful
+  response from every call by default; a test opts into any failure explicitly. One test file per
+  module/platform; check a file's own docstring
   for what it covers rather than expecting this list to enumerate them. **Still not covered**:
   dynamic-device creation's `predicate`-gated path — needs a second real charger to exercise
   meaningfully, not just more mocking.
