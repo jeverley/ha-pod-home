@@ -246,7 +246,7 @@ def select_last_charge(
     current_charge: "PodHomeCharge | None", latest_charge: "PodHomeCharge | None"
 ) -> "PodHomeCharge | None":
     """Which of current_charge (api3's live in-progress entry) and latest_charge (mobile-api's
-    own finalized one) is the accurate source for Last Charge Duration/Energy/Cost right now.
+    own finalized one) is the accurate source for Charge duration/energy/cost right now.
     api3's current_charge stays "open" until the cable is physically unplugged, not until
     charging finishes, so its duration can overrun the real charging time by hours - mobile-api's
     endedAt is set correctly the moment charging concludes.
