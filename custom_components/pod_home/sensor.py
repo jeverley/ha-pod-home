@@ -194,7 +194,7 @@ class PodHomeLastChargeDurationSensor(PodHomeEntity, SensorEntity):
     recorder precision; suggested_unit_of_measurement only changes the default display to hours."""
 
     _attr_translation_key = "last_charge_duration"
-    _attr_name = "Last charge duration"
+    _attr_name = "Charge duration"
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_native_unit_of_measurement = UnitOfTime.SECONDS
     _attr_suggested_unit_of_measurement = UnitOfTime.HOURS
@@ -215,7 +215,7 @@ class PodHomeLastChargeEnergySensor(PodHomeEntity, SensorEntity):
     else the last finished one (latest_charge). A session snapshot, not dashboard-safe."""
 
     _attr_translation_key = "last_charge_energy"
-    _attr_name = "Last charge energy"
+    _attr_name = "Charge energy"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_state_class = SensorStateClass.TOTAL
@@ -235,7 +235,7 @@ class PodHomeLastChargeCostSensor(PodHomeEntity, SensorEntity):
     (latest_charge, via select_last_charge()). A session snapshot, not dashboard-safe."""
 
     _attr_translation_key = "last_charge_cost"
-    _attr_name = "Last charge cost"
+    _attr_name = "Charge cost"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_icon = "mdi:cash"
 

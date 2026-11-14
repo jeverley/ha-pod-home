@@ -273,7 +273,7 @@ class PodHomeCharger:
     last_seen_at: datetime.datetime | None
     latest_charge: PodHomeCharge | None
     # The live in-progress charge, if one is active right now - from api3's charges endpoint,
-    # not mobile-api's own /charges (which only shows finalized sessions). Last Charge
+    # not mobile-api's own /charges (which only shows finalized sessions). The Charge
     # duration/energy/cost sensors prefer this over latest_charge when set - see
     # PodHomeLastChargeDurationSensor's docstring in sensor.py. None when nothing is currently
     # charging, or api3 couldn't be reached this poll (non-fatal).

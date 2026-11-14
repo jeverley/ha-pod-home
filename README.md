@@ -51,9 +51,9 @@ The charger's firmware version shows on its device page, under Device info.
 | Entity              | Category      | Type           | Notes |
 | -------------------- | ------------- | -------------- | ----- |
 | Status                | Sensors       | Sensor         | High-level status derived from the charger's wire state (Charging, Paused, Available, Finished, Pending while the charger hasn't yet picked up a boost, etc.) |
-| Last charge duration   | Sensors       | Sensor         | Duration of the most recent charge - live if one is in progress, else the last finished one |
-| Last charge energy     | Sensors       | Sensor         | Per-session snapshot - don't add to the Energy Dashboard |
-| Last charge cost       | Sensors       | Sensor         | Per-session snapshot - don't add to the Energy Dashboard |
+| Charge duration        | Sensors       | Sensor         | Duration of the most recent charge - live if one is in progress, else the last finished one |
+| Charge energy          | Sensors       | Sensor         | Per-session snapshot - don't add to the Energy Dashboard |
+| Charge cost            | Sensors       | Sensor         | Per-session snapshot - don't add to the Energy Dashboard |
 | Month energy           | Sensors       | Sensor         | Finalized charges only, resets each calendar month |
 | Month cost             | Sensors       | Sensor         | Finalized charges only, resets each calendar month |
 | Total energy           | Sensors       | Sensor         | Live-inclusive running total since this install started tracking - see "Energy Dashboard" below |
@@ -97,7 +97,7 @@ The charger's firmware version shows on its device page, under Device info.
 
 Add **Total energy** to Settings → Dashboards → Energy - it's a live-inclusive running total
 (a session in progress counts immediately), unlike Month energy, which lags until each session
-finalizes. **Don't** add Last charge energy/cost there - those are per-session snapshots, not
+finalizes. **Don't** add Charge energy/cost there - those are per-session snapshots, not
 a monotonic running total, and will break the dashboard's math.
 
 ### Charging Scheme
