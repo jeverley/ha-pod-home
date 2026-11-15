@@ -108,6 +108,16 @@ async def test_start_boost_rejects_during_always_on(hass: HomeAssistant) -> None
     coordinator.api.async_create_charge_override.assert_not_awaited()
 
 
+async def test_start_boost_rejects_unknown_always_on_state(hass: HomeAssistant) -> None:
+    coordinator, device_id = await _setup(hass, charging_state="Charging", always_on_active=None)
+
+    with pytest.raises(ServiceValidationError, match="can't tell yet"):
+        await hass.services.async_call(
+            DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
+        )
+    coordinator.api.async_create_charge_override.assert_not_awaited()
+
+
 async def test_start_boost_rejects_a_non_charger_device(hass: HomeAssistant) -> None:
     coordinator, _ = await _setup(hass, charging_state="Charging")
     other_device = dr.async_get(hass).async_get_or_create(

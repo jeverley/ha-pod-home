@@ -10,11 +10,11 @@
   "services": {
     "start_boost": {
       "name": "Start boost",
-      "description": "Boosts charging on a Pod Home charger, matching the app's Full charge/Set duration boost options. Works with the cable unplugged too: the boost applies from plug-in until it ends.",
+      "description": "Boosts charging on a Pod Home charger, matching the app's Full charge/Set duration boost options. Also accepted with the cable unplugged.",
       "fields": {
         "duration": {
           "name": "Duration",
-          "description": "How long to boost for. Omit for a full charge (matches the app's Full charge option, a flat 12-hour override)."
+          "description": "How long to boost for, counted from when the action runs (not from plug-in). Omit for a full charge (matches the app's Full charge option, a flat 12-hour override)."
         }
       }
     },

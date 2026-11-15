@@ -6,7 +6,8 @@ unplugged.
 device_id is a plain required field, not HA's own "target" mechanism - hassfest rejects a
 services.yaml `target.device` key entirely.
 
-WRITE ENDPOINTS with a real physical effect on the charger. Confirmed working live.
+WRITE ENDPOINTS with a real physical effect on the charger. Confirmed working live with the
+cable plugged in; start_boost with the cable unplugged is NOT YET TESTED against a real account.
 """
 from __future__ import annotations
 
@@ -70,9 +71,13 @@ def _resolve_charger(hass: HomeAssistant, device_id: str) -> tuple[PodHomeDataUp
 
 
 def _require_boostable(charger: PodHomeCharger, device_label: str) -> None:
-    """A boost can't be started during Always On. It can be started with the cable unplugged,
-    taking effect from plug-in until its end time (not yet tested live)."""
-    if charger.always_on_active is not False:
+    """A boost can't be started during Always On, or while that's unknown. The cable may be
+    unplugged."""
+    if charger.always_on_active is None:
+        raise ServiceValidationError(
+            f"{device_label}: can't tell yet whether Always On is active - try again shortly"
+        )
+    if charger.always_on_active:
         raise ServiceValidationError(f"{device_label}: can't boost while Always On is active")
 
 

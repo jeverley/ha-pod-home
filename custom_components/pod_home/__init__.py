@@ -125,23 +125,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> b
 
     entry.runtime_data = coordinator
 
-    await er.async_migrate_entries(hass, entry.entry_id, _migrate_charge_unique_id)
+    await _async_migrate_charge_unique_ids(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
 
 
-@callback
-def _migrate_charge_unique_id(entity_entry: er.RegistryEntry) -> dict[str, Any] | None:
-    """Unique IDs of the Charge duration/energy/cost sensors from before 0.3.7."""
-    for suffix in ("duration", "energy", "cost"):
-        old_suffix = f"_last_charge_{suffix}"
-        if entity_entry.unique_id.endswith(old_suffix):
-            return {
-                "new_unique_id": entity_entry.unique_id.removesuffix(old_suffix)
-                + f"_charge_{suffix}"
-            }
-    return None
+# Unique-ID suffixes of the Charge duration/energy/cost sensors before 0.3.7, and now.
+_CHARGE_UNIQUE_ID_SUFFIXES = {
+    "_last_charge_duration": "_charge_duration",
+    "_last_charge_energy": "_charge_energy",
+    "_last_charge_cost": "_charge_cost",
+}
+
+
+async def _async_migrate_charge_unique_ids(hass: HomeAssistant, entry: PodHomeConfigEntry) -> None:
+    """Move the Charge sensors' registry entries to their current unique IDs."""
+    registry = er.async_get(hass)
+
+    @callback
+    def _migrate(entity_entry: er.RegistryEntry) -> dict[str, Any] | None:
+        for old_suffix, new_suffix in _CHARGE_UNIQUE_ID_SUFFIXES.items():
+            if not entity_entry.unique_id.endswith(old_suffix):
+                continue
+            new_unique_id = entity_entry.unique_id.removesuffix(old_suffix) + new_suffix
+            if registry.async_get_entity_id(entity_entry.domain, DOMAIN, new_unique_id):
+                return None  # the new ID is already taken
+            return {"new_unique_id": new_unique_id}
+        return None
+
+    await er.async_migrate_entries(hass, entry.entry_id, _migrate)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> bool:
