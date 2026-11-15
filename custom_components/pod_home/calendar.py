@@ -43,8 +43,8 @@ async def async_setup_entry(
 class PodHomeScheduleCalendar(PodHomeEntity, CalendarEntity):
     """The mode-appropriate charge schedule as real calendar events - not mode-gated; branches on
     `schedule_mode()` internally (see expand_manual_schedule_events()/smart_schedule_events() in
-    helpers.py for the two branches). Empty outside an active/recent Smart Charging session, or
-    on an unrecognized status - a correct empty result in both cases, not an error."""
+    helpers.py for the two branches) - plus the active or upcoming boost. Schedule events are
+    empty outside an active/recent Smart Charging session, or on an unrecognized status."""
 
     _attr_translation_key = "schedule"
     _attr_name = "Schedule"
@@ -76,6 +76,20 @@ class PodHomeScheduleCalendar(PodHomeEntity, CalendarEntity):
         ]
 
     def _events_for_range(
+        self, charger: "PodHomeCharger", start_date: datetime.datetime, end_date: datetime.datetime
+    ) -> list[tuple[datetime.datetime, datetime.datetime, str]]:
+        events = self._schedule_events(charger, start_date, end_date)
+        boost_start, boost_end = charger.override_requested_at, charger.boost_end_at
+        if (
+            boost_start is not None
+            and boost_end is not None
+            and boost_start < end_date
+            and boost_end > start_date
+        ):
+            events.append((boost_start, boost_end, "Boost"))
+        return sorted(events)
+
+    def _schedule_events(
         self, charger: "PodHomeCharger", start_date: datetime.datetime, end_date: datetime.datetime
     ) -> list[tuple[datetime.datetime, datetime.datetime, str]]:
         mode = schedule_mode(charger.delegated_control_status)

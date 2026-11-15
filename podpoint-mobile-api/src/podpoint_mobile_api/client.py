@@ -248,8 +248,9 @@ class PodHomeApiClient:
     ) -> None:
         """POST /chargers/{ppid}/charge-overrides - triggers a boost ("Charge Now").
         `requestedAt` required, `endAt` nullable (`ChargeOverrideRequestDTO`) - but an explicit
-        `endAt: null` is rejected (403). WRITE ENDPOINT with a real physical effect on the
-        charger."""
+        `endAt: null` is rejected (403). A future `requestedAt` is stored as sent, and the
+        entry's `receivedAt` copies it. Creating an override sets `deletedAt` on the existing one.
+        WRITE ENDPOINT with a real physical effect on the charger."""
         await self._async_post(
             f"/chargers/{ppid}/charge-overrides",
             {

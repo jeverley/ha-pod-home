@@ -94,3 +94,54 @@ async def test_no_charger_returns_no_events_and_no_current_event(hass: HomeAssis
         hass, datetime.datetime(2026, 1, 1, tzinfo=UTC), datetime.datetime(2026, 1, 2, tzinfo=UTC)
     )
     assert events == []
+
+
+async def test_boost_shown_alongside_the_schedule(hass: HomeAssistant) -> None:
+    """A scheduled boost appears as its own event, and is the next event before it starts."""
+    window = make_smart_window(
+        from_timestamp=datetime.datetime(2026, 1, 1, 1, 0, tzinfo=UTC),
+        to_timestamp=datetime.datetime(2026, 1, 1, 2, 0, tzinfo=UTC),
+    )
+    boost_start = datetime.datetime(2026, 1, 1, 11, 0, tzinfo=UTC)
+    coordinator = make_coordinator(
+        hass,
+        {
+            PPID: make_charger(
+                delegated_control_status="ACTIVE",
+                smart_schedule_windows=[window],
+                override_requested_at=boost_start,
+                boost_end_at=boost_start + datetime.timedelta(hours=1),
+            )
+        },
+    )
+    entity = calendar.PodHomeScheduleCalendar(coordinator, PPID)
+
+    events = await entity.async_get_events(
+        hass, datetime.datetime(2026, 1, 1, tzinfo=UTC), datetime.datetime(2026, 1, 2, tzinfo=UTC)
+    )
+
+    assert [e.start for e in events] == [window.from_timestamp, boost_start]
+    assert events[1].summary == "Boost"
+    assert events[1].end == boost_start + datetime.timedelta(hours=1)
+
+
+async def test_no_boost_event_without_an_end(hass: HomeAssistant) -> None:
+    """Always On has no end time, so it gets no event."""
+    coordinator = make_coordinator(
+        hass,
+        {
+            PPID: make_charger(
+                delegated_control_status="INACTIVE",
+                manual_schedule_windows=[],
+                override_requested_at=datetime.datetime(2026, 1, 1, 11, 0, tzinfo=UTC),
+                boost_end_at=None,
+            )
+        },
+    )
+    entity = calendar.PodHomeScheduleCalendar(coordinator, PPID)
+
+    events = await entity.async_get_events(
+        hass, datetime.datetime(2026, 1, 1, tzinfo=UTC), datetime.datetime(2026, 1, 2, tzinfo=UTC)
+    )
+
+    assert events == []
