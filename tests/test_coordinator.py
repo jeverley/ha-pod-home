@@ -276,6 +276,24 @@ async def test_override_requested_at_is_newest_active_entry(
     assert result[PPID].override_requested_at == active
 
 
+async def test_recent_charge_overrides_logged_when_they_change(
+    api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator, caplog
+) -> None:
+    now = datetime.datetime.now(datetime.timezone.utc)
+    entry = {"requestedAt": now.isoformat(), "endAt": (now + datetime.timedelta(minutes=5)).isoformat()}
+    api.async_get_charge_overrides.return_value = [entry]
+    caplog.set_level("DEBUG", logger="custom_components.pod_home.coordinator")
+
+    coordinator.data = await coordinator._async_fetch_data()
+    coordinator.data = await coordinator._async_fetch_data()  # unchanged - not logged again
+    api.async_get_charge_overrides.return_value = [{**entry, "deletedAt": now.isoformat()}]
+    await coordinator._async_fetch_data()
+
+    logged = [r.message for r in caplog.records if r.message.startswith("Charge overrides for")]
+    assert len(logged) == 2
+    assert "deletedAt" in logged[1]
+
+
 async def test_deleted_charge_override_not_current_boost(
     api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
 ) -> None:

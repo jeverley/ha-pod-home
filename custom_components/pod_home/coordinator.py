@@ -52,6 +52,8 @@ SLOW_POLL_INTERVAL = datetime.timedelta(seconds=300)
 # Fast polling runs this long after a plug-in, until charging starts.
 PLUG_IN_FAST_POLL_WINDOW = datetime.timedelta(minutes=5)
 CHECK_IN_BUFFER = datetime.timedelta(seconds=5)
+# How far back charge-overrides entries are debug-logged.
+OVERRIDE_LOG_WINDOW = datetime.timedelta(hours=24)
 # Longest gap between two consecutive charger check-ins, plus margin.
 CHECK_IN_GAP_TOLERANCE = datetime.timedelta(minutes=6)
 # How far back _charging_state_transitions_by_ppid keeps entries - bounds an otherwise
@@ -542,6 +544,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # Whether api3 charges have been fetched successfully since startup.
         self._api3_charges_fetched = False
         self._warned_keys: set[str] = set()
+        # The last charge-overrides entries logged per charger - see _log_recent_overrides().
+        self._logged_overrides_by_ppid: dict[str, list[dict[str, Any]]] = {}
         # Wall-clock time WE observed each charger being plugged in, kept until it charges or is
         # unplugged. Drives adaptive polling.
         self._plugged_in_at: dict[str, datetime.datetime] = {}
@@ -1598,6 +1602,21 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self._current_charge_by_ppid[ppid] = current_charge
         return current_charge
 
+    def _log_recent_overrides(
+        self, ppid: str, charge_overrides_raw: list[Any], now: datetime.datetime
+    ) -> None:
+        """Debug-log this charger's charge-overrides entries requested in the last 24 hours,
+        whenever they change."""
+        recent = [
+            entry
+            for entry in (_safe_dict(raw) for raw in charge_overrides_raw)
+            if (requested_at := _parse_dt(entry.get("requestedAt"))) is not None
+            and now - requested_at <= OVERRIDE_LOG_WINDOW
+        ]
+        if recent != self._logged_overrides_by_ppid.get(ppid):
+            self._logged_overrides_by_ppid[ppid] = recent
+            _LOGGER.debug("Charge overrides for %s (last %s): %s", ppid, OVERRIDE_LOG_WINDOW, recent)
+
     async def _async_fetch_live_per_charger_data(
         self,
         ppid: str,
@@ -1660,6 +1679,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # Only overwrite on a genuine list response (a failed fetch falls back to {} via
         # _safe_call, not a list) - leaves the last known boost end time in place.
         if isinstance(charge_overrides_raw, list):
+            self._log_recent_overrides(ppid, charge_overrides_raw, now)
             current_charge = self._current_charge_by_ppid.get(ppid)
             self._charge_override_by_ppid[ppid] = _parse_charge_overrides(
                 charge_overrides_raw, now, current_charge.started_at if current_charge else None
@@ -1740,6 +1760,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
 
         self._check_restart_gap(ppid, charging_state, last_seen_at)
         if last_seen_at is not None:
+            if last_seen_at != self._last_seen_at_by_ppid.get(ppid):
+                _LOGGER.debug("Check-in for %s at %s: %s", ppid, last_seen_at, charging_state)
             self._last_seen_at_by_ppid[ppid] = last_seen_at
         self._track_plug_in(ppid, charging_state, last_seen_at)
         current_charge = self._current_charge_duration(
