@@ -49,8 +49,8 @@ RECENT_CHARGES_LOOKBACK = datetime.timedelta(days=30)
 # the charger checks in at most every 5 minutes, more often around a plug-in or charging ending.
 FAST_POLL_INTERVAL = datetime.timedelta(seconds=60)
 SLOW_POLL_INTERVAL = datetime.timedelta(seconds=300)
-# Fast polling runs this long after a plug-in, until charging starts.
-PLUG_IN_FAST_POLL_WINDOW = datetime.timedelta(minutes=5)
+# Fast polling runs this long after a plug-in or a boost's start, until charging starts.
+AWAITING_CHARGE_WINDOW = datetime.timedelta(minutes=5)
 CHECK_IN_BUFFER = datetime.timedelta(seconds=5)
 # How far back charge-overrides entries are debug-logged.
 OVERRIDE_LOG_WINDOW = datetime.timedelta(hours=24)
@@ -1874,17 +1874,40 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             self._plugged_in_at.pop(ppid, None)
 
     def _base_poll_interval(self, now: datetime.datetime) -> datetime.timedelta:
-        """FAST_POLL_INTERVAL within PLUG_IN_FAST_POLL_WINDOW of a plug-in that hasn't started
-        charging yet, otherwise SLOW_POLL_INTERVAL."""
+        """FAST_POLL_INTERVAL within AWAITING_CHARGE_WINDOW of a plug-in, or of a plugged-in
+        charger's boost start, that hasn't started charging yet; otherwise SLOW_POLL_INTERVAL."""
         awaiting_charge = any(
-            now - plugged_in_at <= PLUG_IN_FAST_POLL_WINDOW
+            now - plugged_in_at <= AWAITING_CHARGE_WINDOW
             for plugged_in_at in self._plugged_in_at.values()
-        )
+        ) or any(self._boost_awaiting_charge(ppid, now) for ppid in self._charge_override_by_ppid)
         return FAST_POLL_INTERVAL if awaiting_charge else SLOW_POLL_INTERVAL
+
+    def _boost_awaiting_charge(self, ppid: str, now: datetime.datetime) -> bool:
+        """Whether this charger's boost started within AWAITING_CHARGE_WINDOW, with the cable
+        plugged in and not yet charging."""
+        override = self._charge_override_by_ppid.get(ppid)
+        start = override.boost_start_at if override else None
+        transitions = self._charging_state_transitions_by_ppid.get(ppid)
+        state = transitions[-1][1] if transitions else None
+        return (
+            start is not None
+            and start <= now <= start + AWAITING_CHARGE_WINDOW
+            and state != CHARGING_STATE_CHARGING
+            and CHARGING_STATE_CABLE_CONNECTED.get(state or "") is True
+        )
+
+    def _upcoming_boost_start_delays(self, now: datetime.datetime) -> list[datetime.timedelta]:
+        """Time until each charger's boost start that's still ahead."""
+        return [
+            override.boost_start_at - now
+            for override in self._charge_override_by_ppid.values()
+            if override.boost_start_at is not None and override.boost_start_at > now
+        ]
 
     def _async_adjust_poll_interval(self, chargers: dict[str, PodHomeCharger]) -> None:
         """Set the delay to the next poll: _base_poll_interval() counted from the latest charger
-        check-in (plus CHECK_IN_BUFFER) when that's still ahead, else from now."""
+        check-in (plus CHECK_IN_BUFFER) when that's still ahead, else from now - or sooner, to
+        poll at an upcoming boost start."""
         now = dt_util.utcnow()
         interval = self._base_poll_interval(now)
         upcoming = [
@@ -1893,6 +1916,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             if charger.last_seen_at is not None
         ]
         upcoming = [delay for delay in upcoming if delay > datetime.timedelta(0)]
+        upcoming += self._upcoming_boost_start_delays(now)
         new_interval = (
             # HA can fire a poll up to a second early, leaving a sub-second delay.
             max(min(min(upcoming), interval + CHECK_IN_BUFFER), CHECK_IN_BUFFER)
@@ -1902,7 +1926,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         _LOGGER.debug(
             "Next poll in %s (%s)",
             new_interval,
-            "awaiting charge after plug-in" if interval == FAST_POLL_INTERVAL else "idle",
+            "awaiting charge" if interval == FAST_POLL_INTERVAL else "idle",
         )
         self.update_interval = new_interval
 
