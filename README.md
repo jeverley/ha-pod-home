@@ -137,7 +137,7 @@ first:
   the cable unplugged (unlike the buttons). Starting later or unplugged are not yet tested live.
   Fails with a clear error if Always On is active, or if the boost would already have ended. A
   new boost replaces any existing one, including a scheduled one, so there's only ever one at a
-  time. The Schedule calendar shows the active or upcoming boost as a Boost event.
+  time. The Schedule calendar shows the active or upcoming boost as a Boost charging event.
 - **`pod_home.cancel_boost`** - cancels the active boost, if any.
 
 ## Known limitations

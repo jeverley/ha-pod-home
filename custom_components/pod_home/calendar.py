@@ -25,6 +25,10 @@ if TYPE_CHECKING:
 
 PARALLEL_UPDATES = 0
 
+# Summary of the active or upcoming boost's event; a matching schedule window keeps its tariff
+# rate after it, e.g. "Boost charging (Peak)".
+BOOST_EVENT_SUMMARY = "Boost charging"
+
 # How far ahead to search for the next event.
 _UPCOMING_WINDOW = datetime.timedelta(days=8)
 
@@ -81,12 +85,19 @@ class PodHomeScheduleCalendar(PodHomeEntity, CalendarEntity):
         events = self._schedule_events(charger, start_date, end_date)
         boost_start, boost_end = charger.boost_start_at, charger.boost_end_at
         if (
-            boost_start is not None
-            and boost_end is not None
-            and boost_start < end_date
-            and boost_end > start_date
+            boost_start is None
+            or boost_end is None
+            or boost_start >= end_date
+            or boost_end <= start_date
         ):
-            events.append((boost_start, boost_end, "Boost"))
+            return sorted(events)
+        # A schedule window matching the boost exactly is that boost, planned by Smart Charging.
+        for index, (start, end, summary) in enumerate(events):
+            if (start, end) == (boost_start, boost_end):
+                rate = summary.removeprefix("Charging")
+                events[index] = (start, end, f"{BOOST_EVENT_SUMMARY}{rate}")
+                return sorted(events)
+        events.append((boost_start, boost_end, BOOST_EVENT_SUMMARY))
         return sorted(events)
 
     def _schedule_events(

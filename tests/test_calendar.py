@@ -121,8 +121,37 @@ async def test_boost_shown_alongside_the_schedule(hass: HomeAssistant) -> None:
     )
 
     assert [e.start for e in events] == [window.from_timestamp, boost_start]
-    assert events[1].summary == "Boost"
+    assert events[1].summary == "Boost charging"
     assert events[1].end == boost_start + datetime.timedelta(hours=1)
+
+
+async def test_planned_boost_window_merged_into_one_event(hass: HomeAssistant) -> None:
+    """Smart Charging plans the boost as a schedule window; it shows once, named as a boost."""
+    boost_start = datetime.datetime(2026, 1, 1, 11, 0, tzinfo=UTC)
+    boost_end = boost_start + datetime.timedelta(hours=1)
+    window = make_smart_window(
+        from_timestamp=boost_start, to_timestamp=boost_end, tariff_rate="PEAK"
+    )
+    coordinator = make_coordinator(
+        hass,
+        {
+            PPID: make_charger(
+                delegated_control_status="ACTIVE",
+                smart_schedule_windows=[window],
+                boost_start_at=boost_start,
+                boost_end_at=boost_end,
+            )
+        },
+    )
+    entity = calendar.PodHomeScheduleCalendar(coordinator, PPID)
+
+    events = await entity.async_get_events(
+        hass, datetime.datetime(2026, 1, 1, tzinfo=UTC), datetime.datetime(2026, 1, 2, tzinfo=UTC)
+    )
+
+    assert [(e.summary, e.start, e.end) for e in events] == [
+        ("Boost charging (Peak)", boost_start, boost_end)
+    ]
 
 
 async def test_no_boost_event_without_an_end(hass: HomeAssistant) -> None:
