@@ -300,10 +300,12 @@ class PodHomeCharger:
     # preferences) driving the Charge Priority select - both read and write. See
     # charging_priority_label()/max_price_for_charging_priority() in helpers.py.
     max_price: float | None
-    # The active boost ("Charge Now")'s end time, if one is currently running - from
+    # The active or upcoming boost ("Charge Now")'s end time - from
     # GET /chargers/{ppid}/charge-overrides, see _parse_charge_overrides() above for how "current"
-    # is decided. None when no boost is active.
+    # is decided. None when there's no boost.
     boost_end_at: datetime.datetime | None
+    # That boost's start (its requestedAt). None when there's no boost or it has no requestedAt.
+    boost_start_at: datetime.datetime | None
     # Whether the charger's currently-configured tariff supports Smart Charging at all - a
     # tariff with more than two rates, or one where the supplier controls charging directly,
     # forces Basic Charging. From the same already-fetched tariffs response as tariff_windows
@@ -360,9 +362,11 @@ class PodHomeChargeOverrideState:
     alongside preferences (not staleness-cached); only overwritten in the cache on a genuine
     list response, so a transient fetch failure doesn't flap an in-progress boost to None."""
 
-    # The active boost's end time - whichever non-deleted, not-yet-ended entry has the latest
-    # requestedAt (list order isn't trusted). An entry with no endAt is never a boost.
+    # The active or upcoming boost's end time - whichever non-deleted, not-yet-ended entry has
+    # the latest requestedAt (list order isn't trusted). An entry with no endAt is never a boost.
     boost_end_at: datetime.datetime | None
+    # That same boost entry's requestedAt, None if it has none.
+    boost_start_at: datetime.datetime | None
     # Whether any non-deleted entry has no endAt at all.
     always_on_active: bool
     # requestedAt of the newest non-deleted boost or Always On entry still in effect.
@@ -385,7 +389,7 @@ def _parse_charge_overrides(
     account's full override history is returned every time, unbounded, confirmed live), not a
     correctness filter - current_charging_seconds() clips every event to [session_start, now]
     regardless."""
-    best: tuple[datetime.datetime, datetime.datetime] | None = None
+    best: tuple[datetime.datetime, datetime.datetime, datetime.datetime | None] | None = None
     always_on_active = False
     newest_requested_at: datetime.datetime | None = None
     override_events: list[tuple[datetime.datetime, datetime.datetime, str]] = []
@@ -417,10 +421,11 @@ def _parse_charge_overrides(
             continue
         resolved_requested_at = requested_at or end_at
         if best is None or resolved_requested_at > best[0]:
-            best = (resolved_requested_at, end_at)
+            best = (resolved_requested_at, end_at, requested_at)
 
     return PodHomeChargeOverrideState(
         boost_end_at=best[1] if best else None,
+        boost_start_at=best[2] if best else None,
         always_on_active=always_on_active,
         requested_at=newest_requested_at,
         override_events=override_events,
@@ -1607,6 +1612,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
     ) -> None:
         """Debug-log this charger's charge-overrides entries requested in the last 24 hours,
         whenever they change."""
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
         recent = [
             entry
             for entry in (_safe_dict(raw) for raw in charge_overrides_raw)
@@ -1800,6 +1807,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             vehicle=self._vehicle_by_ppid.get(ppid),
             max_price=self._max_price_by_ppid.get(ppid),
             boost_end_at=override_state.boost_end_at if override_state else None,
+            boost_start_at=override_state.boost_start_at if override_state else None,
             smart_charging_supported=self._smart_charging_supported_by_ppid.get(ppid),
             remote_lock_off_mode=self._remote_lock_off_mode_by_ppid.get(ppid),
             always_on_active=override_state.always_on_active if override_state else None,

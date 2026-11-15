@@ -79,7 +79,7 @@ class PodHomeScheduleCalendar(PodHomeEntity, CalendarEntity):
         self, charger: "PodHomeCharger", start_date: datetime.datetime, end_date: datetime.datetime
     ) -> list[tuple[datetime.datetime, datetime.datetime, str]]:
         events = self._schedule_events(charger, start_date, end_date)
-        boost_start, boost_end = charger.override_requested_at, charger.boost_end_at
+        boost_start, boost_end = charger.boost_start_at, charger.boost_end_at
         if (
             boost_start is not None
             and boost_end is not None

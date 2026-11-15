@@ -255,6 +255,7 @@ async def test_boost_end_at_parsed_from_charge_overrides(
     result = await coordinator._async_fetch_data()
 
     assert result[PPID].boost_end_at == future
+    assert result[PPID].boost_start_at == datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
 
 
 async def test_override_requested_at_is_newest_active_entry(

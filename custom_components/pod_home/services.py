@@ -1,7 +1,7 @@
 """Domain-wide services ("actions") for pod_home - registered once in async_setup, not per
 config entry. start_boost/cancel_boost make the same charge-overrides calls as button.py's Boost
-full charge/Boost for duration/Cancel boost buttons; start_boost also works with the cable
-unplugged.
+full charge/Boost for duration/Cancel boost buttons; start_boost is also accepted with the cable
+unplugged (untested - see below).
 
 device_id is a plain required field, not HA's own "target" mechanism - hassfest rejects a
 services.yaml `target.device` key entirely.
@@ -86,6 +86,8 @@ def _boost_window(
 ) -> tuple[datetime.datetime, datetime.datetime]:
     """(requestedAt, endAt) for a boost lasting `duration` from `start` (local time if naive). A
     start already passed is sent as now, keeping the same end."""
+    if duration <= datetime.timedelta(0):
+        raise ServiceValidationError(f"{device_label}: the duration must be more than zero")
     now = dt_util.utcnow()
     start_utc = dt_util.as_utc(start) if start is not None else now
     end_at = start_utc + duration
@@ -105,7 +107,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
         _require_boostable(charger, ppid)
         duration: datetime.timedelta | None = call.data.get(ATTR_DURATION)
         requested_at, end_at = _boost_window(
-            call.data.get(ATTR_START), duration or _FULL_CHARGE_DURATION, ppid
+            call.data.get(ATTR_START),
+            duration if duration is not None else _FULL_CHARGE_DURATION,
+            ppid,
         )
         try:
             await coordinator.api.async_create_charge_override(

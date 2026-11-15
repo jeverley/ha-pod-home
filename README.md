@@ -58,7 +58,7 @@ The charger's firmware version shows on its device page, under Device info.
 | Month cost             | Sensors       | Sensor         | Finalized charges only, resets each calendar month |
 | Total energy           | Sensors       | Sensor         | Live-inclusive running total since this install started tracking - see "Energy Dashboard" below |
 | Electricity rate       | Sensors       | Sensor         | Current tariff rate, computed from your configured tariff windows - not mode-gated, applies in Basic Charging too |
-| Boost end time         | Sensors       | Sensor         | When the active boost ends, if any |
+| Boost end time         | Sensors       | Sensor         | When the active or upcoming boost ends, if any |
 | Cable status           | Sensors       | Binary sensor  | On when a cable is physically connected |
 | Schedule               | Controls      | Calendar       | Manual schedule (Basic) or live smart-charging plan (Smart), whichever mode is active, plus the active or upcoming boost |
 | Boost duration         | Controls      | Time           | Local input (hh:mm) for Boost for duration below - no default, resets after each use, shows `unavailable` with cable unplugged |

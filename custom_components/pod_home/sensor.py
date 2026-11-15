@@ -438,8 +438,8 @@ class PodHomeElectricityRateSensor(PodHomeEntity, SensorEntity):
 
 
 class PodHomeBoostEndTimeSensor(PodHomeEntity, SensorEntity):
-    """When the current boost ("Charge Now" override) ends - see _parse_charge_overrides()'s
-    docstring (coordinator.py) for how "current" is decided. Not mode-gated; the override
+    """When the active or upcoming boost ("Charge Now" override) ends - see
+    _parse_charge_overrides() (coordinator.py) for how that boost is chosen. Not mode-gated; the override
     endpoint isn't tied to delegatedControl.status. Unknown (not unavailable) when no boost is
     running - native_value returning None is sufficient, no `available` override needed."""
 

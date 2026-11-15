@@ -109,7 +109,7 @@ async def test_boost_shown_alongside_the_schedule(hass: HomeAssistant) -> None:
             PPID: make_charger(
                 delegated_control_status="ACTIVE",
                 smart_schedule_windows=[window],
-                override_requested_at=boost_start,
+                boost_start_at=boost_start,
                 boost_end_at=boost_start + datetime.timedelta(hours=1),
             )
         },
@@ -133,7 +133,7 @@ async def test_no_boost_event_without_an_end(hass: HomeAssistant) -> None:
             PPID: make_charger(
                 delegated_control_status="INACTIVE",
                 manual_schedule_windows=[],
-                override_requested_at=datetime.datetime(2026, 1, 1, 11, 0, tzinfo=UTC),
+                boost_start_at=datetime.datetime(2026, 1, 1, 11, 0, tzinfo=UTC),
                 boost_end_at=None,
             )
         },

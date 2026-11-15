@@ -151,6 +151,20 @@ async def test_start_boost_rejects_a_window_already_over(hass: HomeAssistant) ->
     coordinator.api.async_create_charge_override.assert_not_awaited()
 
 
+@pytest.mark.parametrize("duration", ["00:00:00", "-01:00:00"])
+async def test_start_boost_rejects_a_duration_of_zero_or_less(
+    hass: HomeAssistant, duration: str
+) -> None:
+    coordinator, device_id = await _setup(hass, charging_state="Charging")
+
+    with pytest.raises(ServiceValidationError, match="more than zero"):
+        await hass.services.async_call(
+            DOMAIN, SERVICE_START_BOOST, {"device_id": device_id, "duration": duration},
+            blocking=True,
+        )
+    coordinator.api.async_create_charge_override.assert_not_awaited()
+
+
 async def test_start_boost_rejects_unknown_always_on_state(hass: HomeAssistant) -> None:
     coordinator, device_id = await _setup(hass, charging_state="Charging", always_on_active=None)
 
