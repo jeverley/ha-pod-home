@@ -29,6 +29,9 @@ PARALLEL_UPDATES = 0
 # rate after it, e.g. "Boost charging (Peak)".
 BOOST_EVENT_SUMMARY = "Boost charging"
 
+# Slack either side of the boost's period within which a planned window counts as the boost.
+_BOOST_MATCH_TOLERANCE = datetime.timedelta(minutes=1)
+
 # How far ahead to search for the next event.
 _UPCOMING_WINDOW = datetime.timedelta(days=8)
 
@@ -91,13 +94,19 @@ class PodHomeScheduleCalendar(PodHomeEntity, CalendarEntity):
             or boost_end <= start_date
         ):
             return sorted(events)
-        # A schedule window matching the boost exactly is that boost, planned by Smart Charging.
-        for index, (start, end, summary) in enumerate(events):
-            if (start, end) == (boost_start, boost_end):
-                rate = summary.removeprefix("Charging")
-                events[index] = (start, end, f"{BOOST_EVENT_SUMMARY}{rate}")
-                return sorted(events)
-        events.append((boost_start, boost_end, BOOST_EVENT_SUMMARY))
+        merged = False
+        if schedule_mode(charger.delegated_control_status) == SCHEDULE_MODE_SMART_CHARGING:
+            # Smart Charging plans the boost as charging windows within its period.
+            for index, (start, end, summary) in enumerate(events):
+                if (
+                    start >= boost_start - _BOOST_MATCH_TOLERANCE
+                    and end <= boost_end + _BOOST_MATCH_TOLERANCE
+                ):
+                    rate = summary.removeprefix("Charging")
+                    events[index] = (start, end, f"{BOOST_EVENT_SUMMARY}{rate}")
+                    merged = True
+        if not merged:
+            events.append((boost_start, boost_end, BOOST_EVENT_SUMMARY))
         return sorted(events)
 
     def _schedule_events(

@@ -6,8 +6,7 @@ and a future `start`.
 device_id is a plain required field, not HA's own "target" mechanism - hassfest rejects a
 services.yaml `target.device` key entirely.
 
-WRITE ENDPOINTS with a real physical effect on the charger. Confirmed working live, including a
-boost created unplugged with a future `start`.
+WRITE ENDPOINTS with a real physical effect on the charger.
 """
 from __future__ import annotations
 
@@ -54,8 +53,14 @@ def _resolve_charger(hass: HomeAssistant, device_id: str) -> tuple[PodHomeDataUp
     device = device_registry.async_get(device_id)
     if device is None:
         raise ServiceValidationError(f"Unknown device: {device_id}")
-    entry = hass.config_entries.async_get_entry(device.config_entry_id)
-    if entry is not None and entry.domain == DOMAIN:
+    # DeviceEntry.config_entry_id replaces the deprecated config_entries set.
+    entry_ids = (
+        [device.config_entry_id] if hasattr(device, "config_entry_id") else device.config_entries
+    )
+    for entry_id in entry_ids:
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is None or entry.domain != DOMAIN:
+            continue
         # runtime_data is unset (raises AttributeError, not None) until async_setup_entry
         # finishes, even though the device registry can already list this entry against a device.
         coordinator: PodHomeDataUpdateCoordinator | None = getattr(entry, "runtime_data", None)

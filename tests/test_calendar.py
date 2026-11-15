@@ -174,3 +174,64 @@ async def test_no_boost_event_without_an_end(hass: HomeAssistant) -> None:
     )
 
     assert events == []
+
+
+async def test_planned_boost_split_across_rates_merged(hass: HomeAssistant) -> None:
+    """A boost started "now" (with seconds) and planned as two windows shows as two boost
+    windows, with no separate event."""
+    boost_start = datetime.datetime(2026, 1, 1, 6, 59, 30, tzinfo=UTC)
+    boost_end = boost_start + datetime.timedelta(hours=1)
+    peak = make_smart_window(
+        from_timestamp=datetime.datetime(2026, 1, 1, 7, 0, tzinfo=UTC),
+        to_timestamp=datetime.datetime(2026, 1, 1, 7, 30, tzinfo=UTC),
+        tariff_rate="PEAK",
+    )
+    off_peak = make_smart_window(
+        from_timestamp=datetime.datetime(2026, 1, 1, 7, 30, tzinfo=UTC),
+        to_timestamp=datetime.datetime(2026, 1, 1, 8, 0, tzinfo=UTC),
+        tariff_rate="OFF_PEAK",
+    )
+    coordinator = make_coordinator(
+        hass,
+        {
+            PPID: make_charger(
+                delegated_control_status="ACTIVE",
+                smart_schedule_windows=[peak, off_peak],
+                boost_start_at=boost_start,
+                boost_end_at=boost_end,
+            )
+        },
+    )
+    entity = calendar.PodHomeScheduleCalendar(coordinator, PPID)
+
+    events = await entity.async_get_events(
+        hass, datetime.datetime(2026, 1, 1, tzinfo=UTC), datetime.datetime(2026, 1, 2, tzinfo=UTC)
+    )
+
+    assert [e.summary for e in events] == ["Boost charging (Peak)", "Boost charging (Off-peak)"]
+
+
+async def test_basic_schedule_window_not_renamed_by_a_boost(hass: HomeAssistant) -> None:
+    """In Basic Charging the manual schedule stays as it is; the boost is its own event."""
+    window = make_manual_window(start_day=4, start_time="00:30:00", end_day=4, end_time="04:30:00")
+    boost_start = datetime.datetime(2026, 1, 1, 0, 30, tzinfo=UTC)
+    coordinator = make_coordinator(
+        hass,
+        {
+            PPID: make_charger(
+                delegated_control_status="INACTIVE",
+                timezone="UTC",
+                manual_schedule_windows=[window],
+                boost_start_at=boost_start,
+                boost_end_at=boost_start + datetime.timedelta(hours=4),
+            )
+        },
+    )
+    entity = calendar.PodHomeScheduleCalendar(coordinator, PPID)
+
+    events = await entity.async_get_events(
+        hass, datetime.datetime(2026, 1, 1, tzinfo=UTC), datetime.datetime(2026, 1, 2, tzinfo=UTC)
+    )
+
+    assert "Boost charging" in [e.summary for e in events]
+    assert any(e.summary != "Boost charging" for e in events)

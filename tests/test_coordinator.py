@@ -1857,7 +1857,8 @@ def _boost(start: datetime.datetime) -> PodHomeChargeOverrideState:
         (datetime.timedelta(minutes=2), "SuspendedEVSE", True),  # due, plugged in, not charging
         (datetime.timedelta(minutes=2), "Charging", False),  # already charging
         (datetime.timedelta(minutes=2), "Available", False),  # nothing plugged in
-        (datetime.timedelta(minutes=6), "SuspendedEVSE", False),  # window over
+        (datetime.timedelta(minutes=10), "SuspendedEVSE", True),  # awaiting the check-in after
+        (datetime.timedelta(minutes=12), "SuspendedEVSE", False),  # window over
         (-datetime.timedelta(minutes=2), "SuspendedEVSE", False),  # not due yet
     ],
 )
@@ -1882,12 +1883,14 @@ async def test_poll_lands_at_an_upcoming_boost_start(
 ) -> None:
     """Idle polling would wait until 11:03:39; the boost starting at 11:00 brings it forward."""
     now = datetime.datetime(2026, 11, 15, 10, 58, 40, tzinfo=datetime.timezone.utc)
-    coordinator._charge_override_by_ppid[PPID] = _boost(
-        datetime.datetime(2026, 11, 15, 11, 0, tzinfo=datetime.timezone.utc)
-    )
 
     coordinator._async_adjust_poll_interval(
-        {PPID: make_charger(last_seen_at=now - datetime.timedelta(seconds=6))}
+        {
+            PPID: make_charger(
+                last_seen_at=now - datetime.timedelta(seconds=6),
+                boost_start_at=datetime.datetime(2026, 11, 15, 11, 0, tzinfo=datetime.timezone.utc),
+            )
+        }
     )
 
     assert coordinator.update_interval == datetime.timedelta(minutes=1, seconds=20)

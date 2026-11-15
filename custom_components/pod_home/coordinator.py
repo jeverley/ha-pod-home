@@ -1883,25 +1883,29 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         return FAST_POLL_INTERVAL if awaiting_charge else SLOW_POLL_INTERVAL
 
     def _boost_awaiting_charge(self, ppid: str, now: datetime.datetime) -> bool:
-        """Whether this charger's boost started within AWAITING_CHARGE_WINDOW, with the cable
-        plugged in and not yet charging."""
+        """Whether this charger's boost started within AWAITING_CHARGE_WINDOW plus
+        CHECK_IN_GAP_TOLERANCE (the charger starts it at its first check-in after the start), with
+        the cable plugged in and not yet charging."""
         override = self._charge_override_by_ppid.get(ppid)
         start = override.boost_start_at if override else None
         transitions = self._charging_state_transitions_by_ppid.get(ppid)
         state = transitions[-1][1] if transitions else None
         return (
             start is not None
-            and start <= now <= start + AWAITING_CHARGE_WINDOW
+            and start <= now <= start + AWAITING_CHARGE_WINDOW + CHECK_IN_GAP_TOLERANCE
             and state != CHARGING_STATE_CHARGING
             and CHARGING_STATE_CABLE_CONNECTED.get(state or "") is True
         )
 
-    def _upcoming_boost_start_delays(self, now: datetime.datetime) -> list[datetime.timedelta]:
+    @staticmethod
+    def _upcoming_boost_start_delays(
+        chargers: dict[str, PodHomeCharger], now: datetime.datetime
+    ) -> list[datetime.timedelta]:
         """Time until each charger's boost start that's still ahead."""
         return [
-            override.boost_start_at - now
-            for override in self._charge_override_by_ppid.values()
-            if override.boost_start_at is not None and override.boost_start_at > now
+            charger.boost_start_at - now
+            for charger in chargers.values()
+            if charger.boost_start_at is not None and charger.boost_start_at > now
         ]
 
     def _async_adjust_poll_interval(self, chargers: dict[str, PodHomeCharger]) -> None:
@@ -1916,7 +1920,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             if charger.last_seen_at is not None
         ]
         upcoming = [delay for delay in upcoming if delay > datetime.timedelta(0)]
-        upcoming += self._upcoming_boost_start_delays(now)
+        upcoming += self._upcoming_boost_start_delays(chargers, now)
         new_interval = (
             # HA can fire a poll up to a second early, leaving a sub-second delay.
             max(min(min(upcoming), interval + CHECK_IN_BUFFER), CHECK_IN_BUFFER)
