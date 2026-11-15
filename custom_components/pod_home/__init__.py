@@ -8,8 +8,8 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_validation as cv
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
@@ -125,9 +125,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> b
 
     entry.runtime_data = coordinator
 
+    await er.async_migrate_entries(hass, entry.entry_id, _migrate_charge_unique_id)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
+
+
+@callback
+def _migrate_charge_unique_id(entity_entry: er.RegistryEntry) -> dict[str, Any] | None:
+    """Unique IDs of the Charge duration/energy/cost sensors from before 0.3.7."""
+    for suffix in ("duration", "energy", "cost"):
+        old_suffix = f"_last_charge_{suffix}"
+        if entity_entry.unique_id.endswith(old_suffix):
+            return {
+                "new_unique_id": entity_entry.unique_id.removesuffix(old_suffix)
+                + f"_charge_{suffix}"
+            }
+    return None
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> bool:

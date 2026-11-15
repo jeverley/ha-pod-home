@@ -65,9 +65,9 @@ async def async_setup_entry(
             PodHomeChargingStateSensor,
             PodHomeChargingSchemeSensor,
             PodHomeStatusSensor,
-            PodHomeLastChargeDurationSensor,
-            PodHomeLastChargeEnergySensor,
-            PodHomeLastChargeCostSensor,
+            PodHomeChargeDurationSensor,
+            PodHomeChargeEnergySensor,
+            PodHomeChargeCostSensor,
             PodHomeMonthEnergySensor,
             PodHomeMonthCostSensor,
             PodHomeTotalEnergySensor,
@@ -186,14 +186,14 @@ class PodHomeStatusSensor(PodHomeEntity, SensorEntity):
         return charger_status(charger, dt_util.utcnow())
 
 
-class PodHomeLastChargeDurationSensor(PodHomeEntity, SensorEntity):
+class PodHomeChargeDurationSensor(PodHomeEntity, SensorEntity):
     """Duration of the most recent charge session - live (current_charge) if in progress, else
     the last finished one (latest_charge). While live, this is refined cumulative charging time
     where possible (see current_charging_seconds(), helpers.py), in either Charging Scheme, using
     whichever schedule/override data is available this poll. Native unit stays seconds for full
     recorder precision; suggested_unit_of_measurement only changes the default display to hours."""
 
-    _attr_translation_key = "last_charge_duration"
+    _attr_translation_key = "charge_duration"
     _attr_name = "Charge duration"
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_native_unit_of_measurement = UnitOfTime.SECONDS
@@ -202,7 +202,7 @@ class PodHomeLastChargeDurationSensor(PodHomeEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        return f"{DOMAIN}_{self.ppid}_last_charge_duration"
+        return f"{DOMAIN}_{self.ppid}_charge_duration"
 
     @property
     def native_value(self) -> int | None:
@@ -210,11 +210,11 @@ class PodHomeLastChargeDurationSensor(PodHomeEntity, SensorEntity):
         return charge.duration if charge else None
 
 
-class PodHomeLastChargeEnergySensor(PodHomeEntity, SensorEntity):
+class PodHomeChargeEnergySensor(PodHomeEntity, SensorEntity):
     """Energy delivered in the most recent charge session - live if in progress (current_charge),
     else the last finished one (latest_charge). A session snapshot, not dashboard-safe."""
 
-    _attr_translation_key = "last_charge_energy"
+    _attr_translation_key = "charge_energy"
     _attr_name = "Charge energy"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
@@ -222,7 +222,7 @@ class PodHomeLastChargeEnergySensor(PodHomeEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        return f"{DOMAIN}_{self.ppid}_last_charge_energy"
+        return f"{DOMAIN}_{self.ppid}_charge_energy"
 
     @property
     def native_value(self) -> float | None:
@@ -230,18 +230,18 @@ class PodHomeLastChargeEnergySensor(PodHomeEntity, SensorEntity):
         return charge.energy_total if charge else None
 
 
-class PodHomeLastChargeCostSensor(PodHomeEntity, SensorEntity):
+class PodHomeChargeCostSensor(PodHomeEntity, SensorEntity):
     """None while a session is in progress; populates once mobile-api reports it finished
     (latest_charge, via select_last_charge()). A session snapshot, not dashboard-safe."""
 
-    _attr_translation_key = "last_charge_cost"
+    _attr_translation_key = "charge_cost"
     _attr_name = "Charge cost"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_icon = "mdi:cash"
 
     @property
     def unique_id(self) -> str:
-        return f"{DOMAIN}_{self.ppid}_last_charge_cost"
+        return f"{DOMAIN}_{self.ppid}_charge_cost"
 
     @property
     def native_value(self) -> float | None:

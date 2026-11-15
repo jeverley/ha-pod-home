@@ -160,9 +160,8 @@ def is_momentarily_unplugged(charging_state: str | None) -> bool:
 
 
 def boostable(charging_state: str | None, always_on_active: bool | None) -> bool:
-    """A boost can't be started with the cable unplugged or during a confirmed Always On
-    (Basic Charging) - shared by button.py's boost-start buttons and services.py's start_boost
-    service."""
+    """Whether button.py's boost-start buttons apply: cable plugged in and Always On (Basic
+    Charging) confirmed off."""
     return not is_momentarily_unplugged(charging_state) and always_on_active is False
 
 

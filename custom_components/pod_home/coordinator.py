@@ -275,7 +275,7 @@ class PodHomeCharger:
     # The live in-progress charge, if one is active right now - from api3's charges endpoint,
     # not mobile-api's own /charges (which only shows finalized sessions). The Charge
     # duration/energy/cost sensors prefer this over latest_charge when set - see
-    # PodHomeLastChargeDurationSensor's docstring in sensor.py. None when nothing is currently
+    # PodHomeChargeDurationSensor's docstring in sensor.py. None when nothing is currently
     # charging, or api3 couldn't be reached this poll (non-fatal).
     current_charge: PodHomeCharge | None
     # Month-to-date figures - finalized charges only, matching what the app shows. Cost in minor

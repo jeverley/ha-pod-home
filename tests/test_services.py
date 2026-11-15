@@ -85,14 +85,15 @@ async def test_start_boost_with_duration(hass: HomeAssistant) -> None:
     assert kwargs["end_at"] - kwargs["requested_at"] == datetime.timedelta(minutes=30)
 
 
-async def test_start_boost_rejects_unplugged_cable(hass: HomeAssistant) -> None:
+async def test_start_boost_allowed_with_cable_unplugged(hass: HomeAssistant) -> None:
+    """Lets an automation start a boost ahead of plug-in, e.g. for a supplier's free period."""
     coordinator, device_id = await _setup(hass, charging_state="Available")
 
-    with pytest.raises(ServiceValidationError):
-        await hass.services.async_call(
-            DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
-        )
-    coordinator.api.async_create_charge_override.assert_not_awaited()
+    await hass.services.async_call(
+        DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
+    )
+
+    coordinator.api.async_create_charge_override.assert_awaited_once()
 
 
 async def test_start_boost_rejects_during_always_on(hass: HomeAssistant) -> None:

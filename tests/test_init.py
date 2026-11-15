@@ -54,6 +54,28 @@ async def test_async_setup_entry_real_first_refresh_succeeds(hass: HomeAssistant
     assert registry.async_get_entity_id("sensor", DOMAIN, f"{DOMAIN}_{PPID}_status") is not None
 
 
+async def test_pre_0_3_7_charge_sensor_unique_ids_migrated(hass: HomeAssistant) -> None:
+    """The renamed Charge sensors keep their entity IDs (and so their history)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=USER_INPUT)
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    old = registry.async_get_or_create(
+        "sensor", DOMAIN, f"{DOMAIN}_{PPID}_last_charge_energy", config_entry=entry,
+        suggested_object_id="driveway_last_charge_energy",
+    )
+
+    with patch("custom_components.pod_home.PodHomeApiClient", return_value=make_stub_api()):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{DOMAIN}_{PPID}_charge_energy"
+    ) == old.entity_id
+    assert registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{DOMAIN}_{PPID}_last_charge_energy"
+    ) is None
+
+
 async def test_async_setup_entry_auth_failure_does_not_load(hass: HomeAssistant) -> None:
     entry = MockConfigEntry(domain=DOMAIN, data=USER_INPUT)
     entry.add_to_hass(hass)

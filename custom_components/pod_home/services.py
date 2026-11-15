@@ -1,6 +1,7 @@
 """Domain-wide services ("actions") for pod_home - registered once in async_setup, not per
-config entry. start_boost/cancel_boost mirror button.py's Boost full charge/Boost for duration/
-Cancel boost buttons exactly (same underlying charge-overrides calls).
+config entry. start_boost/cancel_boost make the same charge-overrides calls as button.py's Boost
+full charge/Boost for duration/Cancel boost buttons; start_boost also works with the cable
+unplugged.
 
 device_id is a plain required field, not HA's own "target" mechanism - hassfest rejects a
 services.yaml `target.device` key entirely.
@@ -20,7 +21,6 @@ from homeassistant.util import dt as dt_util
 from .const import DOMAIN
 from .coordinator import PodHomeCharger, PodHomeDataUpdateCoordinator
 from .entity import async_handle_write_auth_error
-from .helpers import boostable, is_momentarily_unplugged
 from .podpoint_mobile_api import PodHomeAuthError
 
 SERVICE_START_BOOST = "start_boost"
@@ -70,11 +70,9 @@ def _resolve_charger(hass: HomeAssistant, device_id: str) -> tuple[PodHomeDataUp
 
 
 def _require_boostable(charger: PodHomeCharger, device_label: str) -> None:
-    """Same underlying check as entity.py's _boostable (helpers.boostable()), split into two
-    messages so the user knows which precondition failed."""
-    if is_momentarily_unplugged(charger.charging_state):
-        raise ServiceValidationError(f"{device_label}: plug in the cable before boosting")
-    if not boostable(charger.charging_state, charger.always_on_active):
+    """A boost can't be started during Always On. It can be started with the cable unplugged,
+    taking effect from plug-in until its end time (not yet tested live)."""
+    if charger.always_on_active is not False:
         raise ServiceValidationError(f"{device_label}: can't boost while Always On is active")
 
 
