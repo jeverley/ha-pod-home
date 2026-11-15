@@ -1,14 +1,13 @@
 """Domain-wide services ("actions") for pod_home - registered once in async_setup, not per
 config entry. start_boost/cancel_boost make the same charge-overrides calls as button.py's Boost
-full charge/Boost for duration/Cancel boost buttons; start_boost is also accepted with the cable
-unplugged (untested - see below).
+full charge/Boost for duration/Cancel boost buttons; start_boost also accepts the cable unplugged
+and a future `start`.
 
 device_id is a plain required field, not HA's own "target" mechanism - hassfest rejects a
 services.yaml `target.device` key entirely.
 
-WRITE ENDPOINTS with a real physical effect on the charger. Confirmed working live with the
-cable plugged in and starting now; start_boost with the cable unplugged, or with a future `start`,
-is NOT YET TESTED against a real account.
+WRITE ENDPOINTS with a real physical effect on the charger. Confirmed working live, including a
+boost created unplugged with a future `start`.
 """
 from __future__ import annotations
 

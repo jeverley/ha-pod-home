@@ -133,9 +133,9 @@ first:
 - **`pod_home.start_boost`** - starts a boost. An optional `duration` field boosts for that long
   (matching the app's Set duration option); omit it for a full charge (matching Full charge, a
   flat 12-hour override). An optional `start` schedules it for later (a time already passed starts
-  now with the same end); the duration counts from the start, not from plug-in. Also accepted with
-  the cable unplugged (unlike the buttons). Starting later or unplugged are not yet tested live.
-  Fails with a clear error if Always On is active, or if the boost would already have ended. A
+  now with the same end); the duration counts from the start, not from plug-in. The charger begins
+  at its first check-in after the start, so up to about 5 minutes later. Works with the cable
+  unplugged (unlike the buttons): the boost applies once it's plugged in. Fails with a clear error if Always On is active, or if the boost would already have ended. A
   new boost replaces any existing one, including a scheduled one, so there's only ever one at a
   time. The Schedule calendar shows the active or upcoming boost as a Boost charging event.
 - **`pod_home.cancel_boost`** - cancels the active boost, if any.
