@@ -8,6 +8,7 @@ import datetime
 from unittest.mock import AsyncMock
 
 import pytest
+from freezegun import freeze_time
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
@@ -104,6 +105,48 @@ async def test_start_boost_rejects_during_always_on(hass: HomeAssistant) -> None
     with pytest.raises(ServiceValidationError):
         await hass.services.async_call(
             DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
+        )
+    coordinator.api.async_create_charge_override.assert_not_awaited()
+
+
+@freeze_time("2026-11-15T12:00:00Z")
+@pytest.mark.parametrize(
+    ("start", "expected_requested", "expected_end"),
+    [
+        # Later today: requested then, ending a duration after.
+        ("2026-11-15T13:00:00+00:00", "2026-11-15T13:00:00+00:00", "2026-11-15T13:30:00+00:00"),
+        # Already started: sent as now, same end.
+        ("2026-11-15T11:50:00+00:00", "2026-11-15T12:00:00+00:00", "2026-11-15T12:20:00+00:00"),
+    ],
+)
+async def test_start_boost_with_start(
+    hass: HomeAssistant, start: str, expected_requested: str, expected_end: str
+) -> None:
+    coordinator, device_id = await _setup(hass, charging_state="Available")
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_START_BOOST,
+        {"device_id": device_id, "start": start, "duration": {"minutes": 30}},
+        blocking=True,
+    )
+
+    _, kwargs = coordinator.api.async_create_charge_override.call_args
+    assert kwargs["requested_at"] == datetime.datetime.fromisoformat(expected_requested)
+    assert kwargs["end_at"] == datetime.datetime.fromisoformat(expected_end)
+
+
+@freeze_time("2026-11-15T12:00:00Z")
+async def test_start_boost_rejects_a_window_already_over(hass: HomeAssistant) -> None:
+    coordinator, device_id = await _setup(hass, charging_state="Available")
+
+    with pytest.raises(ServiceValidationError, match="already have ended"):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_START_BOOST,
+            {"device_id": device_id, "start": "2026-11-15T11:00:00+00:00",
+             "duration": {"minutes": 30}},
+            blocking=True,
         )
     coordinator.api.async_create_charge_override.assert_not_awaited()
 

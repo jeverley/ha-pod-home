@@ -7,7 +7,8 @@ device_id is a plain required field, not HA's own "target" mechanism - hassfest 
 services.yaml `target.device` key entirely.
 
 WRITE ENDPOINTS with a real physical effect on the charger. Confirmed working live with the
-cable plugged in; start_boost with the cable unplugged is NOT YET TESTED against a real account.
+cable plugged in and starting now; start_boost with the cable unplugged, or with a future `start`,
+is NOT YET TESTED against a real account.
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ SERVICE_CANCEL_BOOST = "cancel_boost"
 
 ATTR_DEVICE_ID = "device_id"
 ATTR_DURATION = "duration"
+ATTR_START = "start"
 
 # Matches PodHomeBoostFullChargeButton's own flat duration (button.py) - see its docstring for
 # why 12h, not indefinite.
@@ -38,6 +40,7 @@ START_BOOST_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_DEVICE_ID): cv.string,
         vol.Optional(ATTR_DURATION): cv.time_period,
+        vol.Optional(ATTR_START): cv.datetime,
     }
 )
 CANCEL_BOOST_SCHEMA = vol.Schema({vol.Required(ATTR_DEVICE_ID): cv.string})
@@ -52,18 +55,15 @@ def _resolve_charger(hass: HomeAssistant, device_id: str) -> tuple[PodHomeDataUp
     device = device_registry.async_get(device_id)
     if device is None:
         raise ServiceValidationError(f"Unknown device: {device_id}")
-    for config_entry_id in device.config_entries:
-        entry = hass.config_entries.async_get_entry(config_entry_id)
-        if entry is None or entry.domain != DOMAIN:
-            continue
+    entry = hass.config_entries.async_get_entry(device.config_entry_id)
+    if entry is not None and entry.domain == DOMAIN:
         # runtime_data is unset (raises AttributeError, not None) until async_setup_entry
         # finishes, even though the device registry can already list this entry against a device.
         coordinator: PodHomeDataUpdateCoordinator | None = getattr(entry, "runtime_data", None)
-        if coordinator is None:
-            continue
-        for ppid in coordinator.data:
-            if (DOMAIN, ppid) in device.identifiers:
-                return coordinator, ppid
+        if coordinator is not None:
+            for ppid in coordinator.data:
+                if (DOMAIN, ppid) in device.identifiers:
+                    return coordinator, ppid
     raise ServiceValidationError(
         f"{device.name or device_id} isn't a Pod Home charger device - pick the charger, not a "
         "linked vehicle or the Pod Point account device"
@@ -81,6 +81,19 @@ def _require_boostable(charger: PodHomeCharger, device_label: str) -> None:
         raise ServiceValidationError(f"{device_label}: can't boost while Always On is active")
 
 
+def _boost_window(
+    start: datetime.datetime | None, duration: datetime.timedelta, device_label: str
+) -> tuple[datetime.datetime, datetime.datetime]:
+    """(requestedAt, endAt) for a boost lasting `duration` from `start` (local time if naive). A
+    start already passed is sent as now, keeping the same end."""
+    now = dt_util.utcnow()
+    start_utc = dt_util.as_utc(start) if start is not None else now
+    end_at = start_utc + duration
+    if end_at <= now:
+        raise ServiceValidationError(f"{device_label}: that boost would already have ended")
+    return max(start_utc, now), end_at
+
+
 def async_setup_services(hass: HomeAssistant) -> None:
     """Registered once, hass-level, in __init__.py's async_setup - not gated on any one config
     entry's state. Each handler validates its own target/preconditions via
@@ -91,8 +104,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
         charger = coordinator.data[ppid]
         _require_boostable(charger, ppid)
         duration: datetime.timedelta | None = call.data.get(ATTR_DURATION)
-        requested_at = dt_util.utcnow()
-        end_at = requested_at + (duration if duration is not None else _FULL_CHARGE_DURATION)
+        requested_at, end_at = _boost_window(
+            call.data.get(ATTR_START), duration or _FULL_CHARGE_DURATION, ppid
+        )
         try:
             await coordinator.api.async_create_charge_override(
                 ppid, requested_at=requested_at, end_at=end_at
