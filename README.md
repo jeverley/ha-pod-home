@@ -1,15 +1,12 @@
 # Pod Home
 
-A Home Assistant custom integration for Pod Point EV chargers, built against the same
-`mobile-api.pod-point.com` backend (Firebase auth) the official **Pod Home** app uses - not the
-older `api.pod-point.com/v4` API the community
-[pod-point-home-assistant-component](https://github.com/mattrayner/pod-point-home-assistant-component)
-targets. A clean rewrite for that newer backend, not a patch to the older integration.
+A Home Assistant custom integration for Pod Point EV chargers, built on the same backend as the
+official **Pod Home** app.
 
 ## Requirements
 
 - Home Assistant 2026.10 or later.
-- A Pod Point account with the email/password you use to sign in to the Pod Home app.
+- The email and password you use to sign in to the Pod Home app.
 - At least one Pod Point charger on that account.
 
 ## Installation
@@ -28,140 +25,100 @@ Or add it yourself:
 ### Manual
 
 Copy `custom_components/pod_home/` into your Home Assistant `config/custom_components/` folder,
-then restart Home Assistant. The integration bundles its own API client - no separate package
-install needed.
+then restart Home Assistant. No separate package install is needed.
 
 ## Setting up
 
 Settings → Devices & services → Add integration → **Pod Home**, then enter your Pod Home email
-and password. Each charger on the account becomes its own device; a linked vehicle (connected via
-Enode, if your account has one) becomes a second device.
+and password.
 
-## What you get
+## Features
 
-Three device types are created: one **charger** device per Pod Point charger on the account, one
-**car** device only if a vehicle is linked via Enode, and a single account-level **Pod Point**
-device (one per config entry) for entities that aren't tied to a specific charger. Entity
-availability and which ones are enabled by default depend on your account's Charging Scheme (Smart
-Charging vs. Basic Charging, set from the app) and tariff - see "Charging Scheme" below.
-
-Each table's **Category** column is the same grouping Home Assistant's own device page uses:
-**Sensors** and **Controls** are its two default (uncategorized) groups, split by entity domain;
-**Configuration** and **Diagnostic** are this integration's explicit `entity_category` choices.
+The integration creates a **charger** device per charger, a **car** device if a vehicle is linked
+via Enode, and one account-level **Pod Point** device. Some entities depend on your Charging
+Scheme (see below).
 
 ### Charger device
 
-The charger's firmware version shows on its device page, under Device info.
+| Entity             | Category   | Type          | Notes |
+| ------------------ | ---------- | ------------- | ----- |
+| Status             | Sensors    | Sensor        | Charging, Paused, Available, Finished, Pending (boost not yet picked up by the charger), etc. |
+| Charge duration    | Sensors    | Sensor        | Current charge, or the last finished one |
+| Charge energy      | Sensors    | Sensor        | Per charge; not for the Energy Dashboard |
+| Charge cost        | Sensors    | Sensor        | Per charge |
+| Month energy       | Sensors    | Sensor        | Finished charges, resets monthly |
+| Month cost         | Sensors    | Sensor        | Finished charges, resets monthly |
+| Total energy       | Sensors    | Sensor        | Running total including the current charge; use this for the Energy Dashboard |
+| Electricity rate   | Sensors    | Sensor        | Current rate from your tariff, in either scheme |
+| Boost end time     | Sensors    | Sensor        | End of the active or upcoming boost |
+| Cable status       | Sensors    | Binary sensor | On when a cable is connected |
+| Schedule           | Controls   | Calendar      | Manual schedule (Basic) or smart-charging plan (Smart), plus any boost |
+| Boost duration     | Controls   | Time          | Duration for Boost for duration; resets after each use |
+| Full charge        | Controls   | Button        | Boost to 100%, as in the app |
+| Boost for duration | Controls   | Button        | Boost for the duration set above |
+| Cancel boost       | Controls   | Button        | Available while a boost is active |
+| Remote lock        | Controls   | Lock          | Solo 3S only; appears once support is detected |
+| Charge mode        | Controls   | Select        | Options depend on Charging Scheme |
+| Charging state     | Diagnostic | Sensor        | Raw API value, disabled by default |
+| Charging scheme    | Diagnostic | Sensor        | Smart or Basic |
+| Connectivity       | Diagnostic | Binary sensor | On when the charger is online |
 
-| Entity              | Category      | Type           | Notes |
-| -------------------- | ------------- | -------------- | ----- |
-| Status                | Sensors       | Sensor         | High-level status derived from the charger's wire state (Charging, Paused, Available, Finished, Pending while the charger hasn't yet picked up a boost, etc.) |
-| Charge duration        | Sensors       | Sensor         | Duration of the most recent charge - live if one is in progress, else the last finished one |
-| Charge energy          | Sensors       | Sensor         | Per-session snapshot - don't add to the Energy Dashboard |
-| Charge cost            | Sensors       | Sensor         | Per-session snapshot - don't add to the Energy Dashboard |
-| Month energy           | Sensors       | Sensor         | Finalized charges only, resets each calendar month |
-| Month cost             | Sensors       | Sensor         | Finalized charges only, resets each calendar month |
-| Total energy           | Sensors       | Sensor         | Live-inclusive running total since this install started tracking - see "Energy Dashboard" below |
-| Electricity rate       | Sensors       | Sensor         | Current tariff rate, computed from your configured tariff windows - not mode-gated, applies in Basic Charging too |
-| Boost end time         | Sensors       | Sensor         | When the active or upcoming boost ends, if any |
-| Cable status           | Sensors       | Binary sensor  | On when a cable is physically connected |
-| Schedule               | Controls      | Calendar       | Manual schedule (Basic) or live smart-charging plan (Smart), whichever mode is active, plus the active or upcoming boost |
-| Boost duration         | Controls      | Time           | Local input (hh:mm) for Boost for duration below - no default, resets after each use, shows `unavailable` with cable unplugged |
-| Full charge            | Controls      | Button         | Boost ("Charge Now") to 100%, matching the app |
-| Boost for duration     | Controls      | Button         | Boost for the duration set above, matching the app |
-| Cancel boost           | Controls      | Button         | Only available while a boost is active |
-| Remote lock            | Controls      | Lock           | Solo 3S only. Entity isn't created at all until this charger confirms support (added dynamically once detected, no restart needed) - never appears on a model that doesn't support it (confirmed live via `offMode: null`), including the account this integration is developed against |
-| Charge mode            | Controls      | Select         | Options depend on Charging Scheme: Smart Charging offers Lowest cost/Complete charge (unavailable only on a confirmed single-rate tariff); Basic Charging offers Schedule/Always on |
-| Charging state         | Diagnostic    | Sensor         | Raw wire value, disabled by default |
-| Charging scheme        | Diagnostic    | Sensor         | Smart / Basic |
-| Connectivity           | Diagnostic    | Binary sensor  | On when the charger is reachable via Pod Point's cloud |
-
-### Car device (only if a vehicle is linked via Enode)
+### Car device
 
 | Entity                | Category      | Type          | Notes |
-| ---------------------- | ------------- | ------------- | ----- |
-| Battery                 | Sensors       | Sensor        | Vehicle's reported battery level, via Enode |
-| Estimated range         | Sensors       | Sensor        | Vehicle's estimated range, derived from battery level (not live telemetry) |
-| Odometer                | Sensors       | Sensor        | Vehicle's odometer reading, via Enode |
-| Expected charge         | Sensors       | Sensor        | Smart Charging's live prediction for the % it'll actually reach by Ready by - can diverge from Target charge if a constraint (e.g. Charge mode) prevents hitting it. Shows `unavailable` outside Smart Charging |
-| Charge rate             | Sensors       | Sensor        | Vehicle's charge rate - null once charging stops |
-| Charge time remaining   | Sensors       | Sensor        | Estimated time remaining, if reported by the vehicle |
-| Charging                | Sensors       | Binary sensor | On while the vehicle itself reports charging, independent of the charger's own state |
-| Ready by                | Configuration | Time          | Shows `unavailable` outside Smart Charging |
-| Target charge           | Configuration | Number        | Shows `unavailable` outside Smart Charging |
-| Power delivery state    | Diagnostic    | Sensor        | Raw wire value from the vehicle's own charge state, disabled by default |
-| Max current             | Diagnostic    | Sensor        | Raw wire value, disabled by default - always null on this account so far |
+| --------------------- | ------------- | ------------- | ----- |
+| Battery               | Sensors       | Sensor        | Reported by the vehicle via Enode |
+| Estimated range       | Sensors       | Sensor        | Derived from battery level |
+| Odometer              | Sensors       | Sensor        | Reported by the vehicle via Enode |
+| Expected charge       | Sensors       | Sensor        | Smart Charging's predicted % by Ready by |
+| Charge rate           | Sensors       | Sensor        | While charging |
+| Charge time remaining | Sensors       | Sensor        | If reported by the vehicle |
+| Charging              | Sensors       | Binary sensor | On while the vehicle reports charging |
+| Ready by              | Configuration | Time          | Smart Charging only |
+| Target charge         | Configuration | Number        | Smart Charging only |
+| Power delivery state  | Diagnostic    | Sensor        | Raw API value, disabled by default |
+| Max current           | Diagnostic    | Sensor        | Raw API value, disabled by default |
 
-### Pod Point device (account-level, one per config entry)
+### Pod Point device
 
 | Entity          | Category | Type   | Notes |
-| ---------------- | -------- | ------ | ----- |
-| Rewards balance   | Sensors  | Sensor | Account-wide Pod Point rewards balance, always in GBP regardless of your billing currency |
+| --------------- | -------- | ------ | ----- |
+| Rewards balance | Sensors  | Sensor | Pod Point rewards balance, in GBP |
 
 ### Energy Dashboard
 
-Add **Total energy** to Settings → Dashboards → Energy - it's a live-inclusive running total
-(a session in progress counts immediately), unlike Month energy, which lags until each session
-finalizes. **Don't** add Charge energy/cost there - those are per-session snapshots, not
-a monotonic running total, and will break the dashboard's math.
+Add **Total energy** to Settings → Dashboards → Energy. Don't add Charge energy or Charge cost:
+they reset with each charge.
 
 ### Charging Scheme
 
-Pod Point chargers run in one of two schemes, switched from the Pod Home app (this integration
-doesn't add a scheme-switch control):
+Set in the Pod Home app:
 
-- **Smart Charging** - schedule-optimized charging to a target %, by a target time, aware of your
-  tariff. Ready by/Target charge/Expected charge only apply here, and show `unavailable` outside
-  this scheme. Electricity rate isn't scheme-gated at all - it depends on your tariff shape, not
-  which scheme is active, so it's relevant on Basic Charging too. Works on a single-rate or
-  two-rate tariff - Pod Point coordinates directly with your supplier to charge during
-  low-demand periods even on a single-rate tariff, this does not force a switch to Basic
-  Charging.
-- **Basic Charging** - the charger follows its own fixed manual schedule instead, unless Always
-  on is selected (see Charge mode below). Selecting a tariff with more than two rate windows
-  reverts the account to Basic Charging automatically - that's Pod Point's own behaviour, not
-  something this integration decides.
+- **Smart Charging:** charges to a target % by a set time, using your tariff. Ready by, Target
+  charge and Expected charge only work in this scheme.
+- **Basic Charging:** follows a fixed manual schedule. A tariff with more than two rate windows
+  switches the account to Basic Charging.
 
-**Charge mode** exists in both schemes but means something different in each, matching the
-app's own wording exactly: Smart Charging offers **Lowest cost** (only charge during the
-cheapest tariff window) / **Complete charge** (stretch into peak hours if needed to hit your
-target); Basic Charging offers **Schedule** (only charge during your set schedule) / **Always
-on** (charge whenever plugged in, ignoring the schedule). Both pairs represent the same
-underlying choice - stick to the cost/schedule plan, or prioritise actually charging over it.
+**Charge mode** offers **Lowest cost** or **Complete charge** in Smart Charging, and **Schedule**
+or **Always on** in Basic Charging.
 
 ### Actions
 
-Two actions (services), targeted at a charger device, for automations - equivalent to the boost
-buttons above but callable directly with a duration, rather than needing to set Boost duration
-first:
-
-- **`pod_home.start_boost`** - starts a boost. An optional `duration` field boosts for that long
-  (matching the app's Set duration option); omit it for a full charge (matching Full charge, a
-  flat 12-hour override). An optional `start` schedules it for later (a time already passed starts
-  now with the same end); the duration counts from the start, not from plug-in. The charger begins
-  at its first check-in after the start, so up to about 5 minutes later. Works with the cable
-  unplugged (unlike the buttons): the boost applies once it's plugged in. Fails with a clear error if Always On is active, or if the boost would already have ended. A
-  new boost replaces any existing one, including a scheduled one, so there's only ever one at a
-  time. The Schedule calendar shows the active or upcoming boost as a Boost charging event.
-- **`pod_home.cancel_boost`** - cancels the active boost, if any.
+- **`pod_home.start_boost`** starts a boost on a charger.
+  - `duration` (optional): how long to boost. Without it, boosts to a full charge (12 hours).
+  - `start` (optional): when to start. The charger begins at its next check-in, up to about 5
+    minutes later.
+  - Works with the cable unplugged; the boost applies once it's plugged in.
+  - Replaces any existing boost. Fails if Always on is active.
+- **`pod_home.cancel_boost`** cancels the active boost.
 
 ## Known limitations
 
-- **Total energy misses charges that finish while Home Assistant is offline for more than 31
-  days** - it counts finished sessions from a rolling 31-day window of charge history.
-- **Dynamic device creation (a charger added to the account appearing without a restart) is
-  built but not verified against a second physical charger** - only ever tested against a
-  single-charger account.
-- **Remote lock is untested against a real Solo 3S** - it's a Solo 3S-only feature (per Pod
-  Point's own app guide) and the account this integration is developed against has a Solo 3,
-  which reports `offMode: null` rather than a real locked/unlocked value. The entity is only
-  ever created once your charger confirms support, so it simply won't appear at all on
-  unsupported hardware - not a case of finding it and enabling it. Built code-reviewed-only for
-  that reason - if you have a Solo 3S, feedback on whether the entity appears and works as
-  expected is genuinely useful.
-- Not yet in the Marketplace catalog - add it from a link (see above) for now. Tagged releases do
-  exist (see the repo's Releases page).
+- **Total energy** misses charges that finish while Home Assistant is offline for more than 31 days.
+- **More than one charger** on an account is supported but untested.
+- **Remote lock** is untested on a real Solo 3S. Feedback from Solo 3S owners is welcome.
+- Not yet in the Marketplace catalog. Add it from a link (see Installation).
 
-## More detail
+## About
 
-- [`CLAUDE.md`](CLAUDE.md) - working conventions for this repo.
+Developed with the assistance of Claude (Anthropic). Licensed under the [MIT License](LICENSE).
