@@ -1,5 +1,6 @@
 {
   "name": "Pod Home",
   "homeassistant": "2026.10.0",
+  "country": ["GB", "IE"],
   "render_readme": true
 }
