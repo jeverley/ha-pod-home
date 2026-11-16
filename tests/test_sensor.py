@@ -58,7 +58,7 @@ async def test_charging_scheme_sensor(hass: HomeAssistant) -> None:
     }
 
 
-async def test_last_charge_sensors_prefer_current_over_latest(hass: HomeAssistant) -> None:
+async def test_charge_sensors_prefer_current_over_latest(hass: HomeAssistant) -> None:
     # Different started_at values - two genuinely different sessions (current_charge is a new,
     # still-open one mobile-api hasn't reported back yet), not the "same session, latest already
     # finalized" case select_last_charge() specifically prefers latest_charge for.
@@ -73,9 +73,9 @@ async def test_last_charge_sensors_prefer_current_over_latest(hass: HomeAssistan
     coordinator = make_coordinator(
         hass, {PPID: make_charger(current_charge=current, latest_charge=latest)}
     )
-    duration = sensor.PodHomeLastChargeDurationSensor(coordinator, PPID)
-    energy = sensor.PodHomeLastChargeEnergySensor(coordinator, PPID)
-    cost = sensor.PodHomeLastChargeCostSensor(coordinator, PPID)
+    duration = sensor.PodHomeChargeDurationSensor(coordinator, PPID)
+    energy = sensor.PodHomeChargeEnergySensor(coordinator, PPID)
+    cost = sensor.PodHomeChargeCostSensor(coordinator, PPID)
 
     assert duration.native_value == 600
     assert energy.native_value == 1.5
@@ -83,12 +83,12 @@ async def test_last_charge_sensors_prefer_current_over_latest(hass: HomeAssistan
     assert cost.native_value is None
 
 
-async def test_last_charge_cost_converts_minor_units_and_currency(hass: HomeAssistant) -> None:
+async def test_charge_cost_converts_minor_units_and_currency(hass: HomeAssistant) -> None:
     finished = make_charge(cost_amount=1234, cost_currency="GBP", ended_at=datetime.datetime(2026, 1, 1, tzinfo=UTC))
     coordinator = make_coordinator(
         hass, {PPID: make_charger(current_charge=None, latest_charge=finished)}
     )
-    cost = sensor.PodHomeLastChargeCostSensor(coordinator, PPID)
+    cost = sensor.PodHomeChargeCostSensor(coordinator, PPID)
     assert cost.native_value == 12.34
     assert cost.native_unit_of_measurement == "GBP"
 

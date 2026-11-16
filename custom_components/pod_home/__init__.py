@@ -8,8 +8,8 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_validation as cv
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
@@ -125,9 +125,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> b
 
     entry.runtime_data = coordinator
 
+    await _async_migrate_charge_unique_ids(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
+
+
+# Unique-ID suffixes of the Charge duration/energy/cost sensors before 0.3.7, and now.
+_CHARGE_UNIQUE_ID_SUFFIXES = {
+    "_last_charge_duration": "_charge_duration",
+    "_last_charge_energy": "_charge_energy",
+    "_last_charge_cost": "_charge_cost",
+}
+
+
+async def _async_migrate_charge_unique_ids(hass: HomeAssistant, entry: PodHomeConfigEntry) -> None:
+    """Move the Charge sensors' registry entries to their current unique IDs."""
+    registry = er.async_get(hass)
+
+    @callback
+    def _migrate(entity_entry: er.RegistryEntry) -> dict[str, Any] | None:
+        for old_suffix, new_suffix in _CHARGE_UNIQUE_ID_SUFFIXES.items():
+            if not entity_entry.unique_id.endswith(old_suffix):
+                continue
+            new_unique_id = entity_entry.unique_id.removesuffix(old_suffix) + new_suffix
+            if registry.async_get_entity_id(entity_entry.domain, DOMAIN, new_unique_id):
+                return None  # the new ID is already taken
+            return {"new_unique_id": new_unique_id}
+        return None
+
+    await er.async_migrate_entries(hass, entry.entry_id, _migrate)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> bool:

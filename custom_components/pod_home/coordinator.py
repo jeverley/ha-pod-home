@@ -49,9 +49,11 @@ RECENT_CHARGES_LOOKBACK = datetime.timedelta(days=30)
 # the charger checks in at most every 5 minutes, more often around a plug-in or charging ending.
 FAST_POLL_INTERVAL = datetime.timedelta(seconds=60)
 SLOW_POLL_INTERVAL = datetime.timedelta(seconds=300)
-# Fast polling runs this long after a plug-in, until charging starts.
-PLUG_IN_FAST_POLL_WINDOW = datetime.timedelta(minutes=5)
+# Fast polling runs this long after a plug-in or a boost's start, until charging starts.
+AWAITING_CHARGE_WINDOW = datetime.timedelta(minutes=5)
 CHECK_IN_BUFFER = datetime.timedelta(seconds=5)
+# How far back charge-overrides entries are debug-logged.
+OVERRIDE_LOG_WINDOW = datetime.timedelta(hours=24)
 # Longest gap between two consecutive charger check-ins, plus margin.
 CHECK_IN_GAP_TOLERANCE = datetime.timedelta(minutes=6)
 # How far back _charging_state_transitions_by_ppid keeps entries - bounds an otherwise
@@ -275,7 +277,7 @@ class PodHomeCharger:
     # The live in-progress charge, if one is active right now - from api3's charges endpoint,
     # not mobile-api's own /charges (which only shows finalized sessions). The Charge
     # duration/energy/cost sensors prefer this over latest_charge when set - see
-    # PodHomeLastChargeDurationSensor's docstring in sensor.py. None when nothing is currently
+    # PodHomeChargeDurationSensor's docstring in sensor.py. None when nothing is currently
     # charging, or api3 couldn't be reached this poll (non-fatal).
     current_charge: PodHomeCharge | None
     # Month-to-date figures - finalized charges only, matching what the app shows. Cost in minor
@@ -298,10 +300,12 @@ class PodHomeCharger:
     # preferences) driving the Charge Priority select - both read and write. See
     # charging_priority_label()/max_price_for_charging_priority() in helpers.py.
     max_price: float | None
-    # The active boost ("Charge Now")'s end time, if one is currently running - from
+    # The active or upcoming boost ("Charge Now")'s end time - from
     # GET /chargers/{ppid}/charge-overrides, see _parse_charge_overrides() above for how "current"
-    # is decided. None when no boost is active.
+    # is decided. None when there's no boost.
     boost_end_at: datetime.datetime | None
+    # That boost's start (its requestedAt). None when there's no boost or it has no requestedAt.
+    boost_start_at: datetime.datetime | None
     # Whether the charger's currently-configured tariff supports Smart Charging at all - a
     # tariff with more than two rates, or one where the supplier controls charging directly,
     # forces Basic Charging. From the same already-fetched tariffs response as tariff_windows
@@ -358,9 +362,11 @@ class PodHomeChargeOverrideState:
     alongside preferences (not staleness-cached); only overwritten in the cache on a genuine
     list response, so a transient fetch failure doesn't flap an in-progress boost to None."""
 
-    # The active boost's end time - whichever non-deleted, not-yet-ended entry has the latest
-    # requestedAt (list order isn't trusted). An entry with no endAt is never a boost.
+    # The active or upcoming boost's end time - whichever non-deleted, not-yet-ended entry has
+    # the latest requestedAt (list order isn't trusted). An entry with no endAt is never a boost.
     boost_end_at: datetime.datetime | None
+    # That same boost entry's requestedAt, None if it has none.
+    boost_start_at: datetime.datetime | None
     # Whether any non-deleted entry has no endAt at all.
     always_on_active: bool
     # requestedAt of the newest non-deleted boost or Always On entry still in effect.
@@ -383,7 +389,7 @@ def _parse_charge_overrides(
     account's full override history is returned every time, unbounded, confirmed live), not a
     correctness filter - current_charging_seconds() clips every event to [session_start, now]
     regardless."""
-    best: tuple[datetime.datetime, datetime.datetime] | None = None
+    best: tuple[datetime.datetime, datetime.datetime, datetime.datetime | None] | None = None
     always_on_active = False
     newest_requested_at: datetime.datetime | None = None
     override_events: list[tuple[datetime.datetime, datetime.datetime, str]] = []
@@ -415,10 +421,11 @@ def _parse_charge_overrides(
             continue
         resolved_requested_at = requested_at or end_at
         if best is None or resolved_requested_at > best[0]:
-            best = (resolved_requested_at, end_at)
+            best = (resolved_requested_at, end_at, requested_at)
 
     return PodHomeChargeOverrideState(
         boost_end_at=best[1] if best else None,
+        boost_start_at=best[2] if best else None,
         always_on_active=always_on_active,
         requested_at=newest_requested_at,
         override_events=override_events,
@@ -542,6 +549,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # Whether api3 charges have been fetched successfully since startup.
         self._api3_charges_fetched = False
         self._warned_keys: set[str] = set()
+        # The last charge-overrides entries logged per charger - see _log_recent_overrides().
+        self._logged_overrides_by_ppid: dict[str, list[dict[str, Any]]] = {}
         # Wall-clock time WE observed each charger being plugged in, kept until it charges or is
         # unplugged. Drives adaptive polling.
         self._plugged_in_at: dict[str, datetime.datetime] = {}
@@ -1598,6 +1607,23 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self._current_charge_by_ppid[ppid] = current_charge
         return current_charge
 
+    def _log_recent_overrides(
+        self, ppid: str, charge_overrides_raw: list[Any], now: datetime.datetime
+    ) -> None:
+        """Debug-log this charger's charge-overrides entries requested in the last 24 hours,
+        whenever they change."""
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+        recent = [
+            entry
+            for entry in (_safe_dict(raw) for raw in charge_overrides_raw)
+            if (requested_at := _parse_dt(entry.get("requestedAt"))) is not None
+            and now - requested_at <= OVERRIDE_LOG_WINDOW
+        ]
+        if recent != self._logged_overrides_by_ppid.get(ppid):
+            self._logged_overrides_by_ppid[ppid] = recent
+            _LOGGER.debug("Charge overrides for %s (last %s): %s", ppid, OVERRIDE_LOG_WINDOW, recent)
+
     async def _async_fetch_live_per_charger_data(
         self,
         ppid: str,
@@ -1660,6 +1686,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # Only overwrite on a genuine list response (a failed fetch falls back to {} via
         # _safe_call, not a list) - leaves the last known boost end time in place.
         if isinstance(charge_overrides_raw, list):
+            self._log_recent_overrides(ppid, charge_overrides_raw, now)
             current_charge = self._current_charge_by_ppid.get(ppid)
             self._charge_override_by_ppid[ppid] = _parse_charge_overrides(
                 charge_overrides_raw, now, current_charge.started_at if current_charge else None
@@ -1740,6 +1767,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
 
         self._check_restart_gap(ppid, charging_state, last_seen_at)
         if last_seen_at is not None:
+            if last_seen_at != self._last_seen_at_by_ppid.get(ppid):
+                _LOGGER.debug("Check-in for %s at %s: %s", ppid, last_seen_at, charging_state)
             self._last_seen_at_by_ppid[ppid] = last_seen_at
         self._track_plug_in(ppid, charging_state, last_seen_at)
         current_charge = self._current_charge_duration(
@@ -1778,6 +1807,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             vehicle=self._vehicle_by_ppid.get(ppid),
             max_price=self._max_price_by_ppid.get(ppid),
             boost_end_at=override_state.boost_end_at if override_state else None,
+            boost_start_at=override_state.boost_start_at if override_state else None,
             smart_charging_supported=self._smart_charging_supported_by_ppid.get(ppid),
             remote_lock_off_mode=self._remote_lock_off_mode_by_ppid.get(ppid),
             always_on_active=override_state.always_on_active if override_state else None,
@@ -1844,17 +1874,44 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             self._plugged_in_at.pop(ppid, None)
 
     def _base_poll_interval(self, now: datetime.datetime) -> datetime.timedelta:
-        """FAST_POLL_INTERVAL within PLUG_IN_FAST_POLL_WINDOW of a plug-in that hasn't started
-        charging yet, otherwise SLOW_POLL_INTERVAL."""
+        """FAST_POLL_INTERVAL within AWAITING_CHARGE_WINDOW of a plug-in, or of a plugged-in
+        charger's boost start, that hasn't started charging yet; otherwise SLOW_POLL_INTERVAL."""
         awaiting_charge = any(
-            now - plugged_in_at <= PLUG_IN_FAST_POLL_WINDOW
+            now - plugged_in_at <= AWAITING_CHARGE_WINDOW
             for plugged_in_at in self._plugged_in_at.values()
-        )
+        ) or any(self._boost_awaiting_charge(ppid, now) for ppid in self._charge_override_by_ppid)
         return FAST_POLL_INTERVAL if awaiting_charge else SLOW_POLL_INTERVAL
+
+    def _boost_awaiting_charge(self, ppid: str, now: datetime.datetime) -> bool:
+        """Whether this charger's boost started within AWAITING_CHARGE_WINDOW plus
+        CHECK_IN_GAP_TOLERANCE (the charger starts it at its first check-in after the start), with
+        the cable plugged in and not yet charging."""
+        override = self._charge_override_by_ppid.get(ppid)
+        start = override.boost_start_at if override else None
+        transitions = self._charging_state_transitions_by_ppid.get(ppid)
+        state = transitions[-1][1] if transitions else None
+        return (
+            start is not None
+            and start <= now <= start + AWAITING_CHARGE_WINDOW + CHECK_IN_GAP_TOLERANCE
+            and state != CHARGING_STATE_CHARGING
+            and CHARGING_STATE_CABLE_CONNECTED.get(state or "") is True
+        )
+
+    @staticmethod
+    def _upcoming_boost_start_delays(
+        chargers: dict[str, PodHomeCharger], now: datetime.datetime
+    ) -> list[datetime.timedelta]:
+        """Time until each charger's boost start that's still ahead."""
+        return [
+            charger.boost_start_at - now
+            for charger in chargers.values()
+            if charger.boost_start_at is not None and charger.boost_start_at > now
+        ]
 
     def _async_adjust_poll_interval(self, chargers: dict[str, PodHomeCharger]) -> None:
         """Set the delay to the next poll: _base_poll_interval() counted from the latest charger
-        check-in (plus CHECK_IN_BUFFER) when that's still ahead, else from now."""
+        check-in (plus CHECK_IN_BUFFER) when that's still ahead, else from now - or sooner, to
+        poll at an upcoming boost start."""
         now = dt_util.utcnow()
         interval = self._base_poll_interval(now)
         upcoming = [
@@ -1863,6 +1920,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             if charger.last_seen_at is not None
         ]
         upcoming = [delay for delay in upcoming if delay > datetime.timedelta(0)]
+        upcoming += self._upcoming_boost_start_delays(chargers, now)
         new_interval = (
             # HA can fire a poll up to a second early, leaving a sub-second delay.
             max(min(min(upcoming), interval + CHECK_IN_BUFFER), CHECK_IN_BUFFER)
@@ -1872,7 +1930,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         _LOGGER.debug(
             "Next poll in %s (%s)",
             new_interval,
-            "awaiting charge after plug-in" if interval == FAST_POLL_INTERVAL else "idle",
+            "awaiting charge" if interval == FAST_POLL_INTERVAL else "idle",
         )
         self.update_interval = new_interval
 

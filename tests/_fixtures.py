@@ -191,6 +191,7 @@ def make_charger(**overrides) -> PodHomeCharger:
         vehicle=None,
         max_price=None,
         boost_end_at=None,
+        boost_start_at=None,
         smart_charging_supported=None,
         remote_lock_off_mode=None,
         always_on_active=False,

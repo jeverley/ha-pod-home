@@ -8,6 +8,7 @@ import datetime
 from unittest.mock import AsyncMock
 
 import pytest
+from freezegun import freeze_time
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
@@ -85,14 +86,15 @@ async def test_start_boost_with_duration(hass: HomeAssistant) -> None:
     assert kwargs["end_at"] - kwargs["requested_at"] == datetime.timedelta(minutes=30)
 
 
-async def test_start_boost_rejects_unplugged_cable(hass: HomeAssistant) -> None:
+async def test_start_boost_allowed_with_cable_unplugged(hass: HomeAssistant) -> None:
+    """Lets an automation start a boost ahead of plug-in, e.g. for a supplier's free period."""
     coordinator, device_id = await _setup(hass, charging_state="Available")
 
-    with pytest.raises(ServiceValidationError):
-        await hass.services.async_call(
-            DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
-        )
-    coordinator.api.async_create_charge_override.assert_not_awaited()
+    await hass.services.async_call(
+        DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
+    )
+
+    coordinator.api.async_create_charge_override.assert_awaited_once()
 
 
 async def test_start_boost_rejects_during_always_on(hass: HomeAssistant) -> None:
@@ -101,6 +103,72 @@ async def test_start_boost_rejects_during_always_on(hass: HomeAssistant) -> None
     )
 
     with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
+        )
+    coordinator.api.async_create_charge_override.assert_not_awaited()
+
+
+@freeze_time("2026-11-15T12:00:00Z")
+@pytest.mark.parametrize(
+    ("start", "expected_requested", "expected_end"),
+    [
+        # Later today: requested then, ending a duration after.
+        ("2026-11-15T13:00:00+00:00", "2026-11-15T13:00:00+00:00", "2026-11-15T13:30:00+00:00"),
+        # Already started: sent as now, same end.
+        ("2026-11-15T11:50:00+00:00", "2026-11-15T12:00:00+00:00", "2026-11-15T12:20:00+00:00"),
+    ],
+)
+async def test_start_boost_with_start(
+    hass: HomeAssistant, start: str, expected_requested: str, expected_end: str
+) -> None:
+    coordinator, device_id = await _setup(hass, charging_state="Available")
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_START_BOOST,
+        {"device_id": device_id, "start": start, "duration": {"minutes": 30}},
+        blocking=True,
+    )
+
+    _, kwargs = coordinator.api.async_create_charge_override.call_args
+    assert kwargs["requested_at"] == datetime.datetime.fromisoformat(expected_requested)
+    assert kwargs["end_at"] == datetime.datetime.fromisoformat(expected_end)
+
+
+@freeze_time("2026-11-15T12:00:00Z")
+async def test_start_boost_rejects_a_window_already_over(hass: HomeAssistant) -> None:
+    coordinator, device_id = await _setup(hass, charging_state="Available")
+
+    with pytest.raises(ServiceValidationError, match="already have ended"):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_START_BOOST,
+            {"device_id": device_id, "start": "2026-11-15T11:00:00+00:00",
+             "duration": {"minutes": 30}},
+            blocking=True,
+        )
+    coordinator.api.async_create_charge_override.assert_not_awaited()
+
+
+@pytest.mark.parametrize("duration", ["00:00:00", "-01:00:00"])
+async def test_start_boost_rejects_a_duration_of_zero_or_less(
+    hass: HomeAssistant, duration: str
+) -> None:
+    coordinator, device_id = await _setup(hass, charging_state="Charging")
+
+    with pytest.raises(ServiceValidationError, match="more than zero"):
+        await hass.services.async_call(
+            DOMAIN, SERVICE_START_BOOST, {"device_id": device_id, "duration": duration},
+            blocking=True,
+        )
+    coordinator.api.async_create_charge_override.assert_not_awaited()
+
+
+async def test_start_boost_rejects_unknown_always_on_state(hass: HomeAssistant) -> None:
+    coordinator, device_id = await _setup(hass, charging_state="Charging", always_on_active=None)
+
+    with pytest.raises(ServiceValidationError, match="can't tell yet"):
         await hass.services.async_call(
             DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
         )

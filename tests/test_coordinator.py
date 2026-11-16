@@ -22,6 +22,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.pod_home.const import DOMAIN
 from custom_components.pod_home.coordinator import (
     FAST_POLL_INTERVAL,
+    PodHomeChargeOverrideState,
     SLOW_POLL_INTERVAL,
     PodHomeDataUpdateCoordinator,
 )
@@ -255,6 +256,7 @@ async def test_boost_end_at_parsed_from_charge_overrides(
     result = await coordinator._async_fetch_data()
 
     assert result[PPID].boost_end_at == future
+    assert result[PPID].boost_start_at == datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
 
 
 async def test_override_requested_at_is_newest_active_entry(
@@ -274,6 +276,24 @@ async def test_override_requested_at_is_newest_active_entry(
     result = await coordinator._async_fetch_data()
 
     assert result[PPID].override_requested_at == active
+
+
+async def test_recent_charge_overrides_logged_when_they_change(
+    api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator, caplog
+) -> None:
+    now = datetime.datetime.now(datetime.timezone.utc)
+    entry = {"requestedAt": now.isoformat(), "endAt": (now + datetime.timedelta(minutes=5)).isoformat()}
+    api.async_get_charge_overrides.return_value = [entry]
+    caplog.set_level("DEBUG", logger="custom_components.pod_home.coordinator")
+
+    coordinator.data = await coordinator._async_fetch_data()
+    coordinator.data = await coordinator._async_fetch_data()  # unchanged - not logged again
+    api.async_get_charge_overrides.return_value = [{**entry, "deletedAt": now.isoformat()}]
+    await coordinator._async_fetch_data()
+
+    logged = [r.message for r in caplog.records if r.message.startswith("Charge overrides for")]
+    assert len(logged) == 2
+    assert "deletedAt" in logged[1]
 
 
 async def test_deleted_charge_override_not_current_boost(
@@ -1819,6 +1839,61 @@ async def test_fast_polling_only_while_awaiting_charge_after_plug_in(
         minutes=4, seconds=35
     )
     assert coordinator.update_interval == expected
+
+
+def _boost(start: datetime.datetime) -> PodHomeChargeOverrideState:
+    return PodHomeChargeOverrideState(
+        boost_end_at=start + datetime.timedelta(hours=1),
+        boost_start_at=start,
+        always_on_active=False,
+        requested_at=start,
+        override_events=[],
+    )
+
+
+@pytest.mark.parametrize(
+    ("started_ago", "state", "expect_fast"),
+    [
+        (datetime.timedelta(minutes=2), "SuspendedEVSE", True),  # due, plugged in, not charging
+        (datetime.timedelta(minutes=2), "Charging", False),  # already charging
+        (datetime.timedelta(minutes=2), "Available", False),  # nothing plugged in
+        (datetime.timedelta(minutes=10), "SuspendedEVSE", True),  # awaiting the check-in after
+        (datetime.timedelta(minutes=12), "SuspendedEVSE", False),  # window over
+        (-datetime.timedelta(minutes=2), "SuspendedEVSE", False),  # not due yet
+    ],
+)
+async def test_fast_polling_after_a_boost_starts(
+    coordinator: PodHomeDataUpdateCoordinator,
+    started_ago: datetime.timedelta,
+    state: str,
+    expect_fast: bool,
+) -> None:
+    now = datetime.datetime(2026, 11, 15, 11, 2, tzinfo=datetime.timezone.utc)
+    coordinator._charge_override_by_ppid[PPID] = _boost(now - started_ago)
+    coordinator._charging_state_transitions_by_ppid[PPID] = [(now, state)]
+
+    interval = coordinator._base_poll_interval(now)
+
+    assert (interval == FAST_POLL_INTERVAL) is expect_fast
+
+
+@freeze_time("2026-11-15T10:58:40Z")
+async def test_poll_lands_at_an_upcoming_boost_start(
+    coordinator: PodHomeDataUpdateCoordinator,
+) -> None:
+    """Idle polling would wait until 11:03:39; the boost starting at 11:00 brings it forward."""
+    now = datetime.datetime(2026, 11, 15, 10, 58, 40, tzinfo=datetime.timezone.utc)
+
+    coordinator._async_adjust_poll_interval(
+        {
+            PPID: make_charger(
+                last_seen_at=now - datetime.timedelta(seconds=6),
+                boost_start_at=datetime.datetime(2026, 11, 15, 11, 0, tzinfo=datetime.timezone.utc),
+            )
+        }
+    )
+
+    assert coordinator.update_interval == datetime.timedelta(minutes=1, seconds=20)
 
 
 async def test_routine_check_ins_alone_dont_keep_polling_fast(

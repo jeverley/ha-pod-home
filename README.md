@@ -58,9 +58,9 @@ The charger's firmware version shows on its device page, under Device info.
 | Month cost             | Sensors       | Sensor         | Finalized charges only, resets each calendar month |
 | Total energy           | Sensors       | Sensor         | Live-inclusive running total since this install started tracking - see "Energy Dashboard" below |
 | Electricity rate       | Sensors       | Sensor         | Current tariff rate, computed from your configured tariff windows - not mode-gated, applies in Basic Charging too |
-| Boost end time         | Sensors       | Sensor         | When the active boost ends, if any |
+| Boost end time         | Sensors       | Sensor         | When the active or upcoming boost ends, if any |
 | Cable status           | Sensors       | Binary sensor  | On when a cable is physically connected |
-| Schedule               | Controls      | Calendar       | Manual schedule (Basic) or live smart-charging plan (Smart), whichever mode is active |
+| Schedule               | Controls      | Calendar       | Manual schedule (Basic) or live smart-charging plan (Smart), whichever mode is active, plus the active or upcoming boost |
 | Boost duration         | Controls      | Time           | Local input (hh:mm) for Boost for duration below - no default, resets after each use, shows `unavailable` with cable unplugged |
 | Full charge            | Controls      | Button         | Boost ("Charge Now") to 100%, matching the app |
 | Boost for duration     | Controls      | Button         | Boost for the duration set above, matching the app |
@@ -132,8 +132,12 @@ first:
 
 - **`pod_home.start_boost`** - starts a boost. An optional `duration` field boosts for that long
   (matching the app's Set duration option); omit it for a full charge (matching Full charge, a
-  flat 12-hour override). Fails with a clear error if the cable's unplugged or Always On is
-  active, same as the buttons.
+  flat 12-hour override). An optional `start` schedules it for later (a time already passed starts
+  now with the same end); the duration counts from the start, not from plug-in. The charger begins
+  at its first check-in after the start, so up to about 5 minutes later. Works with the cable
+  unplugged (unlike the buttons): the boost applies once it's plugged in. Fails with a clear error if Always On is active, or if the boost would already have ended. A
+  new boost replaces any existing one, including a scheduled one, so there's only ever one at a
+  time. The Schedule calendar shows the active or upcoming boost as a Boost charging event.
 - **`pod_home.cancel_boost`** - cancels the active boost, if any.
 
 ## Known limitations

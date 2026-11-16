@@ -1,11 +1,12 @@
 """Domain-wide services ("actions") for pod_home - registered once in async_setup, not per
-config entry. start_boost/cancel_boost mirror button.py's Boost full charge/Boost for duration/
-Cancel boost buttons exactly (same underlying charge-overrides calls).
+config entry. start_boost/cancel_boost make the same charge-overrides calls as button.py's Boost
+full charge/Boost for duration/Cancel boost buttons; start_boost also accepts the cable unplugged
+and a future `start`.
 
 device_id is a plain required field, not HA's own "target" mechanism - hassfest rejects a
 services.yaml `target.device` key entirely.
 
-WRITE ENDPOINTS with a real physical effect on the charger. Confirmed working live.
+WRITE ENDPOINTS with a real physical effect on the charger.
 """
 from __future__ import annotations
 
@@ -20,7 +21,6 @@ from homeassistant.util import dt as dt_util
 from .const import DOMAIN
 from .coordinator import PodHomeCharger, PodHomeDataUpdateCoordinator
 from .entity import async_handle_write_auth_error
-from .helpers import boostable, is_momentarily_unplugged
 from .podpoint_mobile_api import PodHomeAuthError
 
 SERVICE_START_BOOST = "start_boost"
@@ -28,6 +28,7 @@ SERVICE_CANCEL_BOOST = "cancel_boost"
 
 ATTR_DEVICE_ID = "device_id"
 ATTR_DURATION = "duration"
+ATTR_START = "start"
 
 # Matches PodHomeBoostFullChargeButton's own flat duration (button.py) - see its docstring for
 # why 12h, not indefinite.
@@ -37,6 +38,7 @@ START_BOOST_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_DEVICE_ID): cv.string,
         vol.Optional(ATTR_DURATION): cv.time_period,
+        vol.Optional(ATTR_START): cv.datetime,
     }
 )
 CANCEL_BOOST_SCHEMA = vol.Schema({vol.Required(ATTR_DEVICE_ID): cv.string})
@@ -51,18 +53,21 @@ def _resolve_charger(hass: HomeAssistant, device_id: str) -> tuple[PodHomeDataUp
     device = device_registry.async_get(device_id)
     if device is None:
         raise ServiceValidationError(f"Unknown device: {device_id}")
-    for config_entry_id in device.config_entries:
-        entry = hass.config_entries.async_get_entry(config_entry_id)
+    # DeviceEntry.config_entry_id replaces the deprecated config_entries set.
+    entry_ids = (
+        [device.config_entry_id] if hasattr(device, "config_entry_id") else device.config_entries
+    )
+    for entry_id in entry_ids:
+        entry = hass.config_entries.async_get_entry(entry_id)
         if entry is None or entry.domain != DOMAIN:
             continue
         # runtime_data is unset (raises AttributeError, not None) until async_setup_entry
         # finishes, even though the device registry can already list this entry against a device.
         coordinator: PodHomeDataUpdateCoordinator | None = getattr(entry, "runtime_data", None)
-        if coordinator is None:
-            continue
-        for ppid in coordinator.data:
-            if (DOMAIN, ppid) in device.identifiers:
-                return coordinator, ppid
+        if coordinator is not None:
+            for ppid in coordinator.data:
+                if (DOMAIN, ppid) in device.identifiers:
+                    return coordinator, ppid
     raise ServiceValidationError(
         f"{device.name or device_id} isn't a Pod Home charger device - pick the charger, not a "
         "linked vehicle or the Pod Point account device"
@@ -70,12 +75,29 @@ def _resolve_charger(hass: HomeAssistant, device_id: str) -> tuple[PodHomeDataUp
 
 
 def _require_boostable(charger: PodHomeCharger, device_label: str) -> None:
-    """Same underlying check as entity.py's _boostable (helpers.boostable()), split into two
-    messages so the user knows which precondition failed."""
-    if is_momentarily_unplugged(charger.charging_state):
-        raise ServiceValidationError(f"{device_label}: plug in the cable before boosting")
-    if not boostable(charger.charging_state, charger.always_on_active):
+    """A boost can't be started during Always On, or while that's unknown. The cable may be
+    unplugged."""
+    if charger.always_on_active is None:
+        raise ServiceValidationError(
+            f"{device_label}: can't tell yet whether Always On is active - try again shortly"
+        )
+    if charger.always_on_active:
         raise ServiceValidationError(f"{device_label}: can't boost while Always On is active")
+
+
+def _boost_window(
+    start: datetime.datetime | None, duration: datetime.timedelta, device_label: str
+) -> tuple[datetime.datetime, datetime.datetime]:
+    """(requestedAt, endAt) for a boost lasting `duration` from `start` (local time if naive). A
+    start already passed is sent as now, keeping the same end."""
+    if duration <= datetime.timedelta(0):
+        raise ServiceValidationError(f"{device_label}: the duration must be more than zero")
+    now = dt_util.utcnow()
+    start_utc = dt_util.as_utc(start) if start is not None else now
+    end_at = start_utc + duration
+    if end_at <= now:
+        raise ServiceValidationError(f"{device_label}: that boost would already have ended")
+    return max(start_utc, now), end_at
 
 
 def async_setup_services(hass: HomeAssistant) -> None:
@@ -88,8 +110,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
         charger = coordinator.data[ppid]
         _require_boostable(charger, ppid)
         duration: datetime.timedelta | None = call.data.get(ATTR_DURATION)
-        requested_at = dt_util.utcnow()
-        end_at = requested_at + (duration if duration is not None else _FULL_CHARGE_DURATION)
+        requested_at, end_at = _boost_window(
+            call.data.get(ATTR_START),
+            duration if duration is not None else _FULL_CHARGE_DURATION,
+            ppid,
+        )
         try:
             await coordinator.api.async_create_charge_override(
                 ppid, requested_at=requested_at, end_at=end_at
