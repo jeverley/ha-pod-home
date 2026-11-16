@@ -14,11 +14,24 @@ targets. A clean rewrite for that newer backend, not a patch to the older integr
 
 ## Installation
 
-### HACS
+### Marketplace (Home Assistant 2026.11 or later)
+
+[![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jeverley&repository=ha-pod-home&category=integration)
+
+Or add it yourself:
+
+1. Settings → **Marketplace** → **Add from link** (upper-right) → enter `jeverley/ha-pod-home` →
+   **Add**. The Marketplace asks you to connect GitHub the first time you add a repository.
+2. Open **Pod Home** → **Install**. If Home Assistant needs a restart first, a repair under
+   Settings → System → Repairs offers to do it.
+
+### HACS (Home Assistant 2026.10)
 
 1. HACS → Integrations → ⋮ → **Custom repositories** → add this repository URL, category
    **Integration**.
 2. Install **Pod Home**, then restart Home Assistant.
+
+Upgrading to 2026.11 moves a HACS install into the Marketplace automatically.
 
 ### Manual
 
@@ -154,8 +167,9 @@ first:
   unsupported hardware - not a case of finding it and enabling it. Built code-reviewed-only for
   that reason - if you have a Solo 3S, feedback on whether the entity appears and works as
   expected is genuinely useful.
-- Not yet on HACS's default repository list - install as a custom repository (see above) for
-  now. Tagged releases do exist (see the repo's Releases page).
+- Not yet in the Marketplace catalog (HACS's default repository list) - add it from a link, or as
+  a custom repository in HACS (see above), for now. Tagged releases do exist (see the repo's
+  Releases page).
 
 ## More detail
 
