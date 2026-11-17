@@ -3,6 +3,13 @@ Home" app). Firebase email/password auth plus read-only endpoints.
 """
 from .auth import PodHomeAuth
 from .client import PodHomeApiClient
-from .exceptions import PodHomeApiError, PodHomeAuthError
+from .exceptions import PodHomeApiError, PodHomeAuthError, PodHomeConnectionError, PodHomeError
 
-__all__ = ["PodHomeAuth", "PodHomeApiClient", "PodHomeApiError", "PodHomeAuthError"]
+__all__ = [
+    "PodHomeAuth",
+    "PodHomeApiClient",
+    "PodHomeApiError",
+    "PodHomeAuthError",
+    "PodHomeConnectionError",
+    "PodHomeError",
+]

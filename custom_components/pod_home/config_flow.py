@@ -16,7 +16,7 @@ from homeassistant.helpers.selector import (
 from homeassistant.helpers.storage import Store
 
 # TEMPORARY: vendored copy, see __init__.py's import comment.
-from .podpoint_mobile_api import PodHomeAuth, PodHomeAuthError
+from .podpoint_mobile_api import PodHomeAuth, PodHomeAuthError, PodHomeConnectionError
 from .const import AUTH_STORAGE_VERSION, CONF_EMAIL, CONF_PASSWORD, DOMAIN, auth_store_key
 
 _LOGGER = logging.getLogger(__name__)
@@ -57,9 +57,12 @@ class PodHomeConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             try:
                 await auth.async_get_id_token()
+            except PodHomeConnectionError as exc:
+                _LOGGER.debug("Couldn't reach Pod Point during config flow: %s", exc)
+                errors["base"] = "cannot_connect"
             except PodHomeAuthError as exc:
                 _LOGGER.debug("Sign-in failed during config flow: %s", exc)
-                errors["base"] = "cannot_connect" if exc.transient else "invalid_auth"
+                errors["base"] = "invalid_auth"
             else:
                 return self.async_create_entry(
                     title=user_input[CONF_EMAIL], data=user_input
@@ -88,9 +91,12 @@ class PodHomeConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             try:
                 await auth.async_get_id_token()
+            except PodHomeConnectionError as exc:
+                _LOGGER.debug("Couldn't reach Pod Point during reauth: %s", exc)
+                errors["base"] = "cannot_connect"
             except PodHomeAuthError as exc:
                 _LOGGER.debug("Sign-in failed during reauth: %s", exc)
-                errors["base"] = "cannot_connect" if exc.transient else "invalid_auth"
+                errors["base"] = "invalid_auth"
             else:
                 # Clears the persisted refresh token (keyed by entry_id, unchanged by reauth)
                 # before reload, so a stale pre-reauth session isn't silently restored. A failed

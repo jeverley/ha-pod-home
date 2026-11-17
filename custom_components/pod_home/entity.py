@@ -19,7 +19,7 @@ from .helpers import (
     select_last_charge,
     smart_mode_available,
 )
-from .podpoint_mobile_api import PodHomeApiError, PodHomeAuthError
+from .podpoint_mobile_api import PodHomeAuthError, PodHomeConnectionError, PodHomeError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -200,18 +200,16 @@ class PodHomeOptimisticWriteMixin(
 
 
 async def async_handle_write_error(
-    coordinator: PodHomeDataUpdateCoordinator, exc: PodHomeApiError | PodHomeAuthError
+    coordinator: PodHomeDataUpdateCoordinator, exc: PodHomeError
 ) -> NoReturn:
     """Fail a write with HomeAssistantError. An auth error also requests a refresh, so a real
     rejection starts reauth."""
-    if isinstance(exc, PodHomeApiError):
-        if exc.status == 0:
-            raise HomeAssistantError(f"Couldn't reach Pod Point: {exc.body}") from exc
-        raise HomeAssistantError(f"Pod Point request failed: {exc}") from exc
-    await coordinator.async_request_refresh()
-    if exc.transient:
+    if isinstance(exc, PodHomeConnectionError):
         raise HomeAssistantError(f"Couldn't reach Pod Point: {exc}") from exc
-    raise HomeAssistantError(f"Pod Point rejected the request: {exc}") from exc
+    if isinstance(exc, PodHomeAuthError):
+        await coordinator.async_request_refresh()
+        raise HomeAssistantError(f"Pod Point rejected the request: {exc}") from exc
+    raise HomeAssistantError(f"Pod Point request failed: {exc}") from exc
 
 
 def async_setup_dynamic_chargers(

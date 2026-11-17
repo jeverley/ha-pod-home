@@ -19,7 +19,7 @@ from homeassistant.util import dt as dt_util
 from .const import DOMAIN
 from .entity import PodHomeEntity, async_handle_write_error, async_setup_dynamic_chargers
 from .helpers import parse_time_of_day
-from .podpoint_mobile_api import PodHomeApiError, PodHomeAuthError
+from .podpoint_mobile_api import PodHomeError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -83,7 +83,7 @@ class PodHomeBoostFullChargeButton(PodHomeEntity, ButtonEntity):
             await self.coordinator.api.async_create_charge_override(
                 self.ppid, requested_at=requested_at, end_at=requested_at + _FULL_CHARGE_DURATION
             )
-        except (PodHomeApiError, PodHomeAuthError) as exc:
+        except PodHomeError as exc:
             await async_handle_write_error(self.coordinator, exc)
         await self.coordinator.async_request_refresh()
 
@@ -117,7 +117,7 @@ class PodHomeBoostDurationButton(PodHomeEntity, ButtonEntity):
             await self.coordinator.api.async_create_charge_override(
                 self.ppid, requested_at=requested_at, end_at=end_at
             )
-        except (PodHomeApiError, PodHomeAuthError) as exc:
+        except PodHomeError as exc:
             await async_handle_write_error(self.coordinator, exc)
         await self.coordinator.async_request_refresh()
         # pod_home owns both entities - see time.py's PodHomeBoostDurationTime.async_reset().
@@ -149,6 +149,6 @@ class PodHomeCancelBoostButton(PodHomeEntity, ButtonEntity):
             raise HomeAssistantError("No charger to cancel a boost on")
         try:
             await self.coordinator.api.async_delete_charge_override(self.ppid)
-        except (PodHomeApiError, PodHomeAuthError) as exc:
+        except PodHomeError as exc:
             await async_handle_write_error(self.coordinator, exc)
         await self.coordinator.async_request_refresh()

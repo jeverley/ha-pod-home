@@ -30,6 +30,7 @@ from custom_components.pod_home.podpoint_mobile_api import (
     PodHomeApiClient,
     PodHomeApiError,
     PodHomeAuthError,
+    PodHomeConnectionError,
 )
 from custom_components.pod_home.helpers import select_last_charge
 import custom_components.pod_home.sensor as sensor
@@ -226,12 +227,13 @@ async def test_auth_error_raises_config_entry_auth_failed(
         await coordinator._async_update_data()
 
 
-async def test_transient_auth_error_raises_update_failed(
+async def test_non_fatal_connection_error_keeps_the_poll(
     api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
 ) -> None:
-    api.async_list_chargers.side_effect = PodHomeAuthError("timed out", transient=True)
-    with pytest.raises(UpdateFailed):
-        await coordinator._async_update_data()
+    api.async_reward_wallet.side_effect = PodHomeConnectionError("timed out")
+    result = await coordinator._async_update_data()
+    api.async_reward_wallet.assert_awaited()
+    assert PPID in result
 
 
 async def test_resolve_timezone_known(coordinator: PodHomeDataUpdateCoordinator) -> None:
@@ -248,7 +250,7 @@ async def test_resolve_timezone_falls_back_to_ha_default(
 async def test_connection_error_retries_then_raises_update_failed(
     api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
 ) -> None:
-    api.async_list_chargers.side_effect = PodHomeApiError(0, "connection refused")
+    api.async_list_chargers.side_effect = PodHomeConnectionError("connection refused")
     with patch("custom_components.pod_home.coordinator.asyncio.sleep", AsyncMock()):
         with pytest.raises(UpdateFailed):
             await coordinator._async_fetch_data()

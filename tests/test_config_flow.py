@@ -22,7 +22,10 @@ from custom_components.pod_home.const import (
     DOMAIN,
     auth_store_key,
 )
-from custom_components.pod_home.podpoint_mobile_api import PodHomeAuthError
+from custom_components.pod_home.podpoint_mobile_api import (
+    PodHomeAuthError,
+    PodHomeConnectionError,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -68,11 +71,11 @@ async def test_user_flow_success_creates_entry(hass: HomeAssistant) -> None:
     ("error", "expected"),
     [
         (PodHomeAuthError("bad credentials"), "invalid_auth"),
-        (PodHomeAuthError("timed out", transient=True), "cannot_connect"),
+        (PodHomeConnectionError("timed out"), "cannot_connect"),
     ],
 )
 async def test_user_flow_sign_in_error_shows_error(
-    hass: HomeAssistant, error: PodHomeAuthError, expected: str
+    hass: HomeAssistant, error: Exception, expected: str
 ) -> None:
     with patch(
         "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
@@ -156,11 +159,11 @@ async def test_reauth_flow_success_updates_password(hass: HomeAssistant) -> None
     ("error", "expected"),
     [
         (PodHomeAuthError("bad credentials"), "invalid_auth"),
-        (PodHomeAuthError("timed out", transient=True), "cannot_connect"),
+        (PodHomeConnectionError("timed out"), "cannot_connect"),
     ],
 )
 async def test_reauth_flow_sign_in_error_shows_error(
-    hass: HomeAssistant, error: PodHomeAuthError, expected: str
+    hass: HomeAssistant, error: Exception, expected: str
 ) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN, unique_id=USER_INPUT[CONF_EMAIL].lower(), data=USER_INPUT

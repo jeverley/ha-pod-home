@@ -17,7 +17,12 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 # TEMPORARY: vendored copy, see __init__.py's import comment.
-from .podpoint_mobile_api import PodHomeApiClient, PodHomeApiError, PodHomeAuthError
+from .podpoint_mobile_api import (
+    PodHomeApiClient,
+    PodHomeApiError,
+    PodHomeAuthError,
+    PodHomeConnectionError,
+)
 from .const import (
     CHARGING_STATE_CABLE_CONNECTED,
     CHARGING_STATE_CHARGING,
@@ -76,10 +81,9 @@ API3_UNLISTED_SESSION_HOLD = datetime.timedelta(hours=24)
 # rarely changes, same cadence as firmware/tariffs above.
 API3_ACCOUNT_REFRESH_INTERVAL = datetime.timedelta(hours=6)
 
-# A connection-level failure (couldn't reach mobile-api.pod-point.com at all - PodHomeApiError
-# with status 0) on GET /chargers below, the one call whose failure is fatal to the whole poll,
-# gets a few quick retries before giving up. NOT retried: a genuine HTTP error response (4xx/5xx)
-# or PodHomeAuthError, a different exception type this doesn't catch at all.
+# A PodHomeConnectionError on GET /chargers, the one call whose failure is fatal to the whole
+# poll, gets a few quick retries before giving up. HTTP error responses and auth errors aren't
+# retried.
 CONNECTION_RETRY_ATTEMPTS = 3
 CONNECTION_RETRY_DELAY_SECONDS = 2
 
@@ -782,7 +786,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
     async def _safe_call(
         self, key: str, message: str, coro: Coroutine[Any, Any, dict[str, Any] | list[Any]]
     ) -> dict[str, Any] | list[Any]:
-        """Await `coro`; on PodHomeApiError, log (deduped) and return {} instead of raising.
+        """Await `coro`; on an API or connection error, log (deduped) and return {} instead of
+        raising.
         Most endpoints here return a dict; a couple (e.g. GET /chargers/{ppid}/firmware) return
         a bare list instead - `result or {}` only coerces a falsy result, a genuine list result
         passes through unchanged. Does not catch PodHomeAuthError, which propagates to
@@ -792,7 +797,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             result = await coro
             self._clear_warning(key)
             return result or {}
-        except PodHomeApiError as exc:
+        except (PodHomeApiError, PodHomeConnectionError) as exc:
             self._warn_once(key, f"{message}: {exc}")
             return {}
 
@@ -815,9 +820,11 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             result = await self.api.async_smart_schedule_active(ppid)
             self._clear_warning(key)
             return result or {}
-        except PodHomeApiError as exc:
-            if isinstance(exc.body, dict) and (exc.status, exc.body.get("error")) in (
-                expected_errors
+        except (PodHomeApiError, PodHomeConnectionError) as exc:
+            if (
+                isinstance(exc, PodHomeApiError)
+                and isinstance(exc.body, dict)
+                and (exc.status, exc.body.get("error")) in expected_errors
             ):
                 _LOGGER.debug("No active smart schedule for %s (%s): %s", ppid, exc.body.get("error"), exc)
                 return {}
@@ -833,7 +840,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         successful response, even one where a field is legitimately absent."""
         try:
             users = await self.api.async_get_users()
-        except PodHomeApiError as exc:
+        except (PodHomeApiError, PodHomeConnectionError) as exc:
             self._warn_once(
                 "account_preferences", f"Couldn't fetch account preferences (will retry): {exc}"
             )
@@ -852,7 +859,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         on failure, so a genuine fetch error gets retried next poll."""
         try:
             raw = await self.api.async_reward_wallet()
-        except PodHomeApiError as exc:
+        except (PodHomeApiError, PodHomeConnectionError) as exc:
             self._warn_once("rewards", f"Couldn't fetch rewards balance (non-fatal): {exc}")
             return
         self._clear_warning("rewards")
@@ -875,7 +882,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         unless both calls succeed, so a partial failure gets retried next poll."""
         try:
             session_resp = await self.api.async_create_api3_session(self._email, self._password)
-        except PodHomeApiError as exc:
+        except (PodHomeApiError, PodHomeConnectionError) as exc:
             self._warn_once("api3_session", f"Couldn't create api3 session (non-fatal): {exc}")
             return
         user_id = ((session_resp or {}).get("sessions") or {}).get("user_id")
@@ -887,7 +894,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
 
         try:
             pods_resp = await self.api.async_api3_pods(user_id)
-        except PodHomeApiError as exc:
+        except (PodHomeApiError, PodHomeConnectionError) as exc:
             self._warn_once("api3_pods", f"Couldn't fetch api3 pods (non-fatal): {exc}")
             return
         self._clear_warning("api3_pods")
@@ -910,7 +917,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         called once it's confirmed set). Returns whether the fetch succeeded."""
         try:
             charges_resp = await self.api.async_api3_charges(api3_user_id)
-        except PodHomeApiError as exc:
+        except (PodHomeApiError, PodHomeConnectionError) as exc:
             self._warn_once("api3_charges", f"Couldn't fetch api3 charges (non-fatal): {exc}")
             return False
         self._clear_warning("api3_charges")
@@ -1009,14 +1016,14 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self.update_interval = self._base_poll_interval(dt_util.utcnow())
         try:
             return await self._async_fetch_data()
+        except PodHomeConnectionError as exc:
+            raise UpdateFailed(
+                str(exc),
+                translation_domain=DOMAIN,
+                translation_key="api_failed",
+                translation_placeholders={"error": str(exc)},
+            ) from exc
         except PodHomeAuthError as exc:
-            if exc.transient:
-                raise UpdateFailed(
-                    str(exc),
-                    translation_domain=DOMAIN,
-                    translation_key="api_failed",
-                    translation_placeholders={"error": str(exc)},
-                ) from exc
             raise ConfigEntryAuthFailed(
                 str(exc),
                 translation_domain=DOMAIN,
@@ -1031,13 +1038,11 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         CONNECTION_RETRY_ATTEMPTS times, but only for connection-level failures - see
         CONNECTION_RETRY_ATTEMPTS' comment above. Concretely typed for its one call site
         (async_list_chargers)."""
-        last_exc: PodHomeApiError | None = None
+        last_exc: PodHomeConnectionError | None = None
         for attempt_number in range(CONNECTION_RETRY_ATTEMPTS):
             try:
                 return await attempt()
-            except PodHomeApiError as exc:
-                if exc.status != 0:
-                    raise
+            except PodHomeConnectionError as exc:
                 last_exc = exc
                 if attempt_number < CONNECTION_RETRY_ATTEMPTS - 1:
                     await asyncio.sleep(CONNECTION_RETRY_DELAY_SECONDS)
@@ -1260,7 +1265,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
     async def _async_fetch_data(self) -> dict[str, PodHomeCharger]:
         try:
             chargers_raw = await self._async_with_connection_retry(self.api.async_list_chargers)
-        except PodHomeApiError as exc:
+        except (PodHomeApiError, PodHomeConnectionError) as exc:
             raise UpdateFailed(
                 str(exc),
                 translation_domain=DOMAIN,

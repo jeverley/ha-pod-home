@@ -10,7 +10,7 @@ import pytest
 
 from podpoint_mobile_api.auth import PodHomeAuth
 from podpoint_mobile_api.client import PodHomeApiClient
-from podpoint_mobile_api.exceptions import PodHomeApiError, PodHomeAuthError
+from podpoint_mobile_api.exceptions import PodHomeApiError, PodHomeAuthError, PodHomeConnectionError
 
 from ._fakes import FakeResponse, FakeSession, RaisesClientError, RaisesTimeout
 
@@ -58,22 +58,18 @@ async def test_get_500_raises_api_error_with_status() -> None:
     assert exc_info.value.status == 500
 
 
-async def test_get_connection_failure_raises_api_error_status_zero() -> None:
+async def test_get_connection_failure_raises_connection_error() -> None:
     client = _client(FakeSession([RaisesClientError()]))
 
-    with pytest.raises(PodHomeApiError) as exc_info:
+    with pytest.raises(PodHomeConnectionError):
         await client.async_list_chargers()
 
-    assert exc_info.value.status == 0
 
-
-async def test_get_timeout_raises_api_error_status_zero() -> None:
+async def test_get_timeout_raises_connection_error() -> None:
     client = _client(FakeSession([RaisesTimeout()]))
 
-    with pytest.raises(PodHomeApiError) as exc_info:
+    with pytest.raises(PodHomeConnectionError):
         await client.async_list_chargers()
-
-    assert exc_info.value.status == 0
 
 
 async def test_requests_carry_a_total_timeout() -> None:

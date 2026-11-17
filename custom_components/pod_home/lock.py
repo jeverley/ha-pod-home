@@ -27,7 +27,7 @@ from .entity import (
     async_handle_write_error,
     async_setup_dynamic_chargers,
 )
-from .podpoint_mobile_api import PodHomeApiError, PodHomeAuthError
+from .podpoint_mobile_api import PodHomeApiError, PodHomeError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -86,7 +86,7 @@ class PodHomeRemoteLock(PodHomeOptimisticWriteMixin[bool], PodHomeEntity, LockEn
                     "This charger doesn't support Remote Lock (Solo 3S only)"
                 ) from exc
             await async_handle_write_error(self.coordinator, exc)
-        except PodHomeAuthError as exc:
+        except PodHomeError as exc:
             await async_handle_write_error(self.coordinator, exc)
         self._set_optimistic_value(off_mode)
         await self.coordinator.async_request_refresh()

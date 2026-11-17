@@ -14,7 +14,11 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 
 from custom_components.pod_home.const import DOMAIN
-from custom_components.pod_home.podpoint_mobile_api import PodHomeApiError, PodHomeAuthError
+from custom_components.pod_home.podpoint_mobile_api import (
+    PodHomeApiError,
+    PodHomeAuthError,
+    PodHomeConnectionError,
+)
 from custom_components.pod_home.services import (
     SERVICE_CANCEL_BOOST,
     SERVICE_START_BOOST,
@@ -72,13 +76,11 @@ async def test_start_boost_auth_error_triggers_refresh_and_clean_failure(
     coordinator.async_request_refresh.assert_awaited_once()
 
 
-async def test_start_boost_transient_auth_error_reports_connection_failure(
+async def test_start_boost_connection_error_reports_connection_failure(
     hass: HomeAssistant,
 ) -> None:
     coordinator, device_id = await _setup(hass, charging_state="Charging")
-    coordinator.api.async_create_charge_override.side_effect = PodHomeAuthError(
-        "timed out", transient=True
-    )
+    coordinator.api.async_create_charge_override.side_effect = PodHomeConnectionError("timed out")
 
     with pytest.raises(HomeAssistantError, match="Couldn't reach Pod Point"):
         await hass.services.async_call(
@@ -89,12 +91,12 @@ async def test_start_boost_transient_auth_error_reports_connection_failure(
 @pytest.mark.parametrize(
     ("error", "message"),
     [
-        (PodHomeApiError(0, "timed out"), "Couldn't reach Pod Point"),
+        (PodHomeConnectionError("timed out"), "Couldn't reach Pod Point"),
         (PodHomeApiError(500, "server error"), "Pod Point request failed"),
     ],
 )
 async def test_start_boost_api_error_raises_home_assistant_error(
-    hass: HomeAssistant, error: PodHomeApiError, message: str
+    hass: HomeAssistant, error: Exception, message: str
 ) -> None:
     coordinator, device_id = await _setup(hass, charging_state="Charging")
     coordinator.api.async_create_charge_override.side_effect = error

@@ -13,7 +13,7 @@ import aiohttp
 
 from .auth import PodHomeAuth
 from .const import MOBILE_API_BASE_URL, REQUEST_TIMEOUT_SECONDS
-from .exceptions import PodHomeApiError, PodHomeAuthError
+from .exceptions import PodHomeApiError, PodHomeAuthError, PodHomeConnectionError
 
 
 class PodHomeApiClient:
@@ -64,8 +64,8 @@ class PodHomeApiClient:
         params: dict[str, Any] | None,
         json_body: dict[str, Any] | None,
     ) -> tuple[int, Any]:
-        """One request; returns (status, parsed body), raising PodHomeApiError for any other
-        4xx/5xx or a connection failure."""
+        """One request; returns (status, parsed body). Raises PodHomeApiError for any other
+        4xx/5xx and PodHomeConnectionError if no response arrives."""
         token = await self._auth.async_get_id_token()
         url = self._base_url + path
         try:
@@ -82,7 +82,7 @@ class PodHomeApiClient:
                     raise PodHomeApiError(resp.status, body)
                 return resp.status, body
         except (aiohttp.ClientError, TimeoutError) as exc:
-            raise PodHomeApiError(0, str(exc) or type(exc).__name__) from exc
+            raise PodHomeConnectionError(str(exc) or type(exc).__name__) from exc
 
     async def _async_get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         _status, body = await self._async_request("GET", path, params=params)

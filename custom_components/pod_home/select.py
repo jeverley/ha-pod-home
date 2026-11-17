@@ -31,7 +31,7 @@ from .helpers import (
     max_price_for_charging_priority,
     schedule_mode,
 )
-from .podpoint_mobile_api import PodHomeApiError, PodHomeAuthError
+from .podpoint_mobile_api import PodHomeError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -118,7 +118,7 @@ class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin[str], PodHomeEntity, S
                 await self._async_select_basic_option(charger, option)
                 return
             await self._async_select_smart_option(charger, option)
-        except (PodHomeApiError, PodHomeAuthError) as exc:
+        except PodHomeError as exc:
             await async_handle_write_error(self.coordinator, exc)
 
     async def _async_select_basic_option(self, charger: PodHomeCharger, option: str) -> None:
