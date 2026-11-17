@@ -6,6 +6,7 @@ passthrough of one charger/vehicle field gets one assertion, not exhaustive cove
 from __future__ import annotations
 
 import datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 from freezegun import freeze_time
@@ -95,7 +96,7 @@ async def test_charge_cost_converts_minor_units_and_currency(hass: HomeAssistant
 
 async def test_month_cost_sensor_last_reset_and_currency_fallback(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(
-        hass, {PPID: make_charger(month_cost_amount=500, timezone="Europe/London")}
+        hass, {PPID: make_charger(month_cost_amount=500, timezone=ZoneInfo("Europe/London"))}
     )
     entity = sensor.PodHomeMonthCostSensor(coordinator, PPID)
     assert entity.native_value == 5.0
@@ -142,7 +143,7 @@ async def test_electricity_rate_sensor_picks_current_window_and_cheapest_flag(
     cheap = make_tariff_window(days=["MONDAY"], start="00:30:00", end="05:30:00", price=0.0863)
     expensive = make_tariff_window(days=["MONDAY"], start="05:30:00", end="00:30:00", price=0.2942)
     coordinator = make_coordinator(
-        hass, {PPID: make_charger(tariff_windows=[cheap, expensive], timezone="UTC")}
+        hass, {PPID: make_charger(tariff_windows=[cheap, expensive], timezone=UTC)}
     )
     entity = sensor.PodHomeElectricityRateSensor(coordinator, PPID)
 

@@ -82,12 +82,12 @@ async def test_async_lock_raises_clean_error_when_charger_unsupported(
         await entity.async_lock()
 
 
-async def test_async_lock_reraises_other_api_errors(hass: HomeAssistant) -> None:
+async def test_async_lock_other_api_errors_raise_home_assistant_error(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(hass, {PPID: make_charger()})
     coordinator.api.async_set_remote_lock.side_effect = PodHomeApiError(500, {})
     entity = lock.PodHomeRemoteLock(coordinator, PPID)
 
-    with pytest.raises(PodHomeApiError):
+    with pytest.raises(HomeAssistantError, match="request failed"):
         await entity.async_lock()
 
 

@@ -6,7 +6,6 @@ import logging
 import math
 import re
 from typing import TYPE_CHECKING, TypeVar
-from zoneinfo import ZoneInfo
 
 from .const import (
     CHARGE_PRIORITY_ALWAYS_ON,
@@ -54,17 +53,6 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-
-def resolve_timezone(timezone_name: str | None) -> ZoneInfo | None:
-    """Resolve a charger's reported timezone, or None if missing/invalid."""
-    if not timezone_name:
-        return None
-    try:
-        return ZoneInfo(timezone_name)
-    except Exception:  # noqa: BLE001 - genuinely any bad tz string should just fall back
-        _LOGGER.debug("Unrecognized timezone %r, falling back to HA's default", timezone_name)
-        return None
 
 
 def humanize_model_style(style: str | None) -> str | None:

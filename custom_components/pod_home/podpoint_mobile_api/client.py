@@ -13,7 +13,7 @@ import aiohttp
 
 from .auth import PodHomeAuth
 from .const import MOBILE_API_BASE_URL, REQUEST_TIMEOUT_SECONDS
-from .exceptions import PodHomeApiError, PodHomeAuthError
+from .exceptions import PodHomeApiError, PodHomeAuthError, PodHomeConnectionError
 
 
 class PodHomeApiClient:
@@ -48,6 +48,24 @@ class PodHomeApiClient:
     ) -> tuple[int, Any]:
         """Shared request/error-handling core for _async_get/_async_write/
         _async_post_for_response - returns (status, parsed body)."""
+        status, body = await self._async_request_once(method, path, params, json_body)
+        if status in (401, 403):
+            # The id token may have been revoked early; retry once with a fresh one.
+            self._auth.invalidate_id_token()
+            status, body = await self._async_request_once(method, path, params, json_body)
+            if status in (401, 403):
+                raise PodHomeAuthError(f"mobile-api rejected the request: {status} {body}")
+        return status, body
+
+    async def _async_request_once(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None,
+        json_body: dict[str, Any] | None,
+    ) -> tuple[int, Any]:
+        """One request; returns (status, parsed body). Raises PodHomeApiError for any other
+        4xx/5xx and PodHomeConnectionError if no response arrives."""
         token = await self._auth.async_get_id_token()
         url = self._base_url + path
         try:
@@ -60,13 +78,11 @@ class PodHomeApiClient:
                 timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT_SECONDS),
             ) as resp:
                 body = await self._read_body(resp)
-                if resp.status in (401, 403):
-                    raise PodHomeAuthError(f"mobile-api rejected the request: {resp.status} {body}")
-                if resp.status >= 400:
+                if resp.status >= 400 and resp.status not in (401, 403):
                     raise PodHomeApiError(resp.status, body)
                 return resp.status, body
         except (aiohttp.ClientError, TimeoutError) as exc:
-            raise PodHomeApiError(0, str(exc) or type(exc).__name__) from exc
+            raise PodHomeConnectionError(str(exc) or type(exc).__name__) from exc
 
     async def _async_get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         _status, body = await self._async_request("GET", path, params=params)

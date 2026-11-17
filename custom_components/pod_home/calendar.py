@@ -14,7 +14,6 @@ from .entity import PodHomeEntity, async_setup_dynamic_chargers
 from .helpers import (
     datetime_to_schedule_date,
     expand_manual_schedule_events,
-    resolve_timezone,
     schedule_mode,
     smart_schedule_events,
 )
@@ -116,7 +115,7 @@ class PodHomeScheduleCalendar(PodHomeEntity, CalendarEntity):
         if mode == SCHEDULE_MODE_SMART_CHARGING:
             return smart_schedule_events(charger.smart_schedule_windows, start_date, end_date)
         if mode == SCHEDULE_MODE_BASIC_CHARGING:
-            tz = resolve_timezone(charger.timezone) or dt_util.DEFAULT_TIME_ZONE
+            tz = charger.timezone
             return expand_manual_schedule_events(
                 charger.manual_schedule_windows,
                 datetime_to_schedule_date(start_date, tz),

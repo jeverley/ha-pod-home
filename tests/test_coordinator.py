@@ -30,6 +30,7 @@ from custom_components.pod_home.podpoint_mobile_api import (
     PodHomeApiClient,
     PodHomeApiError,
     PodHomeAuthError,
+    PodHomeConnectionError,
 )
 from custom_components.pod_home.helpers import select_last_charge
 import custom_components.pod_home.sensor as sensor
@@ -111,7 +112,7 @@ async def test_first_refresh_parses_charger_basic_mode(
     assert set(result) == {PPID}
     charger = result[PPID]
     assert charger.unit_id == 12345
-    assert charger.timezone == "Europe/London"
+    assert charger.timezone == ZoneInfo("Europe/London")
     assert charger.model_style == "solo3"
     assert charger.model_colour == "black"
     assert charger.architecture == "3.0"
@@ -226,10 +227,30 @@ async def test_auth_error_raises_config_entry_auth_failed(
         await coordinator._async_update_data()
 
 
+async def test_non_fatal_connection_error_keeps_the_poll(
+    api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
+    api.async_reward_wallet.side_effect = PodHomeConnectionError("timed out")
+    result = await coordinator._async_update_data()
+    api.async_reward_wallet.assert_awaited()
+    assert PPID in result
+
+
+async def test_resolve_timezone_known(coordinator: PodHomeDataUpdateCoordinator) -> None:
+    assert await coordinator._async_resolve_timezone("Europe/London") == ZoneInfo("Europe/London")
+
+
+@pytest.mark.parametrize("name", ["Not/A/Real/Zone", "../etc", "a" * 5000, "", None])
+async def test_resolve_timezone_falls_back_to_ha_default(
+    coordinator: PodHomeDataUpdateCoordinator, name: object
+) -> None:
+    assert await coordinator._async_resolve_timezone(name) == dt_util.get_default_time_zone()
+
+
 async def test_connection_error_retries_then_raises_update_failed(
     api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
 ) -> None:
-    api.async_list_chargers.side_effect = PodHomeApiError(0, "connection refused")
+    api.async_list_chargers.side_effect = PodHomeConnectionError("connection refused")
     with patch("custom_components.pod_home.coordinator.asyncio.sleep", AsyncMock()):
         with pytest.raises(UpdateFailed):
             await coordinator._async_fetch_data()
@@ -1718,7 +1739,8 @@ async def test_month_totals_fall_back_to_ha_time_zone(hass: HomeAssistant) -> No
             (PPID, _charge_entry("2026-10-01T06:30:00Z", 10, 100), {"id": PPID}),
             (PPID, _charge_entry("2026-10-02T06:30:00Z", 5, 50), {"id": PPID}),
         ]
-        totals = coordinator._month_to_date_totals(PPID, None, datetime.date(2026, 10, 1))
+        tz = await coordinator._async_resolve_timezone(None)
+        totals = coordinator._month_to_date_totals(PPID, tz, datetime.date(2026, 10, 1))
     finally:
         dt_util.set_default_time_zone(previous)
 

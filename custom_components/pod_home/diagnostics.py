@@ -27,6 +27,7 @@ async def async_get_config_entry_diagnostics(
     chargers = {}
     for ppid, charger in coordinator.data.items():
         charger_data = dataclasses.asdict(charger)
+        charger_data["timezone"] = str(charger.timezone)
         if charger_data.get("vehicle") is not None:
             charger_data["vehicle"] = _REDACTED
         if (charger_data.get("firmware") or {}).get("serial_number") is not None:

@@ -9,7 +9,7 @@ import aiohttp
 import pytest
 
 from podpoint_mobile_api.auth import PodHomeAuth
-from podpoint_mobile_api.exceptions import PodHomeAuthError
+from podpoint_mobile_api.exceptions import PodHomeAuthError, PodHomeConnectionError
 
 from ._fakes import FakeResponse, FakeSession, RaisesClientError, RaisesTimeout
 
@@ -58,18 +58,16 @@ async def test_rejected_refresh_token_falls_back_to_sign_in() -> None:
     assert len(session.calls) == 2  # refresh attempted, then a real sign-in
 
 
-async def test_transient_network_error_during_refresh_does_not_fall_back_to_sign_in() -> None:
+async def test_network_error_during_refresh_does_not_fall_back_to_sign_in() -> None:
     """A network-level failure isn't the same as Firebase actually rejecting the refresh
     token - falling back to a full password sign-in on every network blip would be wasteful
-    and would mask the real (transient) cause."""
+    and would mask the real cause."""
     session = FakeSession([RaisesClientError()])
     auth = _auth(session)
     auth.import_tokens({"refresh_token": "ref1", "expires_at": "2000-01-01T00:00:00+00:00"})
 
-    with pytest.raises(PodHomeAuthError) as exc_info:
+    with pytest.raises(PodHomeConnectionError):
         await auth.async_get_id_token()
-
-    assert exc_info.value.transient is True
     assert len(session.calls) == 1  # no sign-in attempt made
 
 
@@ -99,24 +97,20 @@ async def test_rejected_sign_in_raises_auth_error() -> None:
         await auth.async_get_id_token()
 
 
-async def test_transient_network_error_during_sign_in_is_marked_transient() -> None:
+async def test_network_error_during_sign_in_is_connection_error() -> None:
     session = FakeSession([RaisesClientError()])
     auth = _auth(session)
 
-    with pytest.raises(PodHomeAuthError) as exc_info:
+    with pytest.raises(PodHomeConnectionError):
         await auth.async_get_id_token()
 
-    assert exc_info.value.transient is True
 
-
-async def test_sign_in_timeout_is_marked_transient() -> None:
+async def test_sign_in_timeout_is_connection_error() -> None:
     session = FakeSession([RaisesTimeout()])
     auth = _auth(session)
 
-    with pytest.raises(PodHomeAuthError) as exc_info:
+    with pytest.raises(PodHomeConnectionError):
         await auth.async_get_id_token()
-
-    assert exc_info.value.transient is True
 
 
 async def test_sign_in_missing_expires_in_does_not_crash_the_change_callback() -> None:
@@ -137,3 +131,52 @@ async def test_sign_in_missing_expires_in_does_not_crash_the_change_callback() -
 
     assert token == "id5"
     on_token_change.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        FakeResponse(503, {"error": "unavailable"}),
+        FakeResponse(429, None),
+        FakeResponse(400, {"error": {"message": "TOO_MANY_ATTEMPTS_TRY_LATER"}}),
+        FakeResponse(502, None, not_json=True),
+    ],
+    ids=["503", "429", "too-many-attempts", "non-json-502"],
+)
+async def test_server_side_sign_in_failure_is_connection_error(response: FakeResponse) -> None:
+    auth = _auth(FakeSession([response]))
+
+    with pytest.raises(PodHomeConnectionError):
+        await auth.async_get_id_token()
+
+
+async def test_server_side_refresh_failure_is_connection_error_without_sign_in() -> None:
+    session = FakeSession([FakeResponse(503, {"error": "unavailable"})])
+    auth = _auth(session)
+    auth.import_tokens({"refresh_token": "ref1", "expires_at": "2000-01-01T00:00:00+00:00"})
+
+    with pytest.raises(PodHomeConnectionError):
+        await auth.async_get_id_token()
+    assert len(session.calls) == 1
+
+
+async def test_sign_in_200_without_token_is_connection_error() -> None:
+    auth = _auth(FakeSession([FakeResponse(200, {"unexpected": "shape"})]))
+
+    with pytest.raises(PodHomeConnectionError):
+        await auth.async_get_id_token()
+
+
+async def test_invalidate_id_token_forces_refresh() -> None:
+    session = FakeSession(
+        [
+            FakeResponse(200, {"idToken": "id1", "refreshToken": "ref1", "expiresIn": "3600"}),
+            FakeResponse(200, {"id_token": "id2", "expires_in": "3600"}),
+        ]
+    )
+    auth = _auth(session)
+    assert await auth.async_get_id_token() == "id1"
+
+    auth.invalidate_id_token()
+
+    assert await auth.async_get_id_token() == "id2"
