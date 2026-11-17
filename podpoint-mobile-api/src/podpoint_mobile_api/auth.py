@@ -93,6 +93,10 @@ class PodHomeAuth:
             assert self._id_token is not None
             return self._id_token
 
+    def invalidate_id_token(self) -> None:
+        """Drop the cached id token so the next call refreshes it."""
+        self._id_token = None
+
     def _notify_token_change(self) -> None:
         if self._on_token_change is None:
             return
@@ -120,16 +124,20 @@ class PodHomeAuth:
                 },
                 timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT_SECONDS),
             ) as resp:
-                body = await resp.json(content_type=None)
+                body = await _read_json(resp)
                 if resp.status != 200:
-                    err = (body or {}).get("error", body)
-                    raise PodHomeAuthError(f"Firebase sign-in failed: {err}")
+                    raise _rejected("Firebase sign-in failed", resp.status, body)
         except (aiohttp.ClientError, TimeoutError) as exc:
             raise PodHomeAuthError(
                 f"Firebase sign-in request failed: {str(exc) or type(exc).__name__}", transient=True
             ) from exc
 
-        self._apply_token_response(body)
+        try:
+            self._apply_token_response(body)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise PodHomeAuthError(
+                f"Firebase sign-in returned an unexpected body: {exc}", transient=True
+            ) from exc
 
     async def _async_refresh(self) -> None:
         try:
@@ -142,10 +150,9 @@ class PodHomeAuth:
                 },
                 timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT_SECONDS),
             ) as resp:
-                body = await resp.json(content_type=None)
+                body = await _read_json(resp)
                 if resp.status != 200:
-                    err = (body or {}).get("error", body)
-                    raise PodHomeAuthError(f"Firebase token refresh failed: {err}")
+                    raise _rejected("Firebase token refresh failed", resp.status, body)
         except (aiohttp.ClientError, TimeoutError) as exc:
             raise PodHomeAuthError(
                 f"Firebase token refresh request failed: {str(exc) or type(exc).__name__}", transient=True
@@ -169,3 +176,18 @@ class PodHomeAuth:
             datetime.utcnow() + timedelta(seconds=int(expires_in)) if expires_in is not None
             else None
         )
+
+
+async def _read_json(resp: aiohttp.ClientResponse) -> Any:
+    """The parsed JSON body, or None if it isn't JSON."""
+    try:
+        return await resp.json(content_type=None)
+    except (aiohttp.ContentTypeError, ValueError):
+        return None
+
+
+def _rejected(prefix: str, status: int, body: Any) -> PodHomeAuthError:
+    """A non-200 Firebase response; server errors and rate limiting are transient."""
+    err = body.get("error", body) if isinstance(body, dict) else body
+    transient = status >= 500 or status == 429 or "TOO_MANY_ATTEMPTS" in str(err)
+    return PodHomeAuthError(f"{prefix}: {status} {err}", transient=transient)

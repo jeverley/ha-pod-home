@@ -12,11 +12,14 @@ import aiohttp
 class FakeResponse:
     """Stands in for aiohttp.ClientResponse - only the surface client.py/auth.py touch."""
 
-    def __init__(self, status: int, json_body: Any = None) -> None:
+    def __init__(self, status: int, json_body: Any = None, *, not_json: bool = False) -> None:
         self.status = status
         self._json_body = json_body
+        self._not_json = not_json
 
     async def json(self, content_type: str | None = None) -> Any:
+        if self._not_json:
+            raise ValueError("not JSON")
         return self._json_body
 
     async def read(self) -> bytes:

@@ -14,7 +14,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 
 from custom_components.pod_home.const import DOMAIN
-from custom_components.pod_home.podpoint_mobile_api import PodHomeAuthError
+from custom_components.pod_home.podpoint_mobile_api import PodHomeApiError, PodHomeAuthError
 from custom_components.pod_home.services import (
     SERVICE_CANCEL_BOOST,
     SERVICE_START_BOOST,
@@ -81,6 +81,25 @@ async def test_start_boost_transient_auth_error_reports_connection_failure(
     )
 
     with pytest.raises(HomeAssistantError, match="Couldn't reach Pod Point"):
+        await hass.services.async_call(
+            DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
+        )
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (PodHomeApiError(0, "timed out"), "Couldn't reach Pod Point"),
+        (PodHomeApiError(500, "server error"), "Pod Point request failed"),
+    ],
+)
+async def test_start_boost_api_error_raises_home_assistant_error(
+    hass: HomeAssistant, error: PodHomeApiError, message: str
+) -> None:
+    coordinator, device_id = await _setup(hass, charging_state="Charging")
+    coordinator.api.async_create_charge_override.side_effect = error
+
+    with pytest.raises(HomeAssistantError, match=message):
         await hass.services.async_call(
             DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
         )

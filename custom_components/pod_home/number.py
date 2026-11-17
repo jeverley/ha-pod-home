@@ -13,10 +13,10 @@ from .const import DOMAIN
 from .entity import (
     PodHomeOptimisticWriteMixin,
     PodHomeVehicleEntity,
-    async_handle_write_auth_error,
+    async_handle_write_error,
     async_setup_dynamic_vehicles,
 )
-from .podpoint_mobile_api import PodHomeAuthError
+from .podpoint_mobile_api import PodHomeApiError, PodHomeAuthError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -90,7 +90,7 @@ class PodHomeVehicleTargetChargeNumber(
             await self.coordinator.api.async_set_vehicle_charge_limit(
                 ppid, vehicle.id, round(value)
             )
-        except PodHomeAuthError as exc:
-            await async_handle_write_auth_error(self.coordinator, exc)
+        except (PodHomeApiError, PodHomeAuthError) as exc:
+            await async_handle_write_error(self.coordinator, exc)
         self._set_optimistic_value(round(value))
         await self.coordinator.async_request_refresh()

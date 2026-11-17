@@ -137,3 +137,58 @@ async def test_sign_in_missing_expires_in_does_not_crash_the_change_callback() -
 
     assert token == "id5"
     on_token_change.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        FakeResponse(503, {"error": "unavailable"}),
+        FakeResponse(429, None),
+        FakeResponse(400, {"error": {"message": "TOO_MANY_ATTEMPTS_TRY_LATER"}}),
+        FakeResponse(502, None, not_json=True),
+    ],
+    ids=["503", "429", "too-many-attempts", "non-json-502"],
+)
+async def test_server_side_sign_in_failure_is_transient(response: FakeResponse) -> None:
+    auth = _auth(FakeSession([response]))
+
+    with pytest.raises(PodHomeAuthError) as exc_info:
+        await auth.async_get_id_token()
+
+    assert exc_info.value.transient is True
+
+
+async def test_server_side_refresh_failure_is_transient_without_sign_in() -> None:
+    session = FakeSession([FakeResponse(503, {"error": "unavailable"})])
+    auth = _auth(session)
+    auth.import_tokens({"refresh_token": "ref1", "expires_at": "2000-01-01T00:00:00+00:00"})
+
+    with pytest.raises(PodHomeAuthError) as exc_info:
+        await auth.async_get_id_token()
+
+    assert exc_info.value.transient is True
+    assert len(session.calls) == 1
+
+
+async def test_sign_in_200_without_token_is_transient() -> None:
+    auth = _auth(FakeSession([FakeResponse(200, {"unexpected": "shape"})]))
+
+    with pytest.raises(PodHomeAuthError) as exc_info:
+        await auth.async_get_id_token()
+
+    assert exc_info.value.transient is True
+
+
+async def test_invalidate_id_token_forces_refresh() -> None:
+    session = FakeSession(
+        [
+            FakeResponse(200, {"idToken": "id1", "refreshToken": "ref1", "expiresIn": "3600"}),
+            FakeResponse(200, {"id_token": "id2", "expires_in": "3600"}),
+        ]
+    )
+    auth = _auth(session)
+    assert await auth.async_get_id_token() == "id1"
+
+    auth.invalidate_id_token()
+
+    assert await auth.async_get_id_token() == "id2"

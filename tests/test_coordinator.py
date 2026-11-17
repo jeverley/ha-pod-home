@@ -240,6 +240,7 @@ async def test_transient_auth_error_raises_update_failed(
         ("Europe/London", ZoneInfo("Europe/London")),
         ("Not/A/Real/Zone", None),
         ("../etc", None),
+        ("a" * 5000, None),
         ("", None),
         (None, None),
     ],

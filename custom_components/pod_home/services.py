@@ -20,8 +20,8 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import PodHomeCharger, PodHomeDataUpdateCoordinator
-from .entity import async_handle_write_auth_error
-from .podpoint_mobile_api import PodHomeAuthError
+from .entity import async_handle_write_error
+from .podpoint_mobile_api import PodHomeApiError, PodHomeAuthError
 
 SERVICE_START_BOOST = "start_boost"
 SERVICE_CANCEL_BOOST = "cancel_boost"
@@ -119,8 +119,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
             await coordinator.api.async_create_charge_override(
                 ppid, requested_at=requested_at, end_at=end_at
             )
-        except PodHomeAuthError as exc:
-            await async_handle_write_auth_error(coordinator, exc)
+        except (PodHomeApiError, PodHomeAuthError) as exc:
+            await async_handle_write_error(coordinator, exc)
         await coordinator.async_request_refresh()
 
     async def _async_cancel_boost(call: ServiceCall) -> None:
@@ -130,8 +130,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(f"{ppid}: no active boost to cancel")
         try:
             await coordinator.api.async_delete_charge_override(ppid)
-        except PodHomeAuthError as exc:
-            await async_handle_write_auth_error(coordinator, exc)
+        except (PodHomeApiError, PodHomeAuthError) as exc:
+            await async_handle_write_error(coordinator, exc)
         await coordinator.async_request_refresh()
 
     hass.services.async_register(

@@ -19,7 +19,7 @@ from .helpers import (
     select_last_charge,
     smart_mode_available,
 )
-from .podpoint_mobile_api import PodHomeAuthError
+from .podpoint_mobile_api import PodHomeApiError, PodHomeAuthError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -199,13 +199,15 @@ class PodHomeOptimisticWriteMixin(
         super()._handle_coordinator_update()
 
 
-async def async_handle_write_auth_error(
-    coordinator: PodHomeDataUpdateCoordinator, exc: PodHomeAuthError
+async def async_handle_write_error(
+    coordinator: PodHomeDataUpdateCoordinator, exc: PodHomeApiError | PodHomeAuthError
 ) -> NoReturn:
-    """Shared by every write entity's async_press/async_set_*/async_lock/async_unlock -
-    requests a coordinator refresh so a genuinely-expired auth session triggers the usual reauth
-    flow (coordinator.py's own PodHomeAuthError handling), then fails this write clearly instead
-    of leaving a raw PodHomeAuthError as the visible error."""
+    """Fail a write with HomeAssistantError. An auth error also requests a refresh, so a real
+    rejection starts reauth."""
+    if isinstance(exc, PodHomeApiError):
+        if exc.status == 0:
+            raise HomeAssistantError(f"Couldn't reach Pod Point: {exc.body}") from exc
+        raise HomeAssistantError(f"Pod Point request failed: {exc}") from exc
     await coordinator.async_request_refresh()
     if exc.transient:
         raise HomeAssistantError(f"Couldn't reach Pod Point: {exc}") from exc

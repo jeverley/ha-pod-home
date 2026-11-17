@@ -21,7 +21,7 @@ from .coordinator import PodHomeCharger
 from .entity import (
     PodHomeEntity,
     PodHomeOptimisticWriteMixin,
-    async_handle_write_auth_error,
+    async_handle_write_error,
     async_setup_dynamic_chargers,
 )
 from .helpers import (
@@ -31,7 +31,7 @@ from .helpers import (
     max_price_for_charging_priority,
     schedule_mode,
 )
-from .podpoint_mobile_api import PodHomeAuthError
+from .podpoint_mobile_api import PodHomeApiError, PodHomeAuthError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -118,8 +118,8 @@ class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin[str], PodHomeEntity, S
                 await self._async_select_basic_option(charger, option)
                 return
             await self._async_select_smart_option(charger, option)
-        except PodHomeAuthError as exc:
-            await async_handle_write_auth_error(self.coordinator, exc)
+        except (PodHomeApiError, PodHomeAuthError) as exc:
+            await async_handle_write_error(self.coordinator, exc)
 
     async def _async_select_basic_option(self, charger: PodHomeCharger, option: str) -> None:
         if option == CHARGE_PRIORITY_ALWAYS_ON:

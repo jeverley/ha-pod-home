@@ -1217,7 +1217,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         if timezone_name not in self._timezones:
             try:
                 tz = await dt_util.async_get_time_zone(timezone_name)
-            except ValueError:
+            except (OSError, ValueError):
                 tz = None
             if tz is None:
                 _LOGGER.debug("Unrecognized timezone %r, using HA's default", timezone_name)
@@ -1303,8 +1303,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         )
 
         result: dict[str, PodHomeCharger] = {}
-        for raw in chargers_raw:
-            charger = await self._async_build_charger(raw, now, connectivity_by_ppid)
+        for raw, tz in zip(chargers_raw, timezones, strict=True):
+            charger = await self._async_build_charger(raw, tz, now, connectivity_by_ppid)
             if charger is not None:
                 result[charger.ppid] = charger
         self._sync_device_sw_versions(result)
@@ -1745,6 +1745,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
     async def _async_build_charger(
         self,
         raw: dict[str, Any],
+        tz: datetime.tzinfo | None,
         now: datetime.datetime,
         connectivity_by_ppid: dict[str, dict[str, Any]],
     ) -> PodHomeCharger | None:
@@ -1756,7 +1757,6 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             return None
 
         model_info = raw.get("modelInfo") or {}
-        tz = await self._async_resolve_timezone(raw.get("timezone"))
         today_local = dt_util.now(tz).date()
         month_start_local = today_local.replace(day=1)
 
