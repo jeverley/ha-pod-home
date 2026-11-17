@@ -64,10 +64,19 @@ async def test_user_flow_success_creates_entry(hass: HomeAssistant) -> None:
     assert result["data"] == USER_INPUT
 
 
-async def test_user_flow_invalid_auth_shows_error(hass: HomeAssistant) -> None:
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (PodHomeAuthError("bad credentials"), "invalid_auth"),
+        (PodHomeAuthError("timed out", transient=True), "cannot_connect"),
+    ],
+)
+async def test_user_flow_sign_in_error_shows_error(
+    hass: HomeAssistant, error: PodHomeAuthError, expected: str
+) -> None:
     with patch(
         "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
-        AsyncMock(side_effect=PodHomeAuthError("bad credentials")),
+        AsyncMock(side_effect=error),
     ):
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -78,7 +87,7 @@ async def test_user_flow_invalid_auth_shows_error(hass: HomeAssistant) -> None:
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "user"
-    assert result["errors"] == {"base": "invalid_auth"}
+    assert result["errors"] == {"base": expected}
 
 
 @pytest.mark.parametrize(
@@ -143,7 +152,16 @@ async def test_reauth_flow_success_updates_password(hass: HomeAssistant) -> None
     assert entry.data[CONF_EMAIL] == USER_INPUT[CONF_EMAIL]  # unchanged
 
 
-async def test_reauth_flow_invalid_auth_shows_error(hass: HomeAssistant) -> None:
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (PodHomeAuthError("bad credentials"), "invalid_auth"),
+        (PodHomeAuthError("timed out", transient=True), "cannot_connect"),
+    ],
+)
+async def test_reauth_flow_sign_in_error_shows_error(
+    hass: HomeAssistant, error: PodHomeAuthError, expected: str
+) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN, unique_id=USER_INPUT[CONF_EMAIL].lower(), data=USER_INPUT
     )
@@ -151,7 +169,7 @@ async def test_reauth_flow_invalid_auth_shows_error(hass: HomeAssistant) -> None
 
     with patch(
         "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
-        AsyncMock(side_effect=PodHomeAuthError("bad credentials")),
+        AsyncMock(side_effect=error),
     ):
         result = await entry.start_reauth_flow(hass)
         result = await hass.config_entries.flow.async_configure(
@@ -160,5 +178,5 @@ async def test_reauth_flow_invalid_auth_shows_error(hass: HomeAssistant) -> None
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "reauth_confirm"
-    assert result["errors"] == {"base": "invalid_auth"}
+    assert result["errors"] == {"base": expected}
     assert entry.data[CONF_PASSWORD] == USER_INPUT[CONF_PASSWORD]  # unchanged

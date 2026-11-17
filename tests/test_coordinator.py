@@ -111,7 +111,7 @@ async def test_first_refresh_parses_charger_basic_mode(
     assert set(result) == {PPID}
     charger = result[PPID]
     assert charger.unit_id == 12345
-    assert charger.timezone == "Europe/London"
+    assert charger.timezone == ZoneInfo("Europe/London")
     assert charger.model_style == "solo3"
     assert charger.model_colour == "black"
     assert charger.architecture == "3.0"
@@ -224,6 +224,30 @@ async def test_auth_error_raises_config_entry_auth_failed(
     api.async_list_chargers.side_effect = PodHomeAuthError("token expired")
     with pytest.raises(ConfigEntryAuthFailed):
         await coordinator._async_update_data()
+
+
+async def test_transient_auth_error_raises_update_failed(
+    api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
+    api.async_list_chargers.side_effect = PodHomeAuthError("timed out", transient=True)
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("Europe/London", ZoneInfo("Europe/London")),
+        ("Not/A/Real/Zone", None),
+        ("../etc", None),
+        ("", None),
+        (None, None),
+    ],
+)
+async def test_resolve_timezone(
+    coordinator: PodHomeDataUpdateCoordinator, name: object, expected: ZoneInfo | None
+) -> None:
+    assert await coordinator._async_resolve_timezone(name) == expected
 
 
 async def test_connection_error_retries_then_raises_update_failed(

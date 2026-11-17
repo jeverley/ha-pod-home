@@ -207,6 +207,8 @@ async def async_handle_write_auth_error(
     flow (coordinator.py's own PodHomeAuthError handling), then fails this write clearly instead
     of leaving a raw PodHomeAuthError as the visible error."""
     await coordinator.async_request_refresh()
+    if exc.transient:
+        raise HomeAssistantError(f"Couldn't reach Pod Point: {exc}") from exc
     raise HomeAssistantError(f"Pod Point rejected the request: {exc}") from exc
 
 

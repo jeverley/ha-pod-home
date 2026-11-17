@@ -43,7 +43,6 @@ from .helpers import (
     currency_icon,
     known_or_none,
     parse_time_of_day,
-    resolve_timezone,
     schedule_mode,
     select_last_charge,
 )
@@ -310,7 +309,7 @@ class PodHomeMonthCostSensor(PodHomeEntity, SensorEntity):
         if not charger:
             return None
         # Midnight on the 1st of the current calendar month, in the charger's local timezone.
-        tz = resolve_timezone(charger.timezone)
+        tz = charger.timezone
         today_local = dt_util.now(tz)
         return today_local.replace(
             day=1, hour=0, minute=0, second=0, microsecond=0
@@ -396,7 +395,7 @@ class PodHomeElectricityRateSensor(PodHomeEntity, SensorEntity):
         charger = self.charger
         if not charger or not charger.tariff_windows:
             return None
-        tz = resolve_timezone(charger.timezone)
+        tz = charger.timezone
         now = dt_util.now(tz)
         today_name = now.strftime("%A").upper()
         yesterday_name = (now - datetime.timedelta(days=1)).strftime("%A").upper()

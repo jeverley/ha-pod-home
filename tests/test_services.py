@@ -64,12 +64,26 @@ async def test_start_boost_auth_error_triggers_refresh_and_clean_failure(
     coordinator, device_id = await _setup(hass, charging_state="Charging")
     coordinator.api.async_create_charge_override.side_effect = PodHomeAuthError("expired")
 
-    with pytest.raises(HomeAssistantError):
+    with pytest.raises(HomeAssistantError, match="rejected"):
         await hass.services.async_call(
             DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
         )
 
     coordinator.async_request_refresh.assert_awaited_once()
+
+
+async def test_start_boost_transient_auth_error_reports_connection_failure(
+    hass: HomeAssistant,
+) -> None:
+    coordinator, device_id = await _setup(hass, charging_state="Charging")
+    coordinator.api.async_create_charge_override.side_effect = PodHomeAuthError(
+        "timed out", transient=True
+    )
+
+    with pytest.raises(HomeAssistantError, match="Couldn't reach Pod Point"):
+        await hass.services.async_call(
+            DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
+        )
 
 
 async def test_start_boost_with_duration(hass: HomeAssistant) -> None:

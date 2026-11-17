@@ -49,19 +49,8 @@ UTC = datetime.timezone.utc
 
 
 # ---------------------------------------------------------------------------
-# resolve_timezone / humanize_model_style / known_or_none / currency_icon
+# humanize_model_style / known_or_none / currency_icon
 # ---------------------------------------------------------------------------
-
-
-def test_resolve_timezone_valid():
-    tz = helpers.resolve_timezone("Europe/London")
-    assert tz is not None
-    assert str(tz) == "Europe/London"
-
-
-@pytest.mark.parametrize("bad", [None, "", "Not/A/Real/Zone"])
-def test_resolve_timezone_invalid_or_missing(bad):
-    assert helpers.resolve_timezone(bad) is None
 
 
 @pytest.mark.parametrize(

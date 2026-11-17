@@ -32,7 +32,6 @@ from .helpers import (
     datetime_to_schedule_date,
     expand_manual_schedule_events,
     is_momentarily_unplugged,
-    resolve_timezone,
     same_session_start,
     smart_schedule_events,
 )
@@ -252,7 +251,8 @@ class PodHomeCharger:
 
     ppid: str
     unit_id: int | None
-    timezone: str | None
+    # Resolved from the charger's IANA timezone name; None if missing or unknown.
+    timezone: datetime.tzinfo | None
     model_style: str | None
     model_colour: str | None
     architecture: str | None
@@ -478,6 +478,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         # cached, not gathered every poll. Retried sooner while still missing.
         self._firmware_by_ppid: dict[str, PodHomeFirmware] = {}
         self._firmware_fetched_at: dict[str, datetime.datetime] = {}
+        self._timezones: dict[str, datetime.tzinfo | None] = {}
         self._tariff_windows_by_ppid: dict[str, list[PodHomeTariffWindow]] = {}
         self._tariff_windows_fetched_at: dict[str, datetime.datetime] = {}
         self._manual_schedules_by_ppid: dict[str, list[PodHomeManualScheduleWindow]] = {}
@@ -784,8 +785,8 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         """Await `coro`; on PodHomeApiError, log (deduped) and return {} instead of raising.
         Most endpoints here return a dict; a couple (e.g. GET /chargers/{ppid}/firmware) return
         a bare list instead - `result or {}` only coerces a falsy result, a genuine list result
-        passes through unchanged. Does not catch PodHomeAuthError, which propagates to trigger
-        reauth.
+        passes through unchanged. Does not catch PodHomeAuthError, which propagates to
+        _async_update_data.
         """
         try:
             result = await coro
@@ -1009,6 +1010,13 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         try:
             return await self._async_fetch_data()
         except PodHomeAuthError as exc:
+            if exc.transient:
+                raise UpdateFailed(
+                    str(exc),
+                    translation_domain=DOMAIN,
+                    translation_key="api_failed",
+                    translation_placeholders={"error": str(exc)},
+                ) from exc
             raise ConfigEntryAuthFailed(
                 str(exc),
                 translation_domain=DOMAIN,
@@ -1202,14 +1210,25 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self._accumulate_total_energy(charge_entries, now)
         return True
 
+    async def _async_resolve_timezone(self, timezone_name: object) -> datetime.tzinfo | None:
+        """The tzinfo for a charger's reported timezone name, or None if missing or unknown."""
+        if not isinstance(timezone_name, str) or not timezone_name:
+            return None
+        if timezone_name not in self._timezones:
+            try:
+                tz = await dt_util.async_get_time_zone(timezone_name)
+            except ValueError:
+                tz = None
+            if tz is None:
+                _LOGGER.debug("Unrecognized timezone %r, using HA's default", timezone_name)
+            self._timezones[timezone_name] = tz
+        return self._timezones[timezone_name]
+
     @staticmethod
-    def _month_window_start(chargers_raw: list[dict[str, Any]]) -> datetime.date:
+    def _month_window_start(timezones: list[datetime.tzinfo | None]) -> datetime.date:
         """The day before the earliest charger-local 1st of the month, so /charges covers every
         session that started in any charger's current month whatever the server's date zone."""
-        month_starts = [
-            dt_util.now(resolve_timezone(raw.get("timezone"))).date().replace(day=1)
-            for raw in chargers_raw
-        ]
+        month_starts = [dt_util.now(tz).date().replace(day=1) for tz in timezones]
         return min(month_starts) - datetime.timedelta(days=1)
 
     def _month_to_date_totals(
@@ -1278,8 +1297,9 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             for ppid, connectivity in connectivity_by_ppid.items()
             if self._cable_unplugged_since_last_poll(ppid, connectivity.get("chargingState"))
         }
+        timezones = [await self._async_resolve_timezone(raw.get("timezone")) for raw in chargers_raw]
         await self._async_refresh_account_level_data(
-            now, any_charging_this_poll, unplugged_ppids, self._month_window_start(chargers_raw)
+            now, any_charging_this_poll, unplugged_ppids, self._month_window_start(timezones)
         )
 
         result: dict[str, PodHomeCharger] = {}
@@ -1736,8 +1756,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             return None
 
         model_info = raw.get("modelInfo") or {}
-        timezone_name = raw.get("timezone")
-        tz = resolve_timezone(timezone_name)
+        tz = await self._async_resolve_timezone(raw.get("timezone"))
         today_local = dt_util.now(tz).date()
         month_start_local = today_local.replace(day=1)
 
@@ -1779,7 +1798,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         return PodHomeCharger(
             ppid=ppid,
             unit_id=raw.get("unitId"),
-            timezone=timezone_name,
+            timezone=tz,
             model_style=model_info.get("style"),
             model_colour=model_info.get("colour"),
             architecture=model_info.get("architecture"),

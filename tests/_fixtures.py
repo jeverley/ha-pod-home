@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 from unittest.mock import create_autospec
+from zoneinfo import ZoneInfo
 
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -22,6 +23,7 @@ from custom_components.pod_home.coordinator import (
 from custom_components.pod_home.podpoint_mobile_api import PodHomeApiClient
 
 UTC = datetime.timezone.utc
+LONDON = ZoneInfo("Europe/London")
 
 
 PPID = "PSL-000001"
@@ -165,7 +167,7 @@ def make_charger(**overrides) -> PodHomeCharger:
     defaults = dict(
         ppid=PPID,
         unit_id=12345,
-        timezone="Europe/London",
+        timezone=LONDON,
         model_style="solo3",
         model_colour="black",
         architecture="3.0",

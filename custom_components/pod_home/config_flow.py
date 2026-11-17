@@ -59,7 +59,7 @@ class PodHomeConfigFlow(ConfigFlow, domain=DOMAIN):
                 await auth.async_get_id_token()
             except PodHomeAuthError as exc:
                 _LOGGER.debug("Sign-in failed during config flow: %s", exc)
-                errors["base"] = "invalid_auth"
+                errors["base"] = "cannot_connect" if exc.transient else "invalid_auth"
             else:
                 return self.async_create_entry(
                     title=user_input[CONF_EMAIL], data=user_input
@@ -90,7 +90,7 @@ class PodHomeConfigFlow(ConfigFlow, domain=DOMAIN):
                 await auth.async_get_id_token()
             except PodHomeAuthError as exc:
                 _LOGGER.debug("Sign-in failed during reauth: %s", exc)
-                errors["base"] = "invalid_auth"
+                errors["base"] = "cannot_connect" if exc.transient else "invalid_auth"
             else:
                 # Clears the persisted refresh token (keyed by entry_id, unchanged by reauth)
                 # before reload, so a stale pre-reauth session isn't silently restored. A failed

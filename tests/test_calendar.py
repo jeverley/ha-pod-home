@@ -49,7 +49,7 @@ async def test_basic_mode_uses_manual_schedule_windows(hass: HomeAssistant) -> N
             PPID: make_charger(
                 delegated_control_status="INACTIVE",
                 manual_schedule_windows=[window],
-                timezone="UTC",
+                timezone=UTC,
             )
         },
     )
@@ -220,7 +220,7 @@ async def test_basic_schedule_window_not_renamed_by_a_boost(hass: HomeAssistant)
         {
             PPID: make_charger(
                 delegated_control_status="INACTIVE",
-                timezone="UTC",
+                timezone=UTC,
                 manual_schedule_windows=[window],
                 boost_start_at=boost_start,
                 boost_end_at=boost_start + datetime.timedelta(hours=4),

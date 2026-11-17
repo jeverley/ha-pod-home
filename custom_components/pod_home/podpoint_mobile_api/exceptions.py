@@ -3,9 +3,8 @@ from __future__ import annotations
 
 
 class PodHomeAuthError(Exception):
-    """Raised when Firebase sign-in/token refresh fails - callers should treat this as needing
-    reauth. `transient=True` marks a request-level failure (e.g. a network error) rather than
-    Firebase actually rejecting the credentials."""
+    """Raised when Firebase sign-in or token refresh fails. `transient=True` marks a request-level
+    failure (e.g. a network error) to retry; otherwise Firebase rejected the credentials."""
 
     def __init__(self, message: str, *, transient: bool = False) -> None:
         super().__init__(message)

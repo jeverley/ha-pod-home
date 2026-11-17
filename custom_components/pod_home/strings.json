@@ -46,6 +46,7 @@
       }
     },
     "error": {
+      "cannot_connect": "Couldn't reach Pod Point. Check your connection and try again.",
       "invalid_auth": "Sign-in failed. Check your email and password."
     },
     "abort": {
