@@ -234,21 +234,15 @@ async def test_transient_auth_error_raises_update_failed(
         await coordinator._async_update_data()
 
 
-@pytest.mark.parametrize(
-    ("name", "expected"),
-    [
-        ("Europe/London", ZoneInfo("Europe/London")),
-        ("Not/A/Real/Zone", None),
-        ("../etc", None),
-        ("a" * 5000, None),
-        ("", None),
-        (None, None),
-    ],
-)
-async def test_resolve_timezone(
-    coordinator: PodHomeDataUpdateCoordinator, name: object, expected: ZoneInfo | None
+async def test_resolve_timezone_known(coordinator: PodHomeDataUpdateCoordinator) -> None:
+    assert await coordinator._async_resolve_timezone("Europe/London") == ZoneInfo("Europe/London")
+
+
+@pytest.mark.parametrize("name", ["Not/A/Real/Zone", "../etc", "a" * 5000, "", None])
+async def test_resolve_timezone_falls_back_to_ha_default(
+    coordinator: PodHomeDataUpdateCoordinator, name: object
 ) -> None:
-    assert await coordinator._async_resolve_timezone(name) == expected
+    assert await coordinator._async_resolve_timezone(name) == dt_util.get_default_time_zone()
 
 
 async def test_connection_error_retries_then_raises_update_failed(
@@ -1743,7 +1737,8 @@ async def test_month_totals_fall_back_to_ha_time_zone(hass: HomeAssistant) -> No
             (PPID, _charge_entry("2026-10-01T06:30:00Z", 10, 100), {"id": PPID}),
             (PPID, _charge_entry("2026-10-02T06:30:00Z", 5, 50), {"id": PPID}),
         ]
-        totals = coordinator._month_to_date_totals(PPID, None, datetime.date(2026, 10, 1))
+        tz = await coordinator._async_resolve_timezone(None)
+        totals = coordinator._month_to_date_totals(PPID, tz, datetime.date(2026, 10, 1))
     finally:
         dt_util.set_default_time_zone(previous)
 

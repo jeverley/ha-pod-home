@@ -251,8 +251,8 @@ class PodHomeCharger:
 
     ppid: str
     unit_id: int | None
-    # Resolved from the charger's IANA timezone name; None if missing or unknown.
-    timezone: datetime.tzinfo | None
+    # The charger's reported timezone, or HA's default if missing or unknown.
+    timezone: datetime.tzinfo
     model_style: str | None
     model_colour: str | None
     architecture: str | None
@@ -1210,10 +1210,11 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self._accumulate_total_energy(charge_entries, now)
         return True
 
-    async def _async_resolve_timezone(self, timezone_name: object) -> datetime.tzinfo | None:
-        """The tzinfo for a charger's reported timezone name, or None if missing or unknown."""
+    async def _async_resolve_timezone(self, timezone_name: object) -> datetime.tzinfo:
+        """The tzinfo for a charger's reported timezone name, or HA's default if missing or
+        unknown."""
         if not isinstance(timezone_name, str) or not timezone_name:
-            return None
+            return dt_util.get_default_time_zone()
         if timezone_name not in self._timezones:
             try:
                 tz = await dt_util.async_get_time_zone(timezone_name)
@@ -1222,17 +1223,17 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             if tz is None:
                 _LOGGER.debug("Unrecognized timezone %r, using HA's default", timezone_name)
             self._timezones[timezone_name] = tz
-        return self._timezones[timezone_name]
+        return self._timezones[timezone_name] or dt_util.get_default_time_zone()
 
     @staticmethod
-    def _month_window_start(timezones: list[datetime.tzinfo | None]) -> datetime.date:
+    def _month_window_start(timezones: list[datetime.tzinfo]) -> datetime.date:
         """The day before the earliest charger-local 1st of the month, so /charges covers every
         session that started in any charger's current month whatever the server's date zone."""
         month_starts = [dt_util.now(tz).date().replace(day=1) for tz in timezones]
         return min(month_starts) - datetime.timedelta(days=1)
 
     def _month_to_date_totals(
-        self, ppid: str, tz: datetime.tzinfo | None, month_start_local: datetime.date
+        self, ppid: str, tz: datetime.tzinfo, month_start_local: datetime.date
     ) -> tuple[float | None, int | None]:
         """Energy (kWh) and cost (minor units) of this charger's finalized sessions that started
         this local calendar month - the month the app attributes each session to."""
@@ -1246,7 +1247,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                 entry_ppid != ppid
                 or entry.get("endedAt") is None
                 or started_at is None
-                or started_at.astimezone(tz or dt_util.get_default_time_zone()).date()
+                or started_at.astimezone(tz).date()
                 < month_start_local
             ):
                 continue
@@ -1495,7 +1496,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self,
         ppid: str,
         now: datetime.datetime,
-        tz: datetime.tzinfo | None,
+        tz: datetime.tzinfo,
         delegated_control_status: str | None,
         smart_schedule_windows: list[PodHomeSmartScheduleWindow] | None,
         session_start: datetime.datetime,
@@ -1526,12 +1527,10 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
                     datetime_to_schedule_date(now, tz) + datetime.timedelta(days=1),
                     tz,
                 )
-                if manual_schedule_windows and tz is not None else None
+                if manual_schedule_windows else None
             )
             # Cached (self._manual_schedules_by_ppid), so this reflects whether a
-            # schedule has EVER been fetched for this ppid, not just this poll -
-            # `schedule_events` above can legitimately be None this poll (e.g. tz momentarily
-            # unresolvable) even once a schedule is known.
+            # schedule has EVER been fetched for this ppid, not just this poll.
             session_has_schedule = manual_schedule_windows is not None
         return schedule_events, session_has_schedule
 
@@ -1594,7 +1593,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self,
         ppid: str,
         now: datetime.datetime,
-        tz: datetime.tzinfo | None,
+        tz: datetime.tzinfo,
         delegated_control_status: str | None,
         smart_schedule_windows: list[PodHomeSmartScheduleWindow] | None,
     ) -> PodHomeCharge | None:
@@ -1745,7 +1744,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
     async def _async_build_charger(
         self,
         raw: dict[str, Any],
-        tz: datetime.tzinfo | None,
+        tz: datetime.tzinfo,
         now: datetime.datetime,
         connectivity_by_ppid: dict[str, dict[str, Any]],
     ) -> PodHomeCharger | None:
