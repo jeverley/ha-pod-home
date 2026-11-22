@@ -13,14 +13,11 @@ official **Pod Home** app.
 
 ### Marketplace
 
-[![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jeverley&repository=ha-pod-home&category=integration)
-
-Or add it yourself:
-
-1. Settings → **Marketplace** → **Add from link** (upper-right) → enter `jeverley/ha-pod-home` →
-   **Add**. The Marketplace asks you to connect GitHub the first time you add a repository.
-2. Open **Pod Home** → **Install**. If Home Assistant needs a restart first, a repair under
+1. Open Settings → **Marketplace** and search for **Pod Home**.
+2. Select it → **Install**. If Home Assistant needs a restart first, a repair under
    Settings → System → Repairs offers to do it.
+
+[![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jeverley&repository=ha-pod-home&category=integration)
 
 ### Manual
 
@@ -117,7 +114,6 @@ or **Always on** in Basic Charging.
 - **Total energy** misses charges that finish while Home Assistant is offline for more than 31 days.
 - **More than one charger** on an account is supported but untested.
 - **Remote lock** is untested on a real Solo 3S. Feedback from Solo 3S owners is welcome.
-- Not yet in the Marketplace catalog. Add it from a link (see Installation).
 
 ## About
 
