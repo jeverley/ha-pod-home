@@ -71,7 +71,7 @@ Scheme (see below).
 | Charge mode        | Controls   | Select        | Options depend on Charging Scheme |
 | Charging state     | Diagnostic | Sensor        | Raw API value, disabled by default |
 | Charging scheme    | Diagnostic | Sensor        | Smart or Basic |
-| Connectivity       | Diagnostic | Binary sensor | On when the charger is online, unknown if Pod Point isn't reporting its connection |
+| Connectivity       | Diagnostic | Binary sensor | On when the charger is online, unknown otherwise |
 
 ### Car device
 
@@ -216,7 +216,7 @@ mode: single
 
 - **Entities are Unavailable.** Home Assistant couldn't reach Pod Point, because of a network
   problem or a Pod Point outage. They recover on the next successful update.
-- **Status is Unknown and Connectivity is off.** Pod Point can't see the charger, for example
+- **Status and Connectivity are Unknown.** Pod Point can't see the charger, for example
   when the charger has lost its network connection. They recover once it reconnects.
 - **Home Assistant asks you to sign in again.** Pod Point rejected the saved password. Enter the
   current one, or use Reconfigure.

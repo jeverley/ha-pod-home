@@ -9,7 +9,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CHARGING_STATE_CABLE_CONNECTED, CONNECTION_STATE_ONLINE, CONNECTION_STATE_UNKNOWN, DOMAIN
+from .const import CHARGING_STATE_CABLE_CONNECTED, CONNECTION_STATE_ONLINE, DOMAIN
 from .entity import (
     PodHomeEntity,
     PodHomeVehicleEntity,
@@ -54,9 +54,10 @@ class PodHomeConnectivitySensor(PodHomeEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         charger = self.charger
-        if not charger or charger.connection_state in (None, CONNECTION_STATE_UNKNOWN):
+        if not charger:
             return None
-        return charger.connection_state == CONNECTION_STATE_ONLINE
+        # Only Online is confirmed; any other connectionState is unknown.
+        return True if charger.connection_state == CONNECTION_STATE_ONLINE else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:

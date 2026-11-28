@@ -23,23 +23,16 @@ async def test_connectivity_sensor_on_off(hass: HomeAssistant) -> None:
     assert entity.is_on is True
     assert entity.extra_state_attributes == {"last_seen": last_seen}
 
-    coordinator.data = {PPID: make_charger(connection_state="Offline")}
-    assert entity.is_on is False
-
-    coordinator.data = {PPID: make_charger(connection_state="Reconnecting")}
-    assert entity.is_on is False
 
 
-async def test_connectivity_sensor_unknown_when_state_unknown(hass: HomeAssistant) -> None:
+async def test_connectivity_sensor_unknown_unless_online(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(hass, {PPID: make_charger(connection_state=None)})
     entity = binary_sensor.PodHomeConnectivitySensor(coordinator, PPID)
     assert entity.is_on is None
 
-    coordinator.data = {PPID: make_charger(connection_state="Unknown")}
-    assert entity.is_on is None
-
-    coordinator.data = {PPID: make_charger(connection_state="SomethingNew")}
-    assert entity.is_on is False  # a reported state other than Online
+    for state in ("Unknown", "Offline", "Reconnecting", "SomethingNew"):
+        coordinator.data = {PPID: make_charger(connection_state=state)}
+        assert entity.is_on is None
 
 
 async def test_cable_connected_sensor_maps_charging_state(hass: HomeAssistant) -> None:
