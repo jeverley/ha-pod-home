@@ -100,7 +100,6 @@ class PodHomeChargingStateSensor(PodHomeEntity, SensorEntity):
     Disabled by default."""
 
     _attr_translation_key = "charging_state"
-    _attr_name = "Charging state"
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = CHARGING_STATE_OPTIONS
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -134,7 +133,6 @@ class PodHomeChargingSchemeSensor(PodHomeEntity, SensorEntity):
     tariff compatibility (Smart Charging needs a single- or two-rate tariff)."""
 
     _attr_translation_key = "charging_scheme"
-    _attr_name = "Charging scheme"
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = SCHEDULE_MODE_OPTIONS
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -169,7 +167,6 @@ class PodHomeStatusSensor(PodHomeEntity, SensorEntity):
     that. Charging State above still exposes the raw wire value."""
 
     _attr_translation_key = "status"
-    _attr_name = "Status"
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = CHARGER_STATUS_OPTIONS
 
@@ -193,7 +190,6 @@ class PodHomeChargeDurationSensor(PodHomeEntity, SensorEntity):
     recorder precision; suggested_unit_of_measurement only changes the default display to hours."""
 
     _attr_translation_key = "charge_duration"
-    _attr_name = "Charge duration"
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_native_unit_of_measurement = UnitOfTime.SECONDS
     _attr_suggested_unit_of_measurement = UnitOfTime.HOURS
@@ -214,7 +210,6 @@ class PodHomeChargeEnergySensor(PodHomeEntity, SensorEntity):
     else the last finished one (latest_charge). A session snapshot, not dashboard-safe."""
 
     _attr_translation_key = "charge_energy"
-    _attr_name = "Charge energy"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_state_class = SensorStateClass.TOTAL
@@ -234,7 +229,6 @@ class PodHomeChargeCostSensor(PodHomeEntity, SensorEntity):
     (latest_charge, via select_last_charge()). A session snapshot, not dashboard-safe."""
 
     _attr_translation_key = "charge_cost"
-    _attr_name = "Charge cost"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_icon = "mdi:cash"
 
@@ -262,7 +256,6 @@ class PodHomeMonthEnergySensor(PodHomeEntity, SensorEntity):
     the app."""
 
     _attr_translation_key = "month_energy"
-    _attr_name = "Month energy"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -283,7 +276,6 @@ class PodHomeMonthCostSensor(PodHomeEntity, SensorEntity):
     above (no live current_charge top-up, see that sensor's docstring)."""
 
     _attr_translation_key = "month_cost"
-    _attr_name = "Month cost"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.TOTAL
     _attr_icon = "mdi:cash-multiple"
@@ -323,7 +315,6 @@ class PodHomeTotalEnergySensor(PodHomeEntity, SensorEntity):
     only when it hasn't already been finalized, to avoid double-counting."""
 
     _attr_translation_key = "total_energy"
-    _attr_name = "Total energy"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -362,7 +353,6 @@ class PodHomeElectricityRateSensor(PodHomeEntity, SensorEntity):
     Scheme (e.g. deciding when to charge manually in Basic mode)."""
 
     _attr_translation_key = "electricity_rate"
-    _attr_name = "Electricity rate"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     @property
@@ -443,7 +433,6 @@ class PodHomeBoostEndTimeSensor(PodHomeEntity, SensorEntity):
     running - native_value returning None is sufficient, no `available` override needed."""
 
     _attr_translation_key = "boost_end_time"
-    _attr_name = "Boost end time"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_icon = "mdi:timer-plus-outline"
 
@@ -462,7 +451,6 @@ class PodHomeVehicleBatteryLevelSensor(PodHomeVehicleEntity, SensorEntity):
     """Vehicle's reported battery level (via Enode, when a vehicle is linked)."""
 
     _attr_translation_key = "vehicle_battery_level"
-    _attr_name = "Battery"
     _attr_device_class = SensorDeviceClass.BATTERY
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -496,7 +484,6 @@ class PodHomeVehicleRangeSensor(PodHomeVehicleEntity, SensorEntity):
     own preferences.unitOfDistance setting."""
 
     _attr_translation_key = "vehicle_estimated_range"
-    _attr_name = "Estimated range"
     _attr_device_class = SensorDeviceClass.DISTANCE
     _attr_native_unit_of_measurement = UnitOfLength.KILOMETERS
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -520,7 +507,6 @@ class PodHomeVehicleOdometerSensor(PodHomeVehicleEntity, SensorEntity):
     handling as Estimated range above - see that sensor's docstring."""
 
     _attr_translation_key = "vehicle_odometer"
-    _attr_name = "Odometer"
     _attr_device_class = SensorDeviceClass.DISTANCE
     _attr_native_unit_of_measurement = UnitOfLength.KILOMETERS
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -545,7 +531,6 @@ class PodHomeVehicleExpectedChargeSensor(PodHomeVehicleEntity, SensorEntity):
     prevents hitting the target."""
 
     _attr_translation_key = "vehicle_expected_charge"
-    _attr_name = "Expected charge"
     _attr_icon = "mdi:battery-clock"
     _attr_native_unit_of_measurement = PERCENTAGE
 
@@ -578,7 +563,6 @@ class PodHomeVehiclePowerDeliveryStateSensor(PodHomeVehicleEntity, SensorEntity)
     handling (see charger_status() in helpers.py). Disabled by default."""
 
     _attr_translation_key = "vehicle_power_delivery_state"
-    _attr_name = "Power delivery state"
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = POWER_DELIVERY_STATE_OPTIONS
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -600,7 +584,6 @@ class PodHomeVehicleChargeRateSensor(PodHomeVehicleEntity, SensorEntity):
     """Vehicle's charge rate (vehicle.chargeState.chargeRate). Null once charging stops."""
 
     _attr_translation_key = "vehicle_charge_rate"
-    _attr_name = "Charge rate"
     _attr_device_class = SensorDeviceClass.POWER
     _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -620,7 +603,6 @@ class PodHomeVehicleMaxCurrentSensor(PodHomeVehicleEntity, SensorEntity):
     account to date. Disabled by default."""
 
     _attr_translation_key = "vehicle_max_current"
-    _attr_name = "Max current"
     _attr_device_class = SensorDeviceClass.CURRENT
     _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -643,7 +625,6 @@ class PodHomeVehicleChargeTimeRemainingSensor(PodHomeVehicleEntity, SensorEntity
     minutes; suggested display unit is hours."""
 
     _attr_translation_key = "vehicle_charge_time_remaining"
-    _attr_name = "Charge time remaining"
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_native_unit_of_measurement = UnitOfTime.MINUTES
     _attr_suggested_unit_of_measurement = UnitOfTime.HOURS
@@ -665,7 +646,6 @@ class PodHomeRewardsBalanceSensor(PodHomeAccountEntity, SensorEntity):
     allowance/payout-threshold figures are exposed as attributes."""
 
     _attr_translation_key = "rewards_balance"
-    _attr_name = "Rewards balance"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = "GBP"

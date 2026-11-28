@@ -113,8 +113,9 @@ async def test_boost_duration_press_unset_raises_clean_error(hass: HomeAssistant
     _register_boost_duration(hass, PPID, "unknown")
     entity = button.PodHomeBoostDurationButton(coordinator, PPID)
     entity.hass = hass
-    with pytest.raises(HomeAssistantError, match="Enter a Boost duration"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await entity.async_press()
+    assert exc_info.value.translation_key == "boost_duration_missing"
     coordinator.api.async_create_charge_override.assert_not_called()
 
 
@@ -123,8 +124,9 @@ async def test_boost_duration_press_zero_raises_clean_error(hass: HomeAssistant)
     _register_boost_duration(hass, PPID, "00:00:00")
     entity = button.PodHomeBoostDurationButton(coordinator, PPID)
     entity.hass = hass
-    with pytest.raises(HomeAssistantError, match="greater than zero"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await entity.async_press()
+    assert exc_info.value.translation_key == "boost_duration_zero"
     coordinator.api.async_create_charge_override.assert_not_called()
 
 

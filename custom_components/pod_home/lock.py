@@ -55,7 +55,6 @@ class PodHomeRemoteLock(PodHomeOptimisticWriteMixin[bool], PodHomeEntity, LockEn
     read-your-own-write race - see its docstring."""
 
     _attr_translation_key = "remote_lock"
-    _attr_name = "Remote lock"
 
     @property
     def unique_id(self) -> str:
@@ -77,13 +76,15 @@ class PodHomeRemoteLock(PodHomeOptimisticWriteMixin[bool], PodHomeEntity, LockEn
 
     async def _async_set_locked(self, off_mode: bool) -> None:
         if not self.charger:
-            raise HomeAssistantError("No charger to lock/unlock")
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="no_charger_to_lock"
+            )
         try:
             await self.coordinator.api.async_set_remote_lock(self.ppid, off_mode)
         except PodHomeApiError as exc:
             if exc.status == 501:
                 raise HomeAssistantError(
-                    "This charger doesn't support Remote Lock (Solo 3S only)"
+                    translation_domain=DOMAIN, translation_key="remote_lock_unsupported"
                 ) from exc
             await async_handle_write_error(self.coordinator, exc)
         except PodHomeError as exc:

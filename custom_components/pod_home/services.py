@@ -52,7 +52,11 @@ def _resolve_charger(hass: HomeAssistant, device_id: str) -> tuple[PodHomeDataUp
     device_registry = dr.async_get(hass)
     device = device_registry.async_get(device_id)
     if device is None:
-        raise ServiceValidationError(f"Unknown device: {device_id}")
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="unknown_device",
+            translation_placeholders={"device_id": device_id},
+        )
     # DeviceEntry.config_entry_id replaces the deprecated config_entries set.
     entry_ids = (
         [device.config_entry_id] if hasattr(device, "config_entry_id") else device.config_entries
@@ -69,8 +73,9 @@ def _resolve_charger(hass: HomeAssistant, device_id: str) -> tuple[PodHomeDataUp
                 if (DOMAIN, ppid) in device.identifiers:
                     return coordinator, ppid
     raise ServiceValidationError(
-        f"{device.name or device_id} isn't a Pod Home charger device - pick the charger, not a "
-        "linked vehicle or the Pod Point account device"
+        translation_domain=DOMAIN,
+        translation_key="not_a_charger_device",
+        translation_placeholders={"device": device.name or device_id},
     )
 
 
@@ -79,10 +84,16 @@ def _require_boostable(charger: PodHomeCharger, device_label: str) -> None:
     unplugged."""
     if charger.always_on_active is None:
         raise ServiceValidationError(
-            f"{device_label}: can't tell yet whether Always On is active - try again shortly"
+            translation_domain=DOMAIN,
+            translation_key="always_on_unknown",
+            translation_placeholders={"device": device_label},
         )
     if charger.always_on_active:
-        raise ServiceValidationError(f"{device_label}: can't boost while Always On is active")
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="boost_blocked_by_always_on",
+            translation_placeholders={"device": device_label},
+        )
 
 
 def _boost_window(
@@ -91,12 +102,20 @@ def _boost_window(
     """(requestedAt, endAt) for a boost lasting `duration` from `start` (local time if naive). A
     start already passed is sent as now, keeping the same end."""
     if duration <= datetime.timedelta(0):
-        raise ServiceValidationError(f"{device_label}: the duration must be more than zero")
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="boost_duration_not_positive",
+            translation_placeholders={"device": device_label},
+        )
     now = dt_util.utcnow()
     start_utc = dt_util.as_utc(start) if start is not None else now
     end_at = start_utc + duration
     if end_at <= now:
-        raise ServiceValidationError(f"{device_label}: that boost would already have ended")
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="boost_already_ended",
+            translation_placeholders={"device": device_label},
+        )
     return max(start_utc, now), end_at
 
 
@@ -127,7 +146,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
         coordinator, ppid = _resolve_charger(hass, call.data[ATTR_DEVICE_ID])
         charger = coordinator.data[ppid]
         if charger.boost_end_at is None:
-            raise ServiceValidationError(f"{ppid}: no active boost to cancel")
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="no_active_boost",
+                translation_placeholders={"device": ppid},
+            )
         try:
             await coordinator.api.async_delete_charge_override(ppid)
         except PodHomeError as exc:
