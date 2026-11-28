@@ -1,0 +1,108 @@
+rules:
+  # Bronze
+  action-setup: done
+  appropriate-polling: done
+  brands:
+    status: done
+    comment: Brand assets ship in the integration's brand directory.
+  common-modules: done
+  config-flow:
+    status: todo
+    comment: The setup and reauth fields have no data_description.
+  config-flow-test-coverage:
+    status: todo
+    comment: config_flow.py is at 96%; the failed token-clear branch in reauth is untested.
+  dependency-transparency:
+    status: todo
+    comment: podpoint-mobile-api is vendored and not published to PyPI.
+  docs-actions: done
+  docs-conditions:
+    status: exempt
+    comment: The integration provides no conditions.
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions:
+    status: todo
+    comment: The README has no removal instructions.
+  docs-triggers:
+    status: exempt
+    comment: The integration provides no triggers.
+  entity-event-setup:
+    status: exempt
+    comment: Entities read coordinator data and subscribe to no events.
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure: done
+  test-before-setup: done
+  unique-config-entry: done
+
+  # Silver
+  action-exceptions: done
+  config-entry-unloading: done
+  docs-configuration-parameters:
+    status: exempt
+    comment: The integration has no options.
+  docs-installation-parameters: done
+  entity-unavailable: done
+  integration-owner: done
+  log-when-unavailable: done
+  parallel-updates: done
+  reauthentication-flow: done
+  test-coverage:
+    status: todo
+    comment: Coverage is 94% overall and several modules are below 95%.
+
+  # Gold
+  devices: done
+  diagnostics: done
+  discovery:
+    status: exempt
+    comment: Chargers are reached through the Pod Point cloud and aren't discoverable on the network.
+  discovery-update-info:
+    status: exempt
+    comment: The integration uses no discovery.
+  docs-data-update:
+    status: todo
+    comment: The README doesn't describe how or how often data is fetched.
+  docs-examples:
+    status: todo
+    comment: The README has no automation examples.
+  docs-known-limitations: done
+  docs-supported-devices:
+    status: todo
+    comment: The README doesn't list supported charger models.
+  docs-supported-functions: done
+  docs-troubleshooting:
+    status: todo
+    comment: The README has no troubleshooting section.
+  docs-use-cases:
+    status: todo
+    comment: The README has no use cases.
+  dynamic-devices: done
+  entity-category: done
+  entity-device-class: done
+  entity-disabled-by-default: done
+  entity-translations:
+    status: todo
+    comment: Every entity sets _attr_name alongside translation_key, so names aren't translated.
+  exception-translations:
+    status: todo
+    comment: Most HomeAssistantError and ServiceValidationError messages are plain strings.
+  icon-translations: done
+  reconfiguration-flow:
+    status: todo
+    comment: There is no reconfigure step; credentials change only through reauth.
+  repair-issues:
+    status: exempt
+    comment: Expired credentials are handled by reauth; there are no other user-fixable states.
+  stale-devices:
+    status: todo
+    comment: Devices for chargers removed from the account aren't removed.
+
+  # Platinum
+  async-dependency: done
+  inject-websession: done
+  strict-typing:
+    status: done
+    comment: mypy --strict runs in CI on the integration and the library, which ships py.typed.

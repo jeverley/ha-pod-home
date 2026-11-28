@@ -28,6 +28,9 @@ squash-merge comes up, ask whether to bundle it in rather than silently leaving 
 ## Repo layout
 
 - `custom_components/pod_home/` — the HA integration itself. Ships as-is in the public repo.
+- `custom_components/pod_home/quality_scale.yaml` tracks each HA quality-scale rule as done, exempt or
+  todo. Hassfest doesn't validate it for custom integrations, so update a rule's status when the code or
+  README changes it.
 - `podpoint-mobile-api/` — the standalone async API client, zero HA dependency (same pattern as
   `ohme` on PyPI). Install locally with `pip install -e podpoint-mobile-api` before running
   anything that imports it. Not yet published anywhere installable, so `custom_components/
