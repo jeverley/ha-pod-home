@@ -78,8 +78,9 @@ async def test_async_lock_raises_clean_error_when_charger_unsupported(
     coordinator.api.async_set_remote_lock.side_effect = PodHomeApiError(501, {})
     entity = lock.PodHomeRemoteLock(coordinator, PPID)
 
-    with pytest.raises(HomeAssistantError, match="doesn't support Remote Lock"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await entity.async_lock()
+    assert exc_info.value.translation_key == "remote_lock_unsupported"
 
 
 async def test_async_lock_other_api_errors_raise_home_assistant_error(hass: HomeAssistant) -> None:
@@ -87,13 +88,34 @@ async def test_async_lock_other_api_errors_raise_home_assistant_error(hass: Home
     coordinator.api.async_set_remote_lock.side_effect = PodHomeApiError(500, {})
     entity = lock.PodHomeRemoteLock(coordinator, PPID)
 
-    with pytest.raises(HomeAssistantError, match="request failed"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await entity.async_lock()
+    assert exc_info.value.translation_key == "pod_point_request_failed"
 
 
 async def test_async_lock_raises_without_charger(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(hass, {})
     entity = lock.PodHomeRemoteLock(coordinator, PPID)
 
-    with pytest.raises(HomeAssistantError, match="No charger"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await entity.async_lock()
+    assert exc_info.value.translation_key == "no_charger_to_lock"
+
+
+async def test_remote_lock_unique_id(hass: HomeAssistant) -> None:
+    from custom_components.pod_home.const import DOMAIN
+
+    entity = lock.PodHomeRemoteLock(make_coordinator(hass, {PPID: make_charger()}), PPID)
+    assert entity.unique_id == f"{DOMAIN}_{PPID}_remote_lock"
+
+
+async def test_async_lock_reports_a_connection_failure(hass: HomeAssistant) -> None:
+    from custom_components.pod_home.podpoint_mobile_api import PodHomeConnectionError
+
+    coordinator = make_coordinator(hass, {PPID: make_charger()})
+    coordinator.api.async_set_remote_lock.side_effect = PodHomeConnectionError("timed out")
+    entity = lock.PodHomeRemoteLock(coordinator, PPID)
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await entity.async_lock()
+    assert exc_info.value.translation_key == "pod_point_unreachable"

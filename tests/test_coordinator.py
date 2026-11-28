@@ -1935,3 +1935,90 @@ async def test_routine_check_ins_alone_dont_keep_polling_fast(
         coordinator.data = await coordinator._async_fetch_data()
 
     assert coordinator.update_interval == datetime.timedelta(minutes=4, seconds=5)
+
+
+# --- parsing, restore and optional-fetch edge cases ---
+
+
+async def test_parse_dt_handles_junk_and_offsetless_values() -> None:
+    from custom_components.pod_home.coordinator import _parse_dt
+
+    assert _parse_dt("not a timestamp") is None
+    assert _parse_dt(None) is None
+    assert _parse_dt("2026-01-01T12:00:00") == datetime.datetime(
+        2026, 1, 1, 12, 0, tzinfo=datetime.timezone.utc
+    )
+
+
+async def test_unreadable_saved_state_starts_fresh(
+    coordinator: PodHomeDataUpdateCoordinator,
+) -> None:
+    coordinator._sticky_store.async_load = AsyncMock(side_effect=OSError("corrupt"))
+    coordinator._total_energy_store.async_load = AsyncMock(side_effect=OSError("corrupt"))
+
+    await coordinator.async_load_sticky_state()
+
+    assert coordinator._latest_charge_by_ppid == {}
+    assert coordinator._total_energy_kwh_by_ppid == {}
+
+
+async def test_non_dict_saved_total_energy_is_ignored(
+    coordinator: PodHomeDataUpdateCoordinator,
+) -> None:
+    coordinator._sticky_store.async_load = AsyncMock(return_value=None)
+    coordinator._total_energy_store.async_load = AsyncMock(return_value=["unexpected"])
+
+    await coordinator.async_load_sticky_state()
+
+    assert coordinator._total_energy_kwh_by_ppid == {}
+    assert coordinator._parse_number_dict("unexpected") == {}
+
+
+async def test_account_preferences_are_read_from_users(
+    api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
+    now = datetime.datetime.now(datetime.timezone.utc)
+    api.async_get_users.return_value = {
+        "balance": {"currency": "EUR"},
+        "preferences": {"unitOfDistance": "miles"},
+    }
+
+    await coordinator._async_fetch_account_preferences(now)
+
+    assert coordinator.currency == "EUR"
+    assert coordinator.unit_of_distance == "miles"
+    assert coordinator._account_preferences_fetched_at == now
+
+
+async def test_account_preferences_failure_is_not_fatal(
+    api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
+    api.async_get_users.side_effect = PodHomeConnectionError("timed out")
+
+    await coordinator._async_fetch_account_preferences(datetime.datetime.now(datetime.timezone.utc))
+
+    assert coordinator._account_preferences_fetched_at is None
+
+
+async def test_api3_pods_failure_is_not_fatal(
+    api: PodHomeApiClient, coordinator: PodHomeDataUpdateCoordinator
+) -> None:
+    api.async_create_api3_session.return_value = {"sessions": {"user_id": 7}}
+    api.async_api3_pods.side_effect = PodHomeConnectionError("timed out")
+
+    await coordinator._async_refresh_api3_account(datetime.datetime.now(datetime.timezone.utc))
+
+    assert coordinator._api3_user_id == 7
+    assert coordinator._api3_account_fetched_at is None
+
+
+async def test_shutdown_survives_a_failed_save(
+    coordinator: PodHomeDataUpdateCoordinator, caplog: pytest.LogCaptureFixture
+) -> None:
+    coordinator._sticky_store.async_save = AsyncMock(side_effect=OSError("disk full"))
+    coordinator._total_energy_store.async_save = AsyncMock()
+
+    await coordinator.async_shutdown()
+
+    coordinator._total_energy_store.async_save.assert_awaited_once()
+    assert "Couldn't save" in caplog.text

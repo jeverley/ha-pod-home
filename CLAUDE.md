@@ -28,6 +28,9 @@ squash-merge comes up, ask whether to bundle it in rather than silently leaving 
 ## Repo layout
 
 - `custom_components/pod_home/` — the HA integration itself. Ships as-is in the public repo.
+- `custom_components/pod_home/quality_scale.yaml` tracks each HA quality-scale rule as done, exempt or
+  todo. Hassfest doesn't validate it for custom integrations, so update a rule's status when the code or
+  README changes it.
 - `podpoint-mobile-api/` — the standalone async API client, zero HA dependency (same pattern as
   `ohme` on PyPI). Install locally with `pip install -e podpoint-mobile-api` before running
   anything that imports it. Not yet published anywhere installable, so `custom_components/
@@ -129,6 +132,11 @@ matching every existing platform module:
   `PodHomeAccountEntity`), using their `translation_key`/`unique_id` pattern
 - A matching entry in both `strings.json` and `translations/en.json` (see "Entity states and
   translations" above for keeping them in sync)
+- No `_attr_name`: the entity's name comes from its `translation_key` (`tests/test_entity_names.py`
+  enforces this)
+- User-facing errors are raised through `translated_error`/`translated_validation_error`
+  (`errors.py`) with a matching `exceptions` entry in the strings files
+  (`tests/test_exception_translations.py` checks the keys and placeholders)
 - The new `Platform.*` registered in `__init__.py`'s `PLATFORMS` list
 
 ## Credentials

@@ -9,6 +9,12 @@ official **Pod Home** app.
 - The email and password you use to sign in to the Pod Home app.
 - At least one Pod Point charger on that account.
 
+## Supported devices
+
+Tested with a Pod Point **Solo 3**. Other Pod Point home chargers on a Pod Home account are not
+tested. Remote lock needs a **Solo 3S**. A car appears if one is linked to your account in the Pod
+Home app, through Enode.
+
 ## Installation
 
 ### Marketplace
@@ -28,6 +34,9 @@ then restart Home Assistant. No separate package install is needed.
 
 Settings → Devices & services → Add integration → **Pod Home**, then enter your Pod Home email
 and password.
+
+To change the email or password later, use Settings → Devices & services → Pod Home → ⋮ →
+**Reconfigure**. If Pod Point rejects the saved password, Home Assistant asks you to sign in again.
 
 ## Features
 
@@ -108,6 +117,123 @@ or **Always on** in Basic Charging.
   - Works with the cable unplugged; the boost applies once it's plugged in.
   - Replaces any existing boost. Fails if Always on is active.
 - **`pod_home.cancel_boost`** cancels the active boost.
+
+## How data is updated
+
+Home Assistant polls Pod Point's cloud every 5 minutes, timed to just after the charger's own
+check-in. It polls every minute for a few minutes after the car is plugged in or a boost starts,
+until charging begins. A finished charge is added to Month energy and Month cost when the car is
+unplugged. If Pod Point can't be reached, entities show Unavailable until the next successful
+update.
+
+## Use cases
+
+- Boost charging during a free-electricity session, such as an Octopus Power-up.
+- Show charge status, energy and cost on a dashboard, and Total energy in the Energy Dashboard.
+- Set Ready by and Target charge for Smart Charging from an automation or dashboard.
+
+## Examples
+
+Boost for two hours from an automation:
+
+```yaml
+actions:
+  - action: pod_home.start_boost
+    data:
+      device_id: <charger device id>
+      duration:
+        hours: 2
+```
+
+<details>
+<summary>Boost for every joined Octopus Power-up session</summary>
+
+Needs the Octopus Energy integration with Power-up sessions joined. It runs every 5 minutes and
+whenever the joined sessions change, and boosts when a run of back-to-back sessions starts within
+30 minutes (or is under way) and no boost covers it. Replace the placeholders with your own entity
+IDs and charger device ID.
+
+```yaml
+alias: Boost charging for Octopus Power-ups
+triggers:
+  - trigger: time_pattern
+    minutes: /5
+  - trigger: state
+    entity_id: event.octopus_energy_<account>_octoplus_power_up_events
+    attribute: events
+variables:
+  chain: >-
+    {%- set ns = namespace(start=none, end=none, done=false) -%}
+    {%- for s in (state_attr('event.octopus_energy_<account>_octoplus_power_up_events', 'events') or [])
+       | selectattr('end', 'gt', now()) | sort(attribute='start') -%}
+      {%- if ns.start is none -%}
+        {%- set ns.start = s.start -%}{%- set ns.end = s.end -%}
+      {%- elif not ns.done and s.start <= ns.end -%}
+        {%- set ns.end = [ns.end, s.end] | max -%}
+      {%- else -%}
+        {%- set ns.done = true -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{ [ns.start.isoformat(), ns.end.isoformat()] if ns.start is not none else [] }}
+  boost_end_state: "{{ states('sensor.<charger>_boost_end_time') }}"
+  boost_end: >-
+    {{ as_datetime(boost_end_state).isoformat()
+       if boost_end_state not in ['unknown', 'unavailable', 'none', ''] else '' }}
+conditions:
+  - condition: template
+    value_template: "{{ boost_end_state != 'unavailable' }}"
+  - condition: template
+    value_template: >-
+      {{ chain | count > 0
+         and as_datetime(chain[0]) - now() <= timedelta(minutes=30)
+         and as_datetime(chain[1]) - now() > timedelta(minutes=2) }}
+  - condition: template
+    value_template: >-
+      {{ not (boost_end != ''
+              and as_datetime(boost_end) >= as_datetime(chain[1]) - timedelta(seconds=60)) }}
+  - condition: template
+    value_template: >-
+      {{ not (boost_end != ''
+              and as_datetime(boost_end) > now()
+              and as_datetime(boost_end) <= as_datetime(chain[0])) }}
+actions:
+  - action: pod_home.start_boost
+    data:
+      device_id: <charger device id>
+      start: "{{ chain[0] }}"
+      duration:
+        seconds: "{{ (as_datetime(chain[1]) - as_datetime(chain[0])).total_seconds() | int }}"
+mode: single
+```
+
+</details>
+
+## Troubleshooting
+
+- **Entities are Unavailable.** Home Assistant couldn't reach Pod Point, because of a network
+  problem or a Pod Point outage. They recover on the next successful update.
+- **Status is Unknown and Connectivity is off.** Pod Point can't see the charger, for example
+  when the charger has lost its network connection. They recover once it reconnects.
+- **Home Assistant asks you to sign in again.** Pod Point rejected the saved password. Enter the
+  current one, or use Reconfigure.
+- **A boost starts a few minutes late.** The charger picks a boost up at its next check-in, up to
+  about 5 minutes after the start. Status shows Pending until it does.
+- **The boost buttons are unavailable.** The cable isn't connected, or Always on is active.
+- **To see more detail,** turn on debug logging for the integration:
+
+  ```yaml
+  logger:
+    logs:
+      custom_components.pod_home: debug
+  ```
+
+## Removing the integration
+
+1. Settings → Devices & services → Pod Home → ⋮ → **Delete**. This removes the charger, car and
+   Pod Point devices and their entities, and deletes the sign-in and running totals the
+   integration saved.
+2. Remove Pod Home from the Marketplace, or delete `custom_components/pod_home/` if you installed
+   it manually, then restart Home Assistant.
 
 ## Known limitations
 

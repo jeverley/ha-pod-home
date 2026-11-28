@@ -44,7 +44,6 @@ class PodHomeConnectivitySensor(PodHomeEntity, BinarySensorEntity):
     """Whether the charger is currently reachable via Pod Point's cloud."""
 
     _attr_translation_key = "connectivity"
-    _attr_name = "Connectivity"
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -71,7 +70,6 @@ class PodHomeCableConnectedSensor(PodHomeEntity, BinarySensorEntity):
     """Whether a cable is plugged in, derived from chargingState."""
 
     _attr_translation_key = "cable_connected"
-    _attr_name = "Cable status"
     _attr_device_class = BinarySensorDeviceClass.PLUG
 
     @property
@@ -91,7 +89,6 @@ class PodHomeVehicleChargingSensor(PodHomeVehicleEntity, BinarySensorEntity):
     charger's own chargingState."""
 
     _attr_translation_key = "vehicle_charging"
-    _attr_name = "Charging"
     _attr_device_class = BinarySensorDeviceClass.BATTERY_CHARGING
 
     @property
@@ -109,7 +106,6 @@ class PodHomeVehiclePluggedInSensor(PodHomeVehicleEntity, BinarySensorEntity):
     charger, not necessarily a Pod Point one this account knows about."""
 
     _attr_translation_key = "vehicle_plugged_in"
-    _attr_name = "Plugged in"
     _attr_device_class = BinarySensorDeviceClass.PLUG
 
     @property

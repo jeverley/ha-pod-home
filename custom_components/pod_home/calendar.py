@@ -53,7 +53,6 @@ class PodHomeScheduleCalendar(PodHomeEntity, CalendarEntity):
     empty outside an active/recent Smart Charging session, or on an unrecognized status."""
 
     _attr_translation_key = "schedule"
-    _attr_name = "Schedule"
 
     @property
     def unique_id(self) -> str:
