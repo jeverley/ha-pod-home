@@ -135,11 +135,11 @@ async def test_ready_by_set_value_without_a_vehicle_raises(hass: HomeAssistant) 
 
 
 async def test_ready_by_set_value_reports_a_connection_failure(hass: HomeAssistant) -> None:
-    from custom_components.pod_home.podpoint_mobile_api import PodHomeConnectionError
+    from podpoint_mobile_api import PodPointMobileConnectionError
 
     vehicle = make_vehicle(id="v1", intent_charge_kwh=42.0)
     coordinator = make_coordinator(hass, {PPID: make_charger(vehicle=vehicle)})
-    coordinator.api.async_set_vehicle_intents.side_effect = PodHomeConnectionError("timed out")
+    coordinator.api.async_set_vehicle_intents.side_effect = PodPointMobileConnectionError("timed out")
     entity = time_platform.PodHomeVehicleReadyByTime(coordinator, "v1")
 
     with pytest.raises(HomeAssistantError) as exc_info:

@@ -20,7 +20,7 @@ from custom_components.pod_home.coordinator import (
     PodHomeTariffWindow,
     PodHomeVehicle,
 )
-from custom_components.pod_home.podpoint_mobile_api import PodHomeApiClient
+from podpoint_mobile_api import PodPointMobileApiClient
 
 UTC = datetime.timezone.utc
 LONDON = ZoneInfo("Europe/London")
@@ -42,10 +42,10 @@ def charger_raw(**overrides) -> dict:
     return raw
 
 
-def make_stub_api() -> PodHomeApiClient:
+def make_stub_api() -> PodPointMobileApiClient:
     """An autospecced client where every call succeeds for one charger with nothing going on -
     tests override only what they care about, including any failure."""
-    api = create_autospec(PodHomeApiClient, instance=True)
+    api = create_autospec(PodPointMobileApiClient, instance=True)
     api.async_list_chargers.return_value = [charger_raw()]
     api.async_get_users.return_value = {}
     api.async_smart_charging_chargers_and_vehicles.return_value = []

@@ -9,9 +9,7 @@ rules:
   common-modules: done
   config-flow: done
   config-flow-test-coverage: done
-  dependency-transparency:
-    status: todo
-    comment: podpoint-mobile-api is vendored; it needs a PyPI source distribution published from CI with matching tags.
+  dependency-transparency: done
   docs-actions: done
   docs-conditions:
     status: exempt

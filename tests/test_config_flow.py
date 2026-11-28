@@ -22,9 +22,9 @@ from custom_components.pod_home.const import (
     DOMAIN,
     auth_store_key,
 )
-from custom_components.pod_home.podpoint_mobile_api import (
-    PodHomeAuthError,
-    PodHomeConnectionError,
+from podpoint_mobile_api import (
+    PodPointMobileAuthError,
+    PodPointMobileConnectionError,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -38,7 +38,7 @@ def no_real_setup():
     patches async_get_clientsession: building a *real* aiohttp connector pulls in aiodns'
     AsyncResolver, which requires either a SelectorEventLoop or the exact winloop.Loop instance -
     neither of which this test's ProactorEventLoop-based `hass` fixture provides on Windows. Not
-    a concern for what's under test here: PodHomeAuth.async_get_id_token is independently mocked
+    a concern for what's under test here: PodPointMobileAuth.async_get_id_token is independently mocked
     in every test below and never actually touches the session object."""
     with (
         patch("custom_components.pod_home.async_setup_entry", AsyncMock(return_value=True)),
@@ -49,7 +49,7 @@ def no_real_setup():
 
 async def test_user_flow_success_creates_entry(hass: HomeAssistant) -> None:
     with patch(
-        "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
+        "custom_components.pod_home.config_flow.PodPointMobileAuth.async_get_id_token",
         AsyncMock(return_value="id-token"),
     ):
         result = await hass.config_entries.flow.async_init(
@@ -70,15 +70,15 @@ async def test_user_flow_success_creates_entry(hass: HomeAssistant) -> None:
 @pytest.mark.parametrize(
     ("error", "expected"),
     [
-        (PodHomeAuthError("bad credentials"), "invalid_auth"),
-        (PodHomeConnectionError("timed out"), "cannot_connect"),
+        (PodPointMobileAuthError("bad credentials"), "invalid_auth"),
+        (PodPointMobileConnectionError("timed out"), "cannot_connect"),
     ],
 )
 async def test_user_flow_sign_in_error_shows_error(
     hass: HomeAssistant, error: Exception, expected: str
 ) -> None:
     with patch(
-        "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
+        "custom_components.pod_home.config_flow.PodPointMobileAuth.async_get_id_token",
         AsyncMock(side_effect=error),
     ):
         result = await hass.config_entries.flow.async_init(
@@ -107,7 +107,7 @@ async def test_user_flow_duplicate_email_aborts(hass: HomeAssistant, email: str)
     existing.add_to_hass(hass)
 
     with patch(
-        "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
+        "custom_components.pod_home.config_flow.PodPointMobileAuth.async_get_id_token",
         AsyncMock(return_value="id-token"),
     ):
         result = await hass.config_entries.flow.async_init(
@@ -136,7 +136,7 @@ async def test_reauth_flow_success_updates_password(hass: HomeAssistant) -> None
     )
 
     with patch(
-        "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
+        "custom_components.pod_home.config_flow.PodPointMobileAuth.async_get_id_token",
         AsyncMock(return_value="id-token"),
     ):
         result = entry.start_reauth_flow(hass)
@@ -158,8 +158,8 @@ async def test_reauth_flow_success_updates_password(hass: HomeAssistant) -> None
 @pytest.mark.parametrize(
     ("error", "expected"),
     [
-        (PodHomeAuthError("bad credentials"), "invalid_auth"),
-        (PodHomeConnectionError("timed out"), "cannot_connect"),
+        (PodPointMobileAuthError("bad credentials"), "invalid_auth"),
+        (PodPointMobileConnectionError("timed out"), "cannot_connect"),
     ],
 )
 async def test_reauth_flow_sign_in_error_shows_error(
@@ -171,7 +171,7 @@ async def test_reauth_flow_sign_in_error_shows_error(
     entry.add_to_hass(hass)
 
     with patch(
-        "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
+        "custom_components.pod_home.config_flow.PodPointMobileAuth.async_get_id_token",
         AsyncMock(side_effect=error),
     ):
         result = await entry.start_reauth_flow(hass)
@@ -195,7 +195,7 @@ async def test_reauth_flow_completes_when_clearing_saved_tokens_fails(
 
     with (
         patch(
-            "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
+            "custom_components.pod_home.config_flow.PodPointMobileAuth.async_get_id_token",
             AsyncMock(return_value="id-token"),
         ),
         patch.object(Store, "async_remove", AsyncMock(side_effect=OSError("disk full"))),
@@ -221,7 +221,7 @@ async def test_reconfigure_flow_updates_password(hass: HomeAssistant) -> None:
     )
 
     with patch(
-        "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
+        "custom_components.pod_home.config_flow.PodPointMobileAuth.async_get_id_token",
         AsyncMock(return_value="id-token"),
     ):
         result = await entry.start_reconfigure_flow(hass)
@@ -249,7 +249,7 @@ async def test_reconfigure_flow_changes_email(hass: HomeAssistant) -> None:
     entry.add_to_hass(hass)
 
     with patch(
-        "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
+        "custom_components.pod_home.config_flow.PodPointMobileAuth.async_get_id_token",
         AsyncMock(return_value="id-token"),
     ):
         result = await entry.start_reconfigure_flow(hass)
@@ -278,7 +278,7 @@ async def test_reconfigure_flow_rejects_email_of_another_entry(
     other.add_to_hass(hass)
 
     with patch(
-        "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
+        "custom_components.pod_home.config_flow.PodPointMobileAuth.async_get_id_token",
         AsyncMock(return_value="id-token"),
     ):
         result = await entry.start_reconfigure_flow(hass)
@@ -294,8 +294,8 @@ async def test_reconfigure_flow_rejects_email_of_another_entry(
 @pytest.mark.parametrize(
     ("error", "expected"),
     [
-        (PodHomeAuthError("bad credentials"), "invalid_auth"),
-        (PodHomeConnectionError("timed out"), "cannot_connect"),
+        (PodPointMobileAuthError("bad credentials"), "invalid_auth"),
+        (PodPointMobileConnectionError("timed out"), "cannot_connect"),
     ],
 )
 async def test_reconfigure_flow_sign_in_error_shows_error(
@@ -307,7 +307,7 @@ async def test_reconfigure_flow_sign_in_error_shows_error(
     entry.add_to_hass(hass)
 
     with patch(
-        "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
+        "custom_components.pod_home.config_flow.PodPointMobileAuth.async_get_id_token",
         AsyncMock(side_effect=error),
     ):
         result = await entry.start_reconfigure_flow(hass)

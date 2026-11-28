@@ -14,7 +14,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.pod_home.const import CONF_EMAIL, CONF_PASSWORD, DOMAIN
 from custom_components.pod_home.coordinator import PodHomeDataUpdateCoordinator
-from custom_components.pod_home.podpoint_mobile_api import PodHomeAuthError
+from podpoint_mobile_api import PodPointMobileAuthError
 from tests._fixtures import PPID, make_stub_api
 
 pytestmark = pytest.mark.asyncio
@@ -36,7 +36,7 @@ async def test_async_setup_entry_real_first_refresh_succeeds(hass: HomeAssistant
     entry.add_to_hass(hass)
 
     api = make_stub_api()
-    with patch("custom_components.pod_home.PodHomeApiClient", return_value=api):
+    with patch("custom_components.pod_home.PodPointMobileApiClient", return_value=api):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
@@ -64,7 +64,7 @@ async def test_pre_0_3_7_charge_sensor_unique_ids_migrated(hass: HomeAssistant) 
         suggested_object_id="driveway_last_charge_energy",
     )
 
-    with patch("custom_components.pod_home.PodHomeApiClient", return_value=make_stub_api()):
+    with patch("custom_components.pod_home.PodPointMobileApiClient", return_value=make_stub_api()):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
@@ -84,7 +84,7 @@ async def test_charge_unique_id_migration_skips_a_taken_id(hass: HomeAssistant) 
     for unique_id in (f"{DOMAIN}_{PPID}_last_charge_energy", f"{DOMAIN}_{PPID}_charge_energy"):
         registry.async_get_or_create("sensor", DOMAIN, unique_id, config_entry=entry)
 
-    with patch("custom_components.pod_home.PodHomeApiClient", return_value=make_stub_api()):
+    with patch("custom_components.pod_home.PodPointMobileApiClient", return_value=make_stub_api()):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
@@ -96,8 +96,8 @@ async def test_async_setup_entry_auth_failure_does_not_load(hass: HomeAssistant)
     entry.add_to_hass(hass)
 
     api = make_stub_api()
-    api.async_list_chargers.side_effect = PodHomeAuthError("token expired")
-    with patch("custom_components.pod_home.PodHomeApiClient", return_value=api):
+    api.async_list_chargers.side_effect = PodPointMobileAuthError("token expired")
+    with patch("custom_components.pod_home.PodPointMobileApiClient", return_value=api):
         assert not await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
@@ -161,7 +161,7 @@ async def test_setup_signs_in_fresh_when_the_saved_tokens_cannot_be_read(hass: H
         return None
 
     with (
-        patch("custom_components.pod_home.PodHomeApiClient", return_value=make_stub_api()),
+        patch("custom_components.pod_home.PodPointMobileApiClient", return_value=make_stub_api()),
         patch.object(Store, "async_load", autospec=True, side_effect=_load),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -195,7 +195,7 @@ async def test_removing_the_entry_deletes_its_saved_data(hass: HomeAssistant) ->
     for store in stores:
         await store.async_save({"saved": True})
 
-    with patch("custom_components.pod_home.PodHomeApiClient", return_value=make_stub_api()):
+    with patch("custom_components.pod_home.PodPointMobileApiClient", return_value=make_stub_api()):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         await hass.config_entries.async_remove(entry.entry_id)
@@ -219,7 +219,7 @@ async def test_unloading_the_entry_saves_pending_state(hass: HomeAssistant) -> N
     entry = MockConfigEntry(domain=DOMAIN, data=USER_INPUT)
     entry.add_to_hass(hass)
 
-    with patch("custom_components.pod_home.PodHomeApiClient", return_value=make_stub_api()):
+    with patch("custom_components.pod_home.PodPointMobileApiClient", return_value=make_stub_api()):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         entry.runtime_data._total_energy_kwh_by_ppid = {PPID: 5.0}

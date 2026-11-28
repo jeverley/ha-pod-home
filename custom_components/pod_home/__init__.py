@@ -14,11 +14,8 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
+from podpoint_mobile_api import PodPointMobileApiClient, PodPointMobileAuth
 
-# TEMPORARY: vendored, not an installed dependency - undo once podpoint-mobile-api has a real
-# installable release (revert this import and the two others below back to a plain
-# `import podpoint_mobile_api`, delete the vendored copy, populate manifest.json's requirements).
-from .podpoint_mobile_api import PodHomeApiClient, PodHomeAuth
 from .const import (
     AUTH_STORAGE_VERSION,
     CONF_EMAIL,
@@ -76,7 +73,7 @@ class _AuthTokenSaver:
         self._pending_tokens: dict[str, Any] | None = None
 
     def save(self, tokens: dict[str, Any]) -> None:
-        """on_token_change callback passed to PodHomeAuth."""
+        """on_token_change callback passed to PodPointMobileAuth."""
         if self._cancel_delayed_save is not None:
             self._cancel_delayed_save()
         self._pending_tokens = tokens
@@ -118,14 +115,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> b
     signed_in_password = entry.data[CONF_PASSWORD]
 
     token_saver = _AuthTokenSaver(hass, auth_store, entry, signed_in_password)
-    auth = PodHomeAuth(
+    auth = PodPointMobileAuth(
         session,
         entry.data[CONF_EMAIL],
         entry.data[CONF_PASSWORD],
         on_token_change=token_saver.save,
     )
     auth.import_tokens(auth_data)
-    api = PodHomeApiClient(session, auth)
+    api = PodPointMobileApiClient(session, auth)
 
     coordinator = PodHomeDataUpdateCoordinator(
         hass, entry, api, email=entry.data[CONF_EMAIL], password=entry.data[CONF_PASSWORD]

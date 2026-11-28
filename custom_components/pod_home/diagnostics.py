@@ -1,6 +1,6 @@
 """Diagnostics support for Pod Home.
 
-Must never reference entry.runtime_data.api or .api._auth: PodHomeAuth holds live Firebase
+Must never reference entry.runtime_data.api or .api._auth: PodPointMobileAuth holds live Firebase
 tokens as plain instance attributes, not covered by any redaction list here.
 """
 from __future__ import annotations

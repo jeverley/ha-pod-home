@@ -104,10 +104,10 @@ async def test_target_charge_unique_id_and_no_value_without_a_vehicle(hass: Home
 
 
 async def test_target_charge_set_value_reports_a_connection_failure(hass: HomeAssistant) -> None:
-    from custom_components.pod_home.podpoint_mobile_api import PodHomeConnectionError
+    from podpoint_mobile_api import PodPointMobileConnectionError
 
     coordinator = make_coordinator(hass, {PPID: make_charger(vehicle=make_vehicle(id="v1"))})
-    coordinator.api.async_set_vehicle_charge_limit.side_effect = PodHomeConnectionError("timed out")
+    coordinator.api.async_set_vehicle_charge_limit.side_effect = PodPointMobileConnectionError("timed out")
     entity = number.PodHomeVehicleTargetChargeNumber(coordinator, "v1")
     entity.async_write_ha_state = lambda: None
 

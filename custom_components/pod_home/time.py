@@ -9,6 +9,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
+from podpoint_mobile_api import PodPointMobileError
 
 from .const import DAY_OF_WEEK_OPTIONS, DOMAIN
 from .coordinator import PodHomeDataUpdateCoordinator
@@ -22,7 +23,6 @@ from .entity import (
 )
 from .errors import translated_error
 from .helpers import parse_time_of_day
-from .podpoint_mobile_api import PodHomeError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -107,7 +107,7 @@ class PodHomeVehicleReadyByTime(
         )
         try:
             await self.coordinator.api.async_set_vehicle_intents(ppid, vehicle.id, intent_details)
-        except PodHomeError as exc:
+        except PodPointMobileError as exc:
             await async_handle_write_error(self.coordinator, exc)
         self._set_optimistic_value(value)
         await self.coordinator.async_request_refresh()

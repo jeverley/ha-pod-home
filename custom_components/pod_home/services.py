@@ -16,12 +16,12 @@ import probatio as vol
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.util import dt as dt_util
+from podpoint_mobile_api import PodPointMobileError
 
 from .const import DOMAIN
 from .coordinator import PodHomeCharger, PodHomeDataUpdateCoordinator
 from .entity import async_handle_write_error
 from .errors import translated_validation_error
-from .podpoint_mobile_api import PodHomeError
 
 SERVICE_START_BOOST = "start_boost"
 SERVICE_CANCEL_BOOST = "cancel_boost"
@@ -114,7 +114,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             await coordinator.api.async_create_charge_override(
                 ppid, requested_at=requested_at, end_at=end_at
             )
-        except PodHomeError as exc:
+        except PodPointMobileError as exc:
             await async_handle_write_error(coordinator, exc)
         await coordinator.async_request_refresh()
 
@@ -125,7 +125,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise translated_validation_error("no_active_boost", device=ppid)
         try:
             await coordinator.api.async_delete_charge_override(ppid)
-        except PodHomeError as exc:
+        except PodPointMobileError as exc:
             await async_handle_write_error(coordinator, exc)
         await coordinator.async_request_refresh()
 

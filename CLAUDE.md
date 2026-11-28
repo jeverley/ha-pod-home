@@ -31,12 +31,9 @@ squash-merge comes up, ask whether to bundle it in rather than silently leaving 
 - `custom_components/pod_home/quality_scale.yaml` tracks each HA quality-scale rule as done, exempt or
   todo. Hassfest doesn't validate it for custom integrations, so update a rule's status when the code or
   README changes it.
-- `podpoint-mobile-api/` — the standalone async API client, zero HA dependency (same pattern as
-  `ohme` on PyPI). Install locally with `pip install -e podpoint-mobile-api` before running
-  anything that imports it. Not yet published anywhere installable, so `custom_components/
-  pod_home/podpoint_mobile_api/` is a temporary vendored copy (`manifest.json`'s `requirements`
-  stays empty until a real release exists) - never edit the vendored copy directly; edit
-  `podpoint-mobile-api/src/podpoint_mobile_api/` and re-copy, `diff`-checking every changed file.
+- `podpoint-mobile-api` — the async API client, a separate repo (`jeverley/podpoint-mobile-api`) published
+  on PyPI, zero HA dependency. `manifest.json`'s `requirements` and `requirements_test.txt` pin the same
+  version. Library changes are made in that repo and released there; bump both pins to adopt them.
 - `README.md` — the living end-user-facing project doc.
 
 ## Documentation style
@@ -118,9 +115,8 @@ classified should fail loudly on load, not silently fall through to a default.
 
 ### No blocking I/O
 
-Everything in this integration runs in HA's event loop or the standalone async client — no
-`requests`, no blocking file/network I/O anywhere in `custom_components/pod_home/` or
-`podpoint-mobile-api/`. `aiohttp` throughout, matching what's already there.
+Everything in this integration runs in HA's event loop - no `requests`, no blocking file/network I/O
+anywhere in `custom_components/pod_home/`. `aiohttp` throughout, matching what's already there.
 
 ## New platform checklist
 
@@ -165,8 +161,8 @@ runners) - not necessarily any given local machine. Layered checks, cheapest fir
 
 - `python -m py_compile` + `python -m pyflakes` on `custom_components/pod_home/` — syntax and
   unused-import/undefined-name only, doesn't import `homeassistant`.
-- `python -c "import podpoint_mobile_api"` (after `pip install -e podpoint-mobile-api`) — a real
-  import check; `podpoint-mobile-api/` has zero HA dependency.
+- `python -c "import podpoint_mobile_api"` (after `pip install -r requirements_test.txt`) — a real
+  import check of the pinned library.
 - A local live-API smoke test (see "Credentials") exercises real API *behavior* — covers
   `podpoint_mobile_api` only, not the coordinator, entities, or config flow.
 - `tests/test_helpers.py` exercises `helpers.py`'s pure functions with hand-built fixture data

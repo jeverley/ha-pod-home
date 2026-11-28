@@ -8,6 +8,11 @@ from homeassistant.const import UnitOfLength
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from podpoint_mobile_api import (
+    PodPointMobileAuthError,
+    PodPointMobileConnectionError,
+    PodPointMobileError,
+)
 
 from .const import ATTRIBUTION, DOMAIN, MANUFACTURER
 from .coordinator import PodHomeCharge, PodHomeCharger, PodHomeDataUpdateCoordinator, PodHomeVehicle
@@ -19,7 +24,6 @@ from .helpers import (
     select_last_charge,
     smart_mode_available,
 )
-from .podpoint_mobile_api import PodHomeAuthError, PodHomeConnectionError, PodHomeError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -200,13 +204,13 @@ class PodHomeOptimisticWriteMixin(
 
 
 async def async_handle_write_error(
-    coordinator: PodHomeDataUpdateCoordinator, exc: PodHomeError
+    coordinator: PodHomeDataUpdateCoordinator, exc: PodPointMobileError
 ) -> NoReturn:
     """Fail a write with HomeAssistantError. An auth error also requests a refresh, so a real
     rejection starts reauth."""
-    if isinstance(exc, PodHomeConnectionError):
+    if isinstance(exc, PodPointMobileConnectionError):
         raise translated_error("pod_point_unreachable", error=str(exc)) from exc
-    if isinstance(exc, PodHomeAuthError):
+    if isinstance(exc, PodPointMobileAuthError):
         await coordinator.async_request_refresh()
         raise translated_error("pod_point_rejected", error=str(exc)) from exc
     raise translated_error("pod_point_request_failed", error=str(exc)) from exc

@@ -14,10 +14,10 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 
 from custom_components.pod_home.const import DOMAIN
-from custom_components.pod_home.podpoint_mobile_api import (
-    PodHomeApiError,
-    PodHomeAuthError,
-    PodHomeConnectionError,
+from podpoint_mobile_api import (
+    PodPointMobileApiError,
+    PodPointMobileAuthError,
+    PodPointMobileConnectionError,
 )
 from custom_components.pod_home.services import (
     SERVICE_CANCEL_BOOST,
@@ -66,7 +66,7 @@ async def test_start_boost_auth_error_triggers_refresh_and_clean_failure(
     hass: HomeAssistant,
 ) -> None:
     coordinator, device_id = await _setup(hass, charging_state="Charging")
-    coordinator.api.async_create_charge_override.side_effect = PodHomeAuthError("expired")
+    coordinator.api.async_create_charge_override.side_effect = PodPointMobileAuthError("expired")
 
     with pytest.raises(HomeAssistantError) as exc_info:
         await hass.services.async_call(
@@ -81,7 +81,7 @@ async def test_start_boost_connection_error_reports_connection_failure(
     hass: HomeAssistant,
 ) -> None:
     coordinator, device_id = await _setup(hass, charging_state="Charging")
-    coordinator.api.async_create_charge_override.side_effect = PodHomeConnectionError("timed out")
+    coordinator.api.async_create_charge_override.side_effect = PodPointMobileConnectionError("timed out")
 
     with pytest.raises(HomeAssistantError) as exc_info:
         await hass.services.async_call(
@@ -93,8 +93,8 @@ async def test_start_boost_connection_error_reports_connection_failure(
 @pytest.mark.parametrize(
     ("error", "translation_key"),
     [
-        (PodHomeConnectionError("timed out"), "pod_point_unreachable"),
-        (PodHomeApiError(500, "server error"), "pod_point_request_failed"),
+        (PodPointMobileConnectionError("timed out"), "pod_point_unreachable"),
+        (PodPointMobileApiError(500, "server error"), "pod_point_request_failed"),
     ],
 )
 async def test_start_boost_api_error_raises_home_assistant_error(
@@ -280,12 +280,12 @@ async def test_device_of_another_integration_is_rejected(hass: HomeAssistant) ->
 
 
 async def test_cancel_boost_reports_a_connection_failure(hass: HomeAssistant) -> None:
-    from custom_components.pod_home.podpoint_mobile_api import PodHomeConnectionError
+    from podpoint_mobile_api import PodPointMobileConnectionError
 
     coordinator, device_id = await _setup(
         hass, charging_state="Charging", boost_end_at=datetime.datetime(2099, 1, 1, tzinfo=datetime.timezone.utc)
     )
-    coordinator.api.async_delete_charge_override.side_effect = PodHomeConnectionError("timed out")
+    coordinator.api.async_delete_charge_override.side_effect = PodPointMobileConnectionError("timed out")
 
     with pytest.raises(HomeAssistantError) as exc_info:
         await hass.services.async_call(
