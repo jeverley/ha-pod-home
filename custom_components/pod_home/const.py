@@ -38,12 +38,11 @@ def total_energy_store_key(entry_id: str) -> str:
     return f"{DOMAIN}_{entry_id}_total_energy"
 
 
-# connectivity-status-v2 wire values. No _OPTIONS list; nothing currently validates
-# connectionState against a closed set.
+# connectivity-status-v2 wire values. Only Online is confirmed live.
 CONNECTION_STATE_ONLINE = "Online"  # confirmed live
 CONNECTION_STATE_OFFLINE = "Offline"  # unconfirmed
-CONNECTION_STATE_UNKNOWN = "Unknown"
-CONNECTION_STATE_RECONNECTING = "Reconnecting"
+CONNECTION_STATE_UNKNOWN = "Unknown"  # unconfirmed
+CONNECTION_STATE_RECONNECTING = "Reconnecting"  # unconfirmed
 
 CHARGING_STATE_AVAILABLE = "Available"  # confirmed live
 CHARGING_STATE_PREPARING = "Preparing"

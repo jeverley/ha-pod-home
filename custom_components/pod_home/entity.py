@@ -19,6 +19,7 @@ from .coordinator import PodHomeCharge, PodHomeCharger, PodHomeDataUpdateCoordin
 from .errors import translated_error
 from .helpers import (
     boostable,
+    charging_state_known,
     humanize_model_style,
     is_momentarily_unplugged,
     select_last_charge,
@@ -65,10 +66,13 @@ class PodHomeEntity(CoordinatorEntity[PodHomeDataUpdateCoordinator]):
     @property
     def _cable_connected(self) -> bool:
         """Shared by every entity/action that only makes sense with a cable plugged in (the
-        boost buttons, Boost duration) - only meaningful once `available` above has already
-        confirmed a charger exists."""
+        boost buttons, Boost duration): charging state known and not unplugged. Only meaningful
+        once `available` above has already confirmed a charger exists."""
         charger = self.charger
-        return not is_momentarily_unplugged(charger.charging_state if charger else None)
+        charging_state = charger.charging_state if charger else None
+        return charging_state_known(charging_state) and not is_momentarily_unplugged(
+            charging_state
+        )
 
     @property
     def _boostable(self) -> bool:

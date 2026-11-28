@@ -71,7 +71,7 @@ Scheme (see below).
 | Charge mode        | Controls   | Select        | Options depend on Charging Scheme |
 | Charging state     | Diagnostic | Sensor        | Raw API value, disabled by default |
 | Charging scheme    | Diagnostic | Sensor        | Smart or Basic |
-| Connectivity       | Diagnostic | Binary sensor | On when the charger is online |
+| Connectivity       | Diagnostic | Binary sensor | On when the charger is online, unknown if Pod Point isn't reporting its connection |
 
 ### Car device
 
@@ -222,7 +222,8 @@ mode: single
   current one, or use Reconfigure.
 - **A boost starts a few minutes late.** The charger picks a boost up at its next check-in, up to
   about 5 minutes after the start. Status shows Pending until it does.
-- **The boost buttons are unavailable.** The cable isn't connected, or Always on is active.
+- **The boost buttons are unavailable.** The cable isn't connected, Pod Point isn't reporting the
+  charger's state, or Always on is active.
 - **To see more detail,** turn on debug logging for the integration:
 
   ```yaml

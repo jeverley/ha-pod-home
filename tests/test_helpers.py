@@ -163,6 +163,22 @@ def test_is_momentarily_unplugged():
     assert helpers.is_momentarily_unplugged(None) is False
 
 
+def test_charging_state_known():
+    assert helpers.charging_state_known(const.CHARGING_STATE_CHARGING) is True
+    assert helpers.charging_state_known(const.CHARGING_STATE_FAULTED) is True
+    assert helpers.charging_state_known(const.CHARGING_STATE_UNKNOWN) is False
+    assert helpers.charging_state_known(None) is False
+
+
+def test_boostable_needs_known_charging_state():
+    assert helpers.boostable(const.CHARGING_STATE_CHARGING, False) is True
+    assert helpers.boostable(const.CHARGING_STATE_AVAILABLE, False) is False
+    assert helpers.boostable(const.CHARGING_STATE_CHARGING, True) is False
+    assert helpers.boostable(const.CHARGING_STATE_CHARGING, None) is False
+    assert helpers.boostable(None, False) is False
+    assert helpers.boostable(const.CHARGING_STATE_UNKNOWN, False) is False
+
+
 # ---------------------------------------------------------------------------
 # charger_status - every CHARGING_STATE_* plus the Finished-sticky logic
 # ---------------------------------------------------------------------------

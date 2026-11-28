@@ -32,6 +32,7 @@ from .const import (
     CHARGING_STATE_SUSPENDED_EV,
     CHARGING_STATE_SUSPENDED_EVSE,
     CHARGING_STATE_UNAVAILABLE,
+    CHARGING_STATE_UNKNOWN,
     DELEGATED_CONTROL_ACTIVE,
     DELEGATED_CONTROL_INACTIVE,
     SCHEDULE_MODE_BASIC_CHARGING,
@@ -147,10 +148,19 @@ def is_momentarily_unplugged(charging_state: str | None) -> bool:
     return CHARGING_STATE_CABLE_CONNECTED.get(charging_state) is False
 
 
+def charging_state_known(charging_state: str | None) -> bool:
+    """Whether chargingState holds a real reading (not missing and not Unknown)."""
+    return charging_state is not None and charging_state != CHARGING_STATE_UNKNOWN
+
+
 def boostable(charging_state: str | None, always_on_active: bool | None) -> bool:
-    """Whether button.py's boost-start buttons apply: cable plugged in and Always On (Basic
-    Charging) confirmed off."""
-    return not is_momentarily_unplugged(charging_state) and always_on_active is False
+    """Whether button.py's boost-start buttons apply: charging state known, cable not unplugged
+    and Always On (Basic Charging) confirmed off."""
+    return (
+        charging_state_known(charging_state)
+        and not is_momentarily_unplugged(charging_state)
+        and always_on_active is False
+    )
 
 
 def charger_status(charger: "PodHomeCharger", now_utc: datetime.datetime) -> str | None:

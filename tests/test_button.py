@@ -46,6 +46,18 @@ async def test_full_charge_available_only_with_cable_connected(hass: HomeAssista
     assert entity.available is False
 
 
+async def test_boost_buttons_unavailable_while_charging_state_unknown(hass: HomeAssistant) -> None:
+    coordinator = make_coordinator(hass, {PPID: make_charger(charging_state=None)})
+    full = button.PodHomeBoostFullChargeButton(coordinator, PPID)
+    duration = button.PodHomeBoostDurationButton(coordinator, PPID)
+    assert full.available is False
+    assert duration.available is False
+
+    coordinator.data = {PPID: make_charger(charging_state="Unknown")}
+    assert full.available is False
+    assert duration.available is False
+
+
 async def test_full_charge_unavailable_during_always_on(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(
         hass, {PPID: make_charger(charging_state="Charging", always_on_active=True)}

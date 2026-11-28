@@ -108,6 +108,15 @@ async def test_boost_duration_available_only_with_cable_connected(hass: HomeAssi
     assert entity.available is False
 
 
+async def test_boost_duration_unavailable_while_charging_state_unknown(hass: HomeAssistant) -> None:
+    coordinator = make_coordinator(hass, {PPID: make_charger(charging_state=None)})
+    entity = time_platform.PodHomeBoostDurationTime(coordinator, PPID)
+    assert entity.available is False
+
+    coordinator.data = {PPID: make_charger(charging_state="Unknown")}
+    assert entity.available is False
+
+
 async def test_boost_duration_set_value_then_reset(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(hass, {PPID: make_charger()})
     entity = time_platform.PodHomeBoostDurationTime(coordinator, PPID)
