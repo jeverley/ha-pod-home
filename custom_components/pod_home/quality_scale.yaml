@@ -1,10 +1,11 @@
+# The docs-* rules are assessed against the README.
 rules:
   # Bronze
   action-setup: done
   appropriate-polling: done
   brands:
-    status: done
-    comment: Brand assets ship in the integration's brand directory.
+    status: todo
+    comment: Core keeps brand images in home-assistant/brands; the existing icons already meet its size rules.
   common-modules: done
   config-flow:
     status: todo
@@ -14,7 +15,7 @@ rules:
     comment: config_flow.py is at 96%; the failed token-clear branch in reauth is untested.
   dependency-transparency:
     status: todo
-    comment: podpoint-mobile-api is vendored and not published to PyPI.
+    comment: podpoint-mobile-api is vendored; it needs a PyPI source distribution published from CI with matching tags.
   docs-actions: done
   docs-conditions:
     status: exempt
