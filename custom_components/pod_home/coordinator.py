@@ -1314,6 +1314,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             if charger is not None:
                 result[charger.ppid] = charger
         self._sync_device_sw_versions(result)
+        self._async_remove_stale_chargers(result)
 
         # Coalesced - the sticky dicts can change up to once a minute.
         self._sticky_store.async_delay_save(self._sticky_state_for_storage, STICKY_STATE_SAVE_DELAY)
@@ -1348,6 +1349,29 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             device = device_by_ppid.get(ppid)
             if sw_version is not None and device is not None and device.sw_version != sw_version:
                 registry.async_update_device(device.id, sw_version=sw_version)
+
+    @property
+    def active_device_identifiers(self) -> set[str]:
+        """Identifiers of the devices that exist on the account right now: the account device,
+        each charger and each linked vehicle."""
+        identifiers = {self.config_entry.entry_id}
+        for ppid, charger in (self.data or {}).items():
+            identifiers.add(ppid)
+            if charger.vehicle is not None:
+                identifiers.add(charger.vehicle.id)
+        return identifiers
+
+    def _async_remove_stale_chargers(self, chargers: dict[str, PodHomeCharger]) -> None:
+        """Remove the devices of chargers that have left the account. Charger devices carry their
+        ppid as serial number; vehicle and account devices have none."""
+        if not chargers:
+            return
+        registry = dr.async_get(self.hass)
+        for device in dr.async_entries_for_config_entry(registry, self.config_entry.entry_id):
+            if device.serial_number and device.serial_number not in chargers:
+                registry.async_update_device(
+                    device.id, remove_config_entry_id=self.config_entry.entry_id
+                )
 
     async def _async_fetch_stale_per_charger_data(
         self, ppid: str, now: datetime.datetime

@@ -9,7 +9,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
@@ -160,3 +160,13 @@ async def _async_migrate_charge_unique_ids(hass: HomeAssistant, entry: PodHomeCo
 async def async_unload_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: PodHomeConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Allow removing a device only once it's no longer on the account."""
+    identifiers = {
+        identifier for domain, identifier in device_entry.identifiers if domain == DOMAIN
+    }
+    return not identifiers & entry.runtime_data.active_device_identifiers

@@ -241,6 +241,8 @@ def async_setup_dynamic_chargers(
     known_ppids: set[str] = set()
 
     def _async_add_new_chargers() -> None:
+        # A charger that leaves the account and returns gets its entities again.
+        known_ppids.intersection_update(coordinator.data)
         eligible_ppids = set(coordinator.data)
         if predicate is not None:
             eligible_ppids = {ppid for ppid in eligible_ppids if predicate(coordinator.data[ppid])}
@@ -270,6 +272,7 @@ def async_setup_dynamic_vehicles(
         current_ids = {
             charger.vehicle.id for charger in coordinator.data.values() if charger.vehicle
         }
+        known_vehicle_ids.intersection_update(current_ids)
         new_ids = current_ids - known_vehicle_ids
         if not new_ids:
             return
