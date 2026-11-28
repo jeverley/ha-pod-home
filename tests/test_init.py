@@ -168,3 +168,65 @@ async def test_setup_signs_in_fresh_when_the_saved_tokens_cannot_be_read(hass: H
         await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_removing_the_entry_deletes_its_saved_data(hass: HomeAssistant) -> None:
+    import datetime
+
+    from homeassistant.helpers.storage import Store
+    from homeassistant.util import dt as dt_util
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed
+
+    from custom_components.pod_home.const import (
+        AUTH_STORAGE_VERSION,
+        STICKY_STATE_STORAGE_VERSION,
+        auth_store_key,
+        status_store_key,
+        total_energy_store_key,
+    )
+
+    entry = MockConfigEntry(domain=DOMAIN, data=USER_INPUT)
+    entry.add_to_hass(hass)
+    stores = [
+        Store(hass, AUTH_STORAGE_VERSION, auth_store_key(entry.entry_id)),
+        Store(hass, STICKY_STATE_STORAGE_VERSION, status_store_key(entry.entry_id)),
+        Store(hass, STICKY_STATE_STORAGE_VERSION, total_energy_store_key(entry.entry_id)),
+    ]
+    for store in stores:
+        await store.async_save({"saved": True})
+
+    with patch("custom_components.pod_home.PodHomeApiClient", return_value=make_stub_api()):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        await hass.config_entries.async_remove(entry.entry_id)
+        await hass.async_block_till_done()
+        # A save the coordinator had already scheduled must not bring the data back.
+        async_fire_time_changed(hass, dt_util.utcnow() + datetime.timedelta(seconds=60))
+        await hass.async_block_till_done()
+
+    for store in stores:
+        assert await store.async_load() is None
+
+
+async def test_unloading_the_entry_saves_pending_state(hass: HomeAssistant) -> None:
+    from homeassistant.helpers.storage import Store
+
+    from custom_components.pod_home.const import (
+        STICKY_STATE_STORAGE_VERSION,
+        total_energy_store_key,
+    )
+
+    entry = MockConfigEntry(domain=DOMAIN, data=USER_INPUT)
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.pod_home.PodHomeApiClient", return_value=make_stub_api()):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        entry.runtime_data._total_energy_kwh_by_ppid = {PPID: 5.0}
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    store = Store(hass, STICKY_STATE_STORAGE_VERSION, total_energy_store_key(entry.entry_id))
+    saved = await store.async_load()
+    assert saved is not None
+    assert saved["total_energy_kwh"] == {PPID: 5.0}

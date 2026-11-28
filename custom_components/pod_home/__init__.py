@@ -19,7 +19,16 @@ from homeassistant.helpers.typing import ConfigType
 # installable release (revert this import and the two others below back to a plain
 # `import podpoint_mobile_api`, delete the vendored copy, populate manifest.json's requirements).
 from .podpoint_mobile_api import PodHomeApiClient, PodHomeAuth
-from .const import AUTH_STORAGE_VERSION, CONF_EMAIL, CONF_PASSWORD, DOMAIN, auth_store_key
+from .const import (
+    AUTH_STORAGE_VERSION,
+    CONF_EMAIL,
+    CONF_PASSWORD,
+    DOMAIN,
+    STICKY_STATE_STORAGE_VERSION,
+    auth_store_key,
+    status_store_key,
+    total_energy_store_key,
+)
 from .coordinator import PodHomeDataUpdateCoordinator
 from .services import async_setup_services
 
@@ -170,3 +179,10 @@ async def async_remove_config_entry_device(
         identifier for domain, identifier in device_entry.identifiers if domain == DOMAIN
     }
     return not identifiers & entry.runtime_data.active_device_identifiers
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> None:
+    """Delete the entry's saved sign-in tokens, charger Status timestamps and Total energy."""
+    await Store(hass, AUTH_STORAGE_VERSION, auth_store_key(entry.entry_id)).async_remove()
+    for key in (status_store_key(entry.entry_id), total_energy_store_key(entry.entry_id)):
+        await Store(hass, STICKY_STATE_STORAGE_VERSION, key).async_remove()

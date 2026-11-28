@@ -31,6 +31,9 @@ from .const import (
     DELEGATED_CONTROL_ACTIVE,
     DELEGATED_CONTROL_OPTIONS,
     DOMAIN,
+    STICKY_STATE_STORAGE_VERSION,
+    status_store_key,
+    total_energy_store_key,
 )
 from .helpers import (
     current_charging_seconds,
@@ -91,7 +94,6 @@ _NEVER_FETCHED = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
 
 # Status's sticky timestamps persist across HA restarts via HA's own Store helper - they
 # change every poll (up to once a minute), so the save is delayed/coalesced.
-STICKY_STATE_STORAGE_VERSION = 1
 STICKY_STATE_SAVE_DELAY = 10  # seconds
 
 
@@ -571,12 +573,12 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self._charge_finished_at_by_ppid: dict[str, datetime.datetime] = {}
         # Scoped per config entry so a second Pod Home account gets its own file.
         self._sticky_store: Store[dict[str, Any]] = Store(
-            hass, STICKY_STATE_STORAGE_VERSION, f"{DOMAIN}_{config_entry.entry_id}_status"
+            hass, STICKY_STATE_STORAGE_VERSION, status_store_key(config_entry.entry_id)
         )
         # Separate Store (and separate load/save try/except below) from the sticky Charger
         # Status signals above.
         self._total_energy_store: Store[dict[str, Any]] = Store(
-            hass, STICKY_STATE_STORAGE_VERSION, f"{DOMAIN}_{config_entry.entry_id}_total_energy"
+            hass, STICKY_STATE_STORAGE_VERSION, total_energy_store_key(config_entry.entry_id)
         )
         # Live PodHomeBoostDurationTime instances, keyed by ppid, used by button.py to reset the
         # entity after a boost.
@@ -712,6 +714,12 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             key: value.isoformat() if isinstance(value, datetime.datetime) else value
             for key, value in dataclasses.asdict(charge).items()
         }
+
+    async def async_shutdown(self) -> None:
+        """Write the saved state now, so an unload keeps it and no delayed save fires later."""
+        await super().async_shutdown()
+        await self._sticky_store.async_save(self._sticky_state_for_storage())
+        await self._total_energy_store.async_save(self._total_energy_state_for_storage())
 
     def _sticky_state_for_storage(self) -> dict[str, Any]:
         return {
