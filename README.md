@@ -3,6 +3,10 @@
 A Home Assistant custom integration for Pod Point EV chargers, built on the same backend as the
 official **Pod Home** app.
 
+> This is an unofficial integration. It is not affiliated with, endorsed by or supported by Pod
+> Point. It uses the same service as the Pod Home app and can stop working at any time. Use it at
+> your own risk. Pod Point and Pod Home are trademarks of their owners.
+
 ## Requirements
 
 - Home Assistant 2026.10 or later.
