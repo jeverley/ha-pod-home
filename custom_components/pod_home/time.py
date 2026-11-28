@@ -22,7 +22,7 @@ from .entity import (
 )
 from .errors import translated_error
 from .helpers import parse_time_of_day
-from .podpoint_mobile_api import PodHomeError
+from podpoint_mobile_api import PodPointMobileError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -107,7 +107,7 @@ class PodHomeVehicleReadyByTime(
         )
         try:
             await self.coordinator.api.async_set_vehicle_intents(ppid, vehicle.id, intent_details)
-        except PodHomeError as exc:
+        except PodPointMobileError as exc:
             await async_handle_write_error(self.coordinator, exc)
         self._set_optimistic_value(value)
         await self.coordinator.async_request_refresh()

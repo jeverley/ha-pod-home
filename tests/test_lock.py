@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 import custom_components.pod_home.lock as lock
-from custom_components.pod_home.podpoint_mobile_api import PodHomeApiError
+from podpoint_mobile_api import PodPointMobileApiError
 from tests._fixtures import PPID, make_charger, make_coordinator
 
 pytestmark = pytest.mark.asyncio
@@ -75,7 +75,7 @@ async def test_async_lock_raises_clean_error_when_charger_unsupported(
     hass: HomeAssistant,
 ) -> None:
     coordinator = make_coordinator(hass, {PPID: make_charger()})
-    coordinator.api.async_set_remote_lock.side_effect = PodHomeApiError(501, {})
+    coordinator.api.async_set_remote_lock.side_effect = PodPointMobileApiError(501, {})
     entity = lock.PodHomeRemoteLock(coordinator, PPID)
 
     with pytest.raises(HomeAssistantError) as exc_info:
@@ -85,7 +85,7 @@ async def test_async_lock_raises_clean_error_when_charger_unsupported(
 
 async def test_async_lock_other_api_errors_raise_home_assistant_error(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(hass, {PPID: make_charger()})
-    coordinator.api.async_set_remote_lock.side_effect = PodHomeApiError(500, {})
+    coordinator.api.async_set_remote_lock.side_effect = PodPointMobileApiError(500, {})
     entity = lock.PodHomeRemoteLock(coordinator, PPID)
 
     with pytest.raises(HomeAssistantError) as exc_info:
@@ -110,10 +110,10 @@ async def test_remote_lock_unique_id(hass: HomeAssistant) -> None:
 
 
 async def test_async_lock_reports_a_connection_failure(hass: HomeAssistant) -> None:
-    from custom_components.pod_home.podpoint_mobile_api import PodHomeConnectionError
+    from podpoint_mobile_api import PodPointMobileConnectionError
 
     coordinator = make_coordinator(hass, {PPID: make_charger()})
-    coordinator.api.async_set_remote_lock.side_effect = PodHomeConnectionError("timed out")
+    coordinator.api.async_set_remote_lock.side_effect = PodPointMobileConnectionError("timed out")
     entity = lock.PodHomeRemoteLock(coordinator, PPID)
 
     with pytest.raises(HomeAssistantError) as exc_info:

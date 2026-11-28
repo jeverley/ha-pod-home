@@ -224,12 +224,12 @@ async def test_charge_mode_without_a_charger(hass: HomeAssistant) -> None:
 
 
 async def test_charge_mode_reports_a_connection_failure(hass: HomeAssistant) -> None:
-    from custom_components.pod_home.podpoint_mobile_api import PodHomeConnectionError
+    from podpoint_mobile_api import PodPointMobileConnectionError
 
     coordinator = make_coordinator(
         hass, {PPID: make_charger(delegated_control_status="INACTIVE", always_on_active=False)}
     )
-    coordinator.api.async_set_always_on.side_effect = PodHomeConnectionError("timed out")
+    coordinator.api.async_set_always_on.side_effect = PodPointMobileConnectionError("timed out")
     entity = select.PodHomeChargeModeSelect(coordinator, PPID)
 
     with pytest.raises(HomeAssistantError) as exc_info:

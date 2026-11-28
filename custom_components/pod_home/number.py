@@ -16,7 +16,7 @@ from .entity import (
     async_setup_dynamic_vehicles,
 )
 from .errors import translated_error
-from .podpoint_mobile_api import PodHomeError
+from podpoint_mobile_api import PodPointMobileError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry
@@ -89,7 +89,7 @@ class PodHomeVehicleTargetChargeNumber(
             await self.coordinator.api.async_set_vehicle_charge_limit(
                 ppid, vehicle.id, round(value)
             )
-        except PodHomeError as exc:
+        except PodPointMobileError as exc:
             await async_handle_write_error(self.coordinator, exc)
         self._set_optimistic_value(round(value))
         await self.coordinator.async_request_refresh()

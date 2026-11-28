@@ -36,7 +36,7 @@ async def _setup_two_chargers(hass: HomeAssistant):
     entry.add_to_hass(hass)
     api = make_stub_api()
     api.async_list_chargers.return_value = [charger_raw(), charger_raw(ppid=OTHER_PPID)]
-    with patch("custom_components.pod_home.PodHomeApiClient", return_value=api):
+    with patch("custom_components.pod_home.PodPointMobileApiClient", return_value=api):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.LOADED

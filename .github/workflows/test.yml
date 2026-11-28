@@ -18,24 +18,9 @@ jobs:
           python-version: "3.14"
       - run: pip install pyflakes
       - run: |
-          python -m py_compile custom_components/pod_home/*.py \
-            podpoint-mobile-api/src/podpoint_mobile_api/*.py
+          python -m py_compile custom_components/pod_home/*.py
       - run: |
-          python -m pyflakes custom_components/pod_home/*.py \
-            podpoint-mobile-api/src/podpoint_mobile_api/*.py
-
-  podpoint-mobile-api:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.14"
-      - run: pip install -e podpoint-mobile-api
-      - run: python -c "import podpoint_mobile_api"
-      - run: pip install mypy pytest pytest-asyncio
-      - run: python -m mypy --strict podpoint-mobile-api/src/podpoint_mobile_api/
-      - run: python -m pytest podpoint-mobile-api/tests/ -v
+          python -m pyflakes custom_components/pod_home/*.py
 
   tests:
     runs-on: ubuntu-latest
@@ -60,4 +45,4 @@ jobs:
       # pytest-homeassistant-custom-component), needed to resolve homeassistant.* imports; mypy
       # is already listed there too.
       - run: pip install -r requirements_test.txt
-      - run: python -m mypy --strict custom_components/pod_home/ --exclude 'podpoint_mobile_api/'
+      - run: python -m mypy --strict custom_components/pod_home/

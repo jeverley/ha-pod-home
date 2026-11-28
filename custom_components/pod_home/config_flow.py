@@ -14,8 +14,7 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
-# TEMPORARY: vendored copy, see __init__.py's import comment.
-from .podpoint_mobile_api import PodHomeAuth, PodHomeAuthError, PodHomeConnectionError
+from podpoint_mobile_api import PodPointMobileAuth, PodPointMobileAuthError, PodPointMobileConnectionError
 from .const import CONF_EMAIL, CONF_PASSWORD, DOMAIN
 from .storage import async_clear_auth_tokens
 
@@ -49,13 +48,13 @@ class PodHomeConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def _async_check_sign_in(self, email: str, password: str) -> str | None:
         """Sign in with the credentials; returns the error key on failure."""
-        auth = PodHomeAuth(async_get_clientsession(self.hass), email, password)
+        auth = PodPointMobileAuth(async_get_clientsession(self.hass), email, password)
         try:
             await auth.async_get_id_token()
-        except PodHomeConnectionError as exc:
+        except PodPointMobileConnectionError as exc:
             _LOGGER.debug("Couldn't reach Pod Point during sign-in check: %s", exc)
             return "cannot_connect"
-        except PodHomeAuthError as exc:
+        except PodPointMobileAuthError as exc:
             _LOGGER.debug("Sign-in check failed: %s", exc)
             return "invalid_auth"
         return None

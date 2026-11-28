@@ -206,10 +206,10 @@ async def test_press_without_a_charger_raises(
 async def test_press_reports_a_connection_failure(
     hass: HomeAssistant, cls: type, api_method: str
 ) -> None:
-    from custom_components.pod_home.podpoint_mobile_api import PodHomeConnectionError
+    from podpoint_mobile_api import PodPointMobileConnectionError
 
     coordinator = make_coordinator(hass, {PPID: make_charger()})
-    getattr(coordinator.api, api_method).side_effect = PodHomeConnectionError("timed out")
+    getattr(coordinator.api, api_method).side_effect = PodPointMobileConnectionError("timed out")
     _register_boost_duration(hass, PPID, "01:00:00")
     entity = cls(coordinator, PPID)
     entity.hass = hass

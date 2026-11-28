@@ -16,12 +16,11 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-# TEMPORARY: vendored copy, see __init__.py's import comment.
-from .podpoint_mobile_api import (
-    PodHomeApiClient,
-    PodHomeApiError,
-    PodHomeAuthError,
-    PodHomeConnectionError,
+from podpoint_mobile_api import (
+    PodPointMobileApiClient,
+    PodPointMobileApiError,
+    PodPointMobileAuthError,
+    PodPointMobileConnectionError,
 )
 from .const import (
     CHARGING_STATE_CABLE_CONNECTED,
@@ -84,7 +83,7 @@ API3_UNLISTED_SESSION_HOLD = datetime.timedelta(hours=24)
 # rarely changes, same cadence as firmware/tariffs above.
 API3_ACCOUNT_REFRESH_INTERVAL = datetime.timedelta(hours=6)
 
-# A PodHomeConnectionError on GET /chargers, the one call whose failure is fatal to the whole
+# A PodPointMobileConnectionError on GET /chargers, the one call whose failure is fatal to the whole
 # poll, gets a few quick retries before giving up. HTTP error responses and auth errors aren't
 # retried.
 CONNECTION_RETRY_ATTEMPTS = 3
@@ -92,8 +91,8 @@ CONNECTION_RETRY_DELAY_SECONDS = 2
 
 _NEVER_FETCHED = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
 
-# Errors from one API call that an optional fetch survives. PodHomeAuthError isn't one of them.
-_FETCH_ERRORS = (PodHomeApiError, PodHomeConnectionError)
+# Errors from one API call that an optional fetch survives. PodPointMobileAuthError isn't one of them.
+_FETCH_ERRORS = (PodPointMobileApiError, PodPointMobileConnectionError)
 
 # Status's sticky timestamps persist across HA restarts via HA's own Store helper - they
 # change every poll (up to once a minute), so the save is delayed/coalesced.
@@ -450,7 +449,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self,
         hass: HomeAssistant,
         config_entry: "PodHomeConfigEntry",
-        api: PodHomeApiClient,
+        api: PodPointMobileApiClient,
         *,
         email: str,
         password: str,
@@ -807,7 +806,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         raising.
         Most endpoints here return a dict; a couple (e.g. GET /chargers/{ppid}/firmware) return
         a bare list instead - `result or {}` only coerces a falsy result, a genuine list result
-        passes through unchanged. Does not catch PodHomeAuthError, which propagates to
+        passes through unchanged. Does not catch PodPointMobileAuthError, which propagates to
         _async_update_data.
         """
         try:
@@ -839,7 +838,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             return result or {}
         except _FETCH_ERRORS as exc:
             if (
-                isinstance(exc, PodHomeApiError)
+                isinstance(exc, PodPointMobileApiError)
                 and isinstance(exc.body, dict)
                 and (exc.status, exc.body.get("error")) in expected_errors
             ):
@@ -1033,14 +1032,14 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         self.update_interval = self._base_poll_interval(dt_util.utcnow())
         try:
             return await self._async_fetch_data()
-        except PodHomeConnectionError as exc:
+        except PodPointMobileConnectionError as exc:
             raise UpdateFailed(
                 str(exc),
                 translation_domain=DOMAIN,
                 translation_key="api_failed",
                 translation_placeholders={"error": str(exc)},
             ) from exc
-        except PodHomeAuthError as exc:
+        except PodPointMobileAuthError as exc:
             raise ConfigEntryAuthFailed(
                 str(exc),
                 translation_domain=DOMAIN,
@@ -1055,11 +1054,11 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         CONNECTION_RETRY_ATTEMPTS times, but only for connection-level failures - see
         CONNECTION_RETRY_ATTEMPTS' comment above. Concretely typed for its one call site
         (async_list_chargers)."""
-        last_exc: PodHomeConnectionError | None = None
+        last_exc: PodPointMobileConnectionError | None = None
         for attempt_number in range(CONNECTION_RETRY_ATTEMPTS):
             try:
                 return await attempt()
-            except PodHomeConnectionError as exc:
+            except PodPointMobileConnectionError as exc:
                 last_exc = exc
                 if attempt_number < CONNECTION_RETRY_ATTEMPTS - 1:
                     await asyncio.sleep(CONNECTION_RETRY_DELAY_SECONDS)
