@@ -250,3 +250,45 @@ async def test_cancel_boost_rejects_when_nothing_active(hass: HomeAssistant) -> 
             DOMAIN, SERVICE_CANCEL_BOOST, {"device_id": device_id}, blocking=True
         )
     coordinator.api.async_delete_charge_override.assert_not_awaited()
+
+
+async def test_unknown_device_is_rejected(hass: HomeAssistant) -> None:
+    await _setup(hass)
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await hass.services.async_call(
+            DOMAIN, SERVICE_START_BOOST, {"device_id": "no-such-device"}, blocking=True
+        )
+    assert exc_info.value.translation_key == "unknown_device"
+
+
+async def test_device_of_another_integration_is_rejected(hass: HomeAssistant) -> None:
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    await _setup(hass)
+    other = MockConfigEntry(domain="other_domain")
+    other.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=other.entry_id, identifiers={("other_domain", "x")}
+    )
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await hass.services.async_call(
+            DOMAIN, SERVICE_START_BOOST, {"device_id": device.id}, blocking=True
+        )
+    assert exc_info.value.translation_key == "not_a_charger_device"
+
+
+async def test_cancel_boost_reports_a_connection_failure(hass: HomeAssistant) -> None:
+    from custom_components.pod_home.podpoint_mobile_api import PodHomeConnectionError
+
+    coordinator, device_id = await _setup(
+        hass, charging_state="Charging", boost_end_at=datetime.datetime(2099, 1, 1, tzinfo=datetime.timezone.utc)
+    )
+    coordinator.api.async_delete_charge_override.side_effect = PodHomeConnectionError("timed out")
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await hass.services.async_call(
+            DOMAIN, SERVICE_CANCEL_BOOST, {"device_id": device_id}, blocking=True
+        )
+    assert exc_info.value.translation_key == "pod_point_unreachable"

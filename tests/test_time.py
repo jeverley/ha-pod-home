@@ -118,3 +118,46 @@ async def test_boost_duration_set_value_then_reset(hass: HomeAssistant) -> None:
 
     await entity.async_reset()
     assert entity.native_value is None
+
+
+async def test_ready_by_unique_id(hass: HomeAssistant) -> None:
+    from custom_components.pod_home.const import DOMAIN
+
+    entity = time_platform.PodHomeVehicleReadyByTime(make_coordinator(hass, {}), "v1")
+    assert entity.unique_id == f"{DOMAIN}_v1_ready_by"
+
+
+async def test_ready_by_set_value_without_a_vehicle_raises(hass: HomeAssistant) -> None:
+    entity = time_platform.PodHomeVehicleReadyByTime(make_coordinator(hass, {}), "v1")
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await entity.async_set_value(datetime.time(8, 0, 0))
+    assert exc_info.value.translation_key == "no_vehicle_for_ready_by"
+
+
+async def test_ready_by_set_value_reports_a_connection_failure(hass: HomeAssistant) -> None:
+    from custom_components.pod_home.podpoint_mobile_api import PodHomeConnectionError
+
+    vehicle = make_vehicle(id="v1", intent_charge_kwh=42.0)
+    coordinator = make_coordinator(hass, {PPID: make_charger(vehicle=vehicle)})
+    coordinator.api.async_set_vehicle_intents.side_effect = PodHomeConnectionError("timed out")
+    entity = time_platform.PodHomeVehicleReadyByTime(coordinator, "v1")
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await entity.async_set_value(datetime.time(8, 0, 0))
+    assert exc_info.value.translation_key == "pod_point_unreachable"
+
+
+async def test_boost_duration_restores_its_last_value(hass: HomeAssistant) -> None:
+    from homeassistant.core import State
+    from pytest_homeassistant_custom_component.common import mock_restore_cache
+
+    mock_restore_cache(hass, [State("time.driveway_boost_duration", "01:30:00")])
+    coordinator = make_coordinator(hass, {PPID: make_charger()})
+    entity = time_platform.PodHomeBoostDurationTime(coordinator, PPID)
+    entity.hass = hass
+    entity.entity_id = "time.driveway_boost_duration"
+
+    await entity.async_added_to_hass()
+
+    assert entity.native_value == datetime.time(1, 30, 0)
+    assert coordinator.boost_duration_entities[PPID] is entity

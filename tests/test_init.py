@@ -104,3 +104,67 @@ async def test_async_setup_entry_auth_failure_does_not_load(hass: HomeAssistant)
     # ConfigEntryAuthFailed during the first refresh must not leave the entry looking loaded -
     # HA routes this into SETUP_ERROR and queues a reauth flow rather than raising past setup.
     assert entry.state is ConfigEntryState.SETUP_ERROR
+
+
+async def test_auth_token_saver_coalesces_and_saves_after_the_delay(hass: HomeAssistant) -> None:
+    import datetime
+
+    from homeassistant.helpers.storage import Store
+    from homeassistant.util import dt as dt_util
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed
+
+    from custom_components.pod_home import AUTH_SAVE_DELAY, _AuthTokenSaver
+
+    entry = MockConfigEntry(domain=DOMAIN, data=USER_INPUT)
+    store = Store(hass, 1, "test_auth_saver")
+    saver = _AuthTokenSaver(hass, store, entry, USER_INPUT[CONF_PASSWORD])
+
+    saver.save({"id_token": "first"})
+    saver.save({"id_token": "second"})
+    async_fire_time_changed(hass, dt_util.utcnow() + datetime.timedelta(seconds=AUTH_SAVE_DELAY + 1))
+    await hass.async_block_till_done()
+
+    assert await store.async_load() == {"id_token": "second"}
+
+
+async def test_auth_token_saver_skips_a_save_after_the_password_changed(hass: HomeAssistant) -> None:
+    import datetime
+
+    from homeassistant.helpers.storage import Store
+    from homeassistant.util import dt as dt_util
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed
+
+    from custom_components.pod_home import AUTH_SAVE_DELAY, _AuthTokenSaver
+
+    entry = MockConfigEntry(domain=DOMAIN, data=USER_INPUT)
+    store = Store(hass, 1, "test_auth_saver_skipped")
+    saver = _AuthTokenSaver(hass, store, entry, "the-old-password")
+
+    saver.save({"id_token": "stale"})
+    async_fire_time_changed(hass, dt_util.utcnow() + datetime.timedelta(seconds=AUTH_SAVE_DELAY + 1))
+    await hass.async_block_till_done()
+
+    assert await store.async_load() is None
+
+
+async def test_setup_signs_in_fresh_when_the_saved_tokens_cannot_be_read(hass: HomeAssistant) -> None:
+    from homeassistant.helpers.storage import Store
+
+    from custom_components.pod_home.const import auth_store_key
+
+    entry = MockConfigEntry(domain=DOMAIN, data=USER_INPUT)
+    entry.add_to_hass(hass)
+
+    async def _load(self):
+        if self.key == auth_store_key(entry.entry_id):
+            raise OSError("corrupt")
+        return None
+
+    with (
+        patch("custom_components.pod_home.PodHomeApiClient", return_value=make_stub_api()),
+        patch.object(Store, "async_load", autospec=True, side_effect=_load),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED

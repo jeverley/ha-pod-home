@@ -87,3 +87,19 @@ async def test_vehicle_plugged_in_sensor_charger_serial_number_attribute(
 
     coordinator.data = {}
     assert entity.extra_state_attributes is None  # no linked vehicle found
+
+
+async def test_charger_binary_sensors_without_a_charger_are_unknown(hass: HomeAssistant) -> None:
+    coordinator = make_coordinator(hass, {})
+    assert binary_sensor.PodHomeConnectivitySensor(coordinator, PPID).is_on is None
+    assert binary_sensor.PodHomeCableConnectedSensor(coordinator, PPID).is_on is None
+
+
+async def test_vehicle_binary_sensor_unique_ids(hass: HomeAssistant) -> None:
+    from custom_components.pod_home.const import DOMAIN
+
+    coordinator = make_coordinator(hass, {})
+    charging = binary_sensor.PodHomeVehicleChargingSensor(coordinator, "v1")
+    plugged_in = binary_sensor.PodHomeVehiclePluggedInSensor(coordinator, "v1")
+    assert charging.unique_id == f"{DOMAIN}_v1_charging"
+    assert plugged_in.unique_id == f"{DOMAIN}_v1_plugged_in"
