@@ -150,3 +150,18 @@ async def test_vehicle_that_returns_gets_entities_again(hass: HomeAssistant) -> 
     coordinator.data = {PPID: charger}
     coordinator.async_update_listeners()
     assert add_entities.call_count == 2
+
+
+async def test_a_charger_entry_without_a_ppid_removes_no_devices(hass: HomeAssistant) -> None:
+    entry, api = await _setup_two_chargers(hass)
+
+    api.async_list_chargers.return_value = [
+        charger_raw(),
+        {"unitId": 99, "timezone": "Europe/London"},
+        charger_raw(ppid=OTHER_PPID),
+    ]
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+
+    assert _device(hass, entry, PPID) is not None
+    assert _device(hass, entry, OTHER_PPID) is not None

@@ -13,11 +13,11 @@ from homeassistant.helpers.selector import (
     TextSelectorConfig,
     TextSelectorType,
 )
-from homeassistant.helpers.storage import Store
 
 # TEMPORARY: vendored copy, see __init__.py's import comment.
 from .podpoint_mobile_api import PodHomeAuth, PodHomeAuthError, PodHomeConnectionError
-from .const import AUTH_STORAGE_VERSION, CONF_EMAIL, CONF_PASSWORD, DOMAIN, auth_store_key
+from .const import CONF_EMAIL, CONF_PASSWORD, DOMAIN
+from .storage import async_clear_auth_tokens
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +35,11 @@ STEP_USER_SCHEMA = vol.Schema(
     }
 )
 REAUTH_SCHEMA = vol.Schema({vol.Required(CONF_PASSWORD): PASSWORD_SELECTOR})
+
+
+def _unique_id(email: str) -> str:
+    """The config entry unique ID for an account email."""
+    return email.lower()
 
 
 class PodHomeConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -55,15 +60,12 @@ class PodHomeConfigFlow(ConfigFlow, domain=DOMAIN):
             return "invalid_auth"
         return None
 
-    async def _async_clear_saved_tokens(self, entry: ConfigEntry) -> None:
-        """Drop the persisted refresh token so a session from the old credentials isn't
-        restored. A failed clear doesn't block the flow."""
-        try:
-            await Store(
-                self.hass, AUTH_STORAGE_VERSION, auth_store_key(entry.entry_id)
-            ).async_remove()
-        except Exception:  # noqa: BLE001
-            _LOGGER.warning("Couldn't clear saved auth tokens", exc_info=True)
+    def _is_email_in_use(self, email: str, entry: ConfigEntry | None = None) -> bool:
+        """Whether a config entry other than `entry` already uses this account email."""
+        existing = self.hass.config_entries.async_entry_for_domain_unique_id(
+            DOMAIN, _unique_id(email)
+        )
+        return existing is not None and (entry is None or existing.entry_id != entry.entry_id)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -71,8 +73,9 @@ class PodHomeConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            await self.async_set_unique_id(user_input[CONF_EMAIL].lower())
-            self._abort_if_unique_id_configured()
+            await self.async_set_unique_id(_unique_id(user_input[CONF_EMAIL]))
+            if self._is_email_in_use(user_input[CONF_EMAIL]):
+                return self.async_abort(reason="already_configured")
 
             error = await self._async_check_sign_in(
                 user_input[CONF_EMAIL], user_input[CONF_PASSWORD]
@@ -104,7 +107,7 @@ class PodHomeConfigFlow(ConfigFlow, domain=DOMAIN):
                 reauth_entry.data[CONF_EMAIL], user_input[CONF_PASSWORD]
             )
             if error is None:
-                await self._async_clear_saved_tokens(reauth_entry)
+                await async_clear_auth_tokens(self.hass, reauth_entry.entry_id)
                 return self.async_update_reload_and_abort(
                     reauth_entry,
                     data_updates={CONF_PASSWORD: user_input[CONF_PASSWORD]},
@@ -126,18 +129,15 @@ class PodHomeConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             email = user_input[CONF_EMAIL]
-            existing = self.hass.config_entries.async_entry_for_domain_unique_id(
-                DOMAIN, email.lower()
-            )
-            if existing is not None and existing.entry_id != entry.entry_id:
+            if self._is_email_in_use(email, entry):
                 return self.async_abort(reason="already_configured")
 
             error = await self._async_check_sign_in(email, user_input[CONF_PASSWORD])
             if error is None:
-                await self._async_clear_saved_tokens(entry)
+                await async_clear_auth_tokens(self.hass, entry.entry_id)
                 return self.async_update_reload_and_abort(
                     entry,
-                    unique_id=email.lower(),
+                    unique_id=_unique_id(email),
                     title=email,
                     data_updates=user_input,
                 )

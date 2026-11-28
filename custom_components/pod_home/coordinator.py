@@ -92,6 +92,9 @@ CONNECTION_RETRY_DELAY_SECONDS = 2
 
 _NEVER_FETCHED = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
 
+# Errors from one API call that an optional fetch survives. PodHomeAuthError isn't one of them.
+_FETCH_ERRORS = (PodHomeApiError, PodHomeConnectionError)
+
 # Status's sticky timestamps persist across HA restarts via HA's own Store helper - they
 # change every poll (up to once a minute), so the save is delayed/coalesced.
 STICKY_STATE_SAVE_DELAY = 10  # seconds
@@ -718,8 +721,14 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
     async def async_shutdown(self) -> None:
         """Write the saved state now, so an unload keeps it and no delayed save fires later."""
         await super().async_shutdown()
-        await self._sticky_store.async_save(self._sticky_state_for_storage())
-        await self._total_energy_store.async_save(self._total_energy_state_for_storage())
+        for store, data in (
+            (self._sticky_store, self._sticky_state_for_storage()),
+            (self._total_energy_store, self._total_energy_state_for_storage()),
+        ):
+            try:
+                await store.async_save(data)
+            except Exception:  # noqa: BLE001 - a failed write must not block the unload
+                _LOGGER.warning("Couldn't save %s on unload", store.key, exc_info=True)
 
     def _sticky_state_for_storage(self) -> dict[str, Any]:
         return {
@@ -805,7 +814,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             result = await coro
             self._clear_warning(key)
             return result or {}
-        except (PodHomeApiError, PodHomeConnectionError) as exc:
+        except _FETCH_ERRORS as exc:
             self._warn_once(key, f"{message}: {exc}")
             return {}
 
@@ -828,7 +837,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
             result = await self.api.async_smart_schedule_active(ppid)
             self._clear_warning(key)
             return result or {}
-        except (PodHomeApiError, PodHomeConnectionError) as exc:
+        except _FETCH_ERRORS as exc:
             if (
                 isinstance(exc, PodHomeApiError)
                 and isinstance(exc.body, dict)
@@ -848,7 +857,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         successful response, even one where a field is legitimately absent."""
         try:
             users = await self.api.async_get_users()
-        except (PodHomeApiError, PodHomeConnectionError) as exc:
+        except _FETCH_ERRORS as exc:
             self._warn_once(
                 "account_preferences", f"Couldn't fetch account preferences (will retry): {exc}"
             )
@@ -867,7 +876,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         on failure, so a genuine fetch error gets retried next poll."""
         try:
             raw = await self.api.async_reward_wallet()
-        except (PodHomeApiError, PodHomeConnectionError) as exc:
+        except _FETCH_ERRORS as exc:
             self._warn_once("rewards", f"Couldn't fetch rewards balance (non-fatal): {exc}")
             return
         self._clear_warning("rewards")
@@ -890,7 +899,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         unless both calls succeed, so a partial failure gets retried next poll."""
         try:
             session_resp = await self.api.async_create_api3_session(self._email, self._password)
-        except (PodHomeApiError, PodHomeConnectionError) as exc:
+        except _FETCH_ERRORS as exc:
             self._warn_once("api3_session", f"Couldn't create api3 session (non-fatal): {exc}")
             return
         user_id = ((session_resp or {}).get("sessions") or {}).get("user_id")
@@ -902,7 +911,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
 
         try:
             pods_resp = await self.api.async_api3_pods(user_id)
-        except (PodHomeApiError, PodHomeConnectionError) as exc:
+        except _FETCH_ERRORS as exc:
             self._warn_once("api3_pods", f"Couldn't fetch api3 pods (non-fatal): {exc}")
             return
         self._clear_warning("api3_pods")
@@ -925,7 +934,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
         called once it's confirmed set). Returns whether the fetch succeeded."""
         try:
             charges_resp = await self.api.async_api3_charges(api3_user_id)
-        except (PodHomeApiError, PodHomeConnectionError) as exc:
+        except _FETCH_ERRORS as exc:
             self._warn_once("api3_charges", f"Couldn't fetch api3 charges (non-fatal): {exc}")
             return False
         self._clear_warning("api3_charges")
@@ -1273,7 +1282,7 @@ class PodHomeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, PodHomeCharge
     async def _async_fetch_data(self) -> dict[str, PodHomeCharger]:
         try:
             chargers_raw = await self._async_with_connection_retry(self.api.async_list_chargers)
-        except (PodHomeApiError, PodHomeConnectionError) as exc:
+        except _FETCH_ERRORS as exc:
             raise UpdateFailed(
                 str(exc),
                 translation_domain=DOMAIN,

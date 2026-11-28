@@ -37,6 +37,7 @@ def total_energy_store_key(entry_id: str) -> str:
     """Storage key for the Total energy Store."""
     return f"{DOMAIN}_{entry_id}_total_energy"
 
+
 # connectivity-status-v2 wire values. No _OPTIONS list; nothing currently validates
 # connectionState against a closed set.
 CONNECTION_STATE_ONLINE = "Online"  # confirmed live

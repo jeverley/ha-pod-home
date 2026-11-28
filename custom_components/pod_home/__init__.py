@@ -31,6 +31,7 @@ from .const import (
 )
 from .coordinator import PodHomeDataUpdateCoordinator
 from .services import async_setup_services
+from .storage import async_clear_auth_tokens, async_remove_store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -183,6 +184,6 @@ async def async_remove_config_entry_device(
 
 async def async_remove_entry(hass: HomeAssistant, entry: PodHomeConfigEntry) -> None:
     """Delete the entry's saved sign-in tokens, charger Status timestamps and Total energy."""
-    await Store(hass, AUTH_STORAGE_VERSION, auth_store_key(entry.entry_id)).async_remove()
+    await async_clear_auth_tokens(hass, entry.entry_id)
     for key in (status_store_key(entry.entry_id), total_energy_store_key(entry.entry_id)):
-        await Store(hass, STICKY_STATE_STORAGE_VERSION, key).async_remove()
+        await async_remove_store(hass, STICKY_STATE_STORAGE_VERSION, key)

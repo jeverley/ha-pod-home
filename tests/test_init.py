@@ -4,7 +4,7 @@ end-to-end against a mocked API client rather than a live account.
 """
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
@@ -230,3 +230,18 @@ async def test_unloading_the_entry_saves_pending_state(hass: HomeAssistant) -> N
     saved = await store.async_load()
     assert saved is not None
     assert saved["total_energy_kwh"] == {PPID: 5.0}
+
+
+async def test_failed_deletion_of_one_store_does_not_stop_the_rest(hass: HomeAssistant) -> None:
+    from homeassistant.helpers.storage import Store
+
+    from custom_components.pod_home import async_remove_entry
+
+    entry = MockConfigEntry(domain=DOMAIN, data=USER_INPUT)
+    # The auth store is deleted first, then Status and Total energy.
+    failing_first = AsyncMock(side_effect=[OSError("denied"), None, None])
+
+    with patch.object(Store, "async_remove", failing_first):
+        await async_remove_entry(hass, entry)
+
+    assert failing_first.await_count == 3

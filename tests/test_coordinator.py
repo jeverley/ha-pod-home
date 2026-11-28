@@ -2010,3 +2010,15 @@ async def test_api3_pods_failure_is_not_fatal(
 
     assert coordinator._api3_user_id == 7
     assert coordinator._api3_account_fetched_at is None
+
+
+async def test_shutdown_survives_a_failed_save(
+    coordinator: PodHomeDataUpdateCoordinator, caplog: pytest.LogCaptureFixture
+) -> None:
+    coordinator._sticky_store.async_save = AsyncMock(side_effect=OSError("disk full"))
+    coordinator._total_energy_store.async_save = AsyncMock()
+
+    await coordinator.async_shutdown()
+
+    coordinator._total_energy_store.async_save.assert_awaited_once()
+    assert "Couldn't save" in caplog.text
