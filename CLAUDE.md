@@ -132,6 +132,11 @@ matching every existing platform module:
   `PodHomeAccountEntity`), using their `translation_key`/`unique_id` pattern
 - A matching entry in both `strings.json` and `translations/en.json` (see "Entity states and
   translations" above for keeping them in sync)
+- No `_attr_name`: the entity's name comes from its `translation_key` (`tests/test_entity_names.py`
+  enforces this)
+- User-facing errors are `HomeAssistantError`/`ServiceValidationError` with `translation_domain` and
+  `translation_key`, plus a matching `exceptions` entry (`tests/test_exception_translations.py`
+  checks the keys and placeholders)
 - The new `Platform.*` registered in `__init__.py`'s `PLATFORMS` list
 
 ## Credentials

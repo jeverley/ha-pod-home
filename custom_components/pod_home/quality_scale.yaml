@@ -7,12 +7,8 @@ rules:
     status: todo
     comment: Core keeps brand images in home-assistant/brands; the existing icons already meet its size rules.
   common-modules: done
-  config-flow:
-    status: todo
-    comment: The setup and reauth fields have no data_description.
-  config-flow-test-coverage:
-    status: todo
-    comment: config_flow.py is at 96%; the failed token-clear branch in reauth is untested.
+  config-flow: done
+  config-flow-test-coverage: done
   dependency-transparency:
     status: todo
     comment: podpoint-mobile-api is vendored; it needs a PyPI source distribution published from CI with matching tags.
@@ -22,9 +18,7 @@ rules:
     comment: The integration provides no conditions.
   docs-high-level-description: done
   docs-installation-instructions: done
-  docs-removal-instructions:
-    status: todo
-    comment: The README has no removal instructions.
+  docs-removal-instructions: done
   docs-triggers:
     status: exempt
     comment: The integration provides no triggers.
@@ -50,9 +44,7 @@ rules:
   log-when-unavailable: done
   parallel-updates: done
   reauthentication-flow: done
-  test-coverage:
-    status: todo
-    comment: Coverage is 94% overall and several modules are below 95%.
+  test-coverage: done
 
   # Gold
   devices: done
@@ -63,43 +55,27 @@ rules:
   discovery-update-info:
     status: exempt
     comment: The integration uses no discovery.
-  docs-data-update:
-    status: todo
-    comment: The README doesn't describe how or how often data is fetched.
-  docs-examples:
-    status: todo
-    comment: The README has no automation examples.
+  docs-data-update: done
+  docs-examples: done
   docs-known-limitations: done
-  docs-supported-devices:
-    status: todo
-    comment: The README doesn't list supported charger models.
+  docs-supported-devices: done
   docs-supported-functions: done
-  docs-troubleshooting:
-    status: todo
-    comment: The README has no troubleshooting section.
-  docs-use-cases:
-    status: todo
-    comment: The README has no use cases.
+  docs-troubleshooting: done
+  docs-use-cases: done
   dynamic-devices: done
   entity-category: done
   entity-device-class: done
   entity-disabled-by-default: done
-  entity-translations:
-    status: todo
-    comment: Every entity sets _attr_name alongside translation_key, so names aren't translated.
-  exception-translations:
-    status: todo
-    comment: Most HomeAssistantError and ServiceValidationError messages are plain strings.
+  entity-translations: done
+  exception-translations: done
   icon-translations: done
-  reconfiguration-flow:
-    status: todo
-    comment: There is no reconfigure step; credentials change only through reauth.
+  reconfiguration-flow: done
   repair-issues:
     status: exempt
     comment: Expired credentials are handled by reauth; there are no other user-fixable states.
   stale-devices:
-    status: todo
-    comment: Devices for chargers removed from the account aren't removed.
+    status: done
+    comment: Charger devices that leave the account are removed on the next poll; other devices can be deleted by hand once they are gone.
 
   # Platinum
   async-dependency: done
