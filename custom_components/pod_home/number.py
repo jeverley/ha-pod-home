@@ -7,6 +7,7 @@ from homeassistant.components.number import NumberDeviceClass, NumberEntity
 from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from podpoint_mobile_api import PodPointMobileError
 
 from .const import DOMAIN
 from .entity import (
@@ -16,7 +17,6 @@ from .entity import (
     async_setup_dynamic_vehicles,
 )
 from .errors import translated_error
-from podpoint_mobile_api import PodPointMobileError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry

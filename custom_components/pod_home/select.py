@@ -7,6 +7,7 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
+from podpoint_mobile_api import PodPointMobileError
 
 from .const import (
     CHARGE_PRIORITY_ALWAYS_ON,
@@ -31,7 +32,6 @@ from .helpers import (
     max_price_for_charging_priority,
     schedule_mode,
 )
-from podpoint_mobile_api import PodPointMobileError
 
 if TYPE_CHECKING:
     from . import PodHomeConfigEntry

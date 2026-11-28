@@ -14,8 +14,8 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
-
 from podpoint_mobile_api import PodPointMobileApiClient, PodPointMobileAuth
+
 from .const import (
     AUTH_STORAGE_VERSION,
     CONF_EMAIL,

@@ -15,13 +15,13 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
-
 from podpoint_mobile_api import (
     PodPointMobileApiClient,
     PodPointMobileApiError,
     PodPointMobileAuthError,
     PodPointMobileConnectionError,
 )
+
 from .const import (
     CHARGING_STATE_CABLE_CONNECTED,
     CHARGING_STATE_CHARGING,
@@ -84,8 +84,8 @@ API3_UNLISTED_SESSION_HOLD = datetime.timedelta(hours=24)
 API3_ACCOUNT_REFRESH_INTERVAL = datetime.timedelta(hours=6)
 
 # A PodPointMobileConnectionError on GET /chargers, the one call whose failure is fatal to the whole
-# poll, gets a few quick retries before giving up. HTTP error responses and auth errors aren't
-# retried.
+# poll, gets a few quick retries before giving up. That covers 429, 502, 503 and 504 as well as
+# failed connections; other HTTP errors and auth errors aren't retried.
 CONNECTION_RETRY_ATTEMPTS = 3
 CONNECTION_RETRY_DELAY_SECONDS = 2
 
