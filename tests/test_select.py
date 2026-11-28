@@ -212,3 +212,26 @@ async def test_basic_mode_select_unrecognized_option_raises(hass: HomeAssistant)
     with pytest.raises(HomeAssistantError):
         await entity.async_select_option(CHARGE_PRIORITY_LOWEST_COST)
     coordinator.api.async_set_charge_priority_max_price.assert_not_called()
+
+
+async def test_charge_mode_without_a_charger(hass: HomeAssistant) -> None:
+    entity = select.PodHomeChargeModeSelect(make_coordinator(hass, {}), PPID)
+    assert entity.available is False
+    assert entity.current_option is None
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await entity.async_select_option(CHARGE_PRIORITY_ALWAYS_ON)
+    assert exc_info.value.translation_key == "no_charger_for_charge_mode"
+
+
+async def test_charge_mode_reports_a_connection_failure(hass: HomeAssistant) -> None:
+    from custom_components.pod_home.podpoint_mobile_api import PodHomeConnectionError
+
+    coordinator = make_coordinator(
+        hass, {PPID: make_charger(delegated_control_status="INACTIVE", always_on_active=False)}
+    )
+    coordinator.api.async_set_always_on.side_effect = PodHomeConnectionError("timed out")
+    entity = select.PodHomeChargeModeSelect(coordinator, PPID)
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await entity.async_select_option(CHARGE_PRIORITY_ALWAYS_ON)
+    assert exc_info.value.translation_key == "pod_point_unreachable"

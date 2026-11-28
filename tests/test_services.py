@@ -68,11 +68,12 @@ async def test_start_boost_auth_error_triggers_refresh_and_clean_failure(
     coordinator, device_id = await _setup(hass, charging_state="Charging")
     coordinator.api.async_create_charge_override.side_effect = PodHomeAuthError("expired")
 
-    with pytest.raises(HomeAssistantError, match="rejected"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await hass.services.async_call(
             DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
         )
 
+    assert exc_info.value.translation_key == "pod_point_rejected"
     coordinator.async_request_refresh.assert_awaited_once()
 
 
@@ -82,29 +83,31 @@ async def test_start_boost_connection_error_reports_connection_failure(
     coordinator, device_id = await _setup(hass, charging_state="Charging")
     coordinator.api.async_create_charge_override.side_effect = PodHomeConnectionError("timed out")
 
-    with pytest.raises(HomeAssistantError, match="Couldn't reach Pod Point"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await hass.services.async_call(
             DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
         )
+    assert exc_info.value.translation_key == "pod_point_unreachable"
 
 
 @pytest.mark.parametrize(
-    ("error", "message"),
+    ("error", "translation_key"),
     [
-        (PodHomeConnectionError("timed out"), "Couldn't reach Pod Point"),
-        (PodHomeApiError(500, "server error"), "Pod Point request failed"),
+        (PodHomeConnectionError("timed out"), "pod_point_unreachable"),
+        (PodHomeApiError(500, "server error"), "pod_point_request_failed"),
     ],
 )
 async def test_start_boost_api_error_raises_home_assistant_error(
-    hass: HomeAssistant, error: Exception, message: str
+    hass: HomeAssistant, error: Exception, translation_key: str
 ) -> None:
     coordinator, device_id = await _setup(hass, charging_state="Charging")
     coordinator.api.async_create_charge_override.side_effect = error
 
-    with pytest.raises(HomeAssistantError, match=message):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await hass.services.async_call(
             DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
         )
+    assert exc_info.value.translation_key == translation_key
 
 
 async def test_start_boost_with_duration(hass: HomeAssistant) -> None:
@@ -175,7 +178,7 @@ async def test_start_boost_with_start(
 async def test_start_boost_rejects_a_window_already_over(hass: HomeAssistant) -> None:
     coordinator, device_id = await _setup(hass, charging_state="Available")
 
-    with pytest.raises(ServiceValidationError, match="already have ended"):
+    with pytest.raises(ServiceValidationError) as exc_info:
         await hass.services.async_call(
             DOMAIN,
             SERVICE_START_BOOST,
@@ -183,6 +186,7 @@ async def test_start_boost_rejects_a_window_already_over(hass: HomeAssistant) ->
              "duration": {"minutes": 30}},
             blocking=True,
         )
+    assert exc_info.value.translation_key == "boost_already_ended"
     coordinator.api.async_create_charge_override.assert_not_awaited()
 
 
@@ -192,21 +196,23 @@ async def test_start_boost_rejects_a_duration_of_zero_or_less(
 ) -> None:
     coordinator, device_id = await _setup(hass, charging_state="Charging")
 
-    with pytest.raises(ServiceValidationError, match="more than zero"):
+    with pytest.raises(ServiceValidationError) as exc_info:
         await hass.services.async_call(
             DOMAIN, SERVICE_START_BOOST, {"device_id": device_id, "duration": duration},
             blocking=True,
         )
+    assert exc_info.value.translation_key == "boost_duration_not_positive"
     coordinator.api.async_create_charge_override.assert_not_awaited()
 
 
 async def test_start_boost_rejects_unknown_always_on_state(hass: HomeAssistant) -> None:
     coordinator, device_id = await _setup(hass, charging_state="Charging", always_on_active=None)
 
-    with pytest.raises(ServiceValidationError, match="can't tell yet"):
+    with pytest.raises(ServiceValidationError) as exc_info:
         await hass.services.async_call(
             DOMAIN, SERVICE_START_BOOST, {"device_id": device_id}, blocking=True
         )
+    assert exc_info.value.translation_key == "always_on_unknown"
     coordinator.api.async_create_charge_override.assert_not_awaited()
 
 
@@ -244,3 +250,45 @@ async def test_cancel_boost_rejects_when_nothing_active(hass: HomeAssistant) -> 
             DOMAIN, SERVICE_CANCEL_BOOST, {"device_id": device_id}, blocking=True
         )
     coordinator.api.async_delete_charge_override.assert_not_awaited()
+
+
+async def test_unknown_device_is_rejected(hass: HomeAssistant) -> None:
+    await _setup(hass)
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await hass.services.async_call(
+            DOMAIN, SERVICE_START_BOOST, {"device_id": "no-such-device"}, blocking=True
+        )
+    assert exc_info.value.translation_key == "unknown_device"
+
+
+async def test_device_of_another_integration_is_rejected(hass: HomeAssistant) -> None:
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    await _setup(hass)
+    other = MockConfigEntry(domain="other_domain")
+    other.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=other.entry_id, identifiers={("other_domain", "x")}
+    )
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await hass.services.async_call(
+            DOMAIN, SERVICE_START_BOOST, {"device_id": device.id}, blocking=True
+        )
+    assert exc_info.value.translation_key == "not_a_charger_device"
+
+
+async def test_cancel_boost_reports_a_connection_failure(hass: HomeAssistant) -> None:
+    from custom_components.pod_home.podpoint_mobile_api import PodHomeConnectionError
+
+    coordinator, device_id = await _setup(
+        hass, charging_state="Charging", boost_end_at=datetime.datetime(2099, 1, 1, tzinfo=datetime.timezone.utc)
+    )
+    coordinator.api.async_delete_charge_override.side_effect = PodHomeConnectionError("timed out")
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await hass.services.async_call(
+            DOMAIN, SERVICE_CANCEL_BOOST, {"device_id": device_id}, blocking=True
+        )
+    assert exc_info.value.translation_key == "pod_point_unreachable"

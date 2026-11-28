@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .entity import PodHomeEntity, async_handle_write_error, async_setup_dynamic_chargers
+from .errors import translated_error
 from .helpers import parse_time_of_day
 from .podpoint_mobile_api import PodHomeError
 
@@ -44,15 +44,15 @@ def _read_boost_duration(hass: HomeAssistant, ppid: str) -> datetime.time:
     registry = er.async_get(hass)
     entity_id = registry.async_get_entity_id("time", DOMAIN, f"{DOMAIN}_{ppid}_boost_duration")
     if entity_id is None:
-        raise HomeAssistantError("Boost duration entity isn't registered yet")
+        raise translated_error("boost_duration_not_registered")
     state = hass.states.get(entity_id)
     if state is None or state.state in ("unknown", "unavailable"):
-        raise HomeAssistantError("Enter a Boost duration before pressing this")
+        raise translated_error("boost_duration_missing")
     duration = parse_time_of_day(state.state)
     if duration is None:
-        raise HomeAssistantError(f"Couldn't parse Boost duration value {state.state!r}")
+        raise translated_error("boost_duration_unparseable", value=state.state)
     if duration == datetime.time(0, 0):
-        raise HomeAssistantError("Enter a Boost duration greater than zero before pressing this")
+        raise translated_error("boost_duration_zero")
     return duration
 
 
@@ -64,7 +64,6 @@ class PodHomeBoostFullChargeButton(PodHomeEntity, ButtonEntity):
     endAt: null is rejected by the server (403)."""
 
     _attr_translation_key = "boost_full_charge"
-    _attr_name = "Full charge"
     _attr_icon = "mdi:battery-charging-100"
 
     @property
@@ -77,7 +76,7 @@ class PodHomeBoostFullChargeButton(PodHomeEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         if not self.charger:
-            raise HomeAssistantError("No charger to boost")
+            raise translated_error("no_charger_to_boost")
         requested_at = dt_util.utcnow()
         try:
             await self.coordinator.api.async_create_charge_override(
@@ -94,7 +93,6 @@ class PodHomeBoostDurationButton(PodHomeEntity, ButtonEntity):
     preference - resets to unset only after a successful press."""
 
     _attr_translation_key = "boost_duration_button"
-    _attr_name = "Boost for duration"
     _attr_icon = "mdi:timer-play-outline"
 
     @property
@@ -107,7 +105,7 @@ class PodHomeBoostDurationButton(PodHomeEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         if not self.charger:
-            raise HomeAssistantError("No charger to boost")
+            raise translated_error("no_charger_to_boost")
         duration = _read_boost_duration(self.hass, self.ppid)
         requested_at = dt_util.utcnow()
         end_at = requested_at + datetime.timedelta(
@@ -131,7 +129,6 @@ class PodHomeCancelBoostButton(PodHomeEntity, ButtonEntity):
     confirmed via the account's public OpenAPI schema."""
 
     _attr_translation_key = "boost_cancel"
-    _attr_name = "Cancel boost"
     _attr_icon = "mdi:timer-off-outline"
 
     @property
@@ -146,7 +143,7 @@ class PodHomeCancelBoostButton(PodHomeEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         if not self.charger:
-            raise HomeAssistantError("No charger to cancel a boost on")
+            raise translated_error("no_charger_to_cancel_boost")
         try:
             await self.coordinator.api.async_delete_charge_override(self.ppid)
         except PodHomeError as exc:

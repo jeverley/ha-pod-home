@@ -278,3 +278,86 @@ async def test_device_info_leaves_sw_version_to_coordinator(hass: HomeAssistant)
     coordinator = make_coordinator(hass, {PPID: make_charger(firmware=make_firmware())})
     entity = sensor.PodHomeStatusSensor(coordinator, PPID)
     assert "sw_version" not in entity.device_info
+
+
+# --- entities with nothing to report ---
+
+
+def _sensor_classes(base: type) -> list[type]:
+    import inspect
+
+    return [
+        cls
+        for _, cls in inspect.getmembers(sensor, inspect.isclass)
+        if cls.__module__ == sensor.__name__ and issubclass(cls, base)
+    ]
+
+
+def _charger_sensor_classes() -> list[type]:
+    from custom_components.pod_home.entity import PodHomeEntity, PodHomeVehicleEntity
+
+    return [
+        cls for cls in _sensor_classes(PodHomeEntity) if not issubclass(cls, PodHomeVehicleEntity)
+    ]
+
+
+def _vehicle_sensor_classes() -> list[type]:
+    from custom_components.pod_home.entity import PodHomeVehicleEntity
+
+    return _sensor_classes(PodHomeVehicleEntity)
+
+
+@pytest.mark.parametrize("cls", _charger_sensor_classes(), ids=lambda cls: cls.__name__)
+async def test_charger_sensor_without_a_charger_has_no_value(hass: HomeAssistant, cls: type) -> None:
+    from custom_components.pod_home.const import DOMAIN
+
+    entity = cls(make_coordinator(hass, {}), PPID)
+    assert entity.native_value is None
+    assert entity.unique_id.startswith(f"{DOMAIN}_{PPID}_")
+
+
+@pytest.mark.parametrize("cls", _vehicle_sensor_classes(), ids=lambda cls: cls.__name__)
+async def test_vehicle_sensor_without_a_vehicle_has_no_value(hass: HomeAssistant, cls: type) -> None:
+    from custom_components.pod_home.const import DOMAIN
+
+    entity = cls(make_coordinator(hass, {}), "v1")
+    assert entity.native_value is None
+    assert entity.extra_state_attributes is None
+    assert entity.unique_id.startswith(f"{DOMAIN}_v1_")
+
+
+async def test_rewards_sensor_without_rewards_has_no_value(hass: HomeAssistant) -> None:
+    coordinator = make_coordinator(hass, {})
+    entity = sensor.PodHomeRewardsBalanceSensor(coordinator)
+    assert coordinator.rewards is None
+    assert entity.available is False
+    assert entity.native_value is None
+    assert entity.extra_state_attributes is None
+
+
+async def test_electricity_rate_wrapped_window_belongs_to_the_day_it_started(
+    hass: HomeAssistant,
+) -> None:
+    night = make_tariff_window(days=["MONDAY"], start="23:00:00", end="07:00:00", price=0.1)
+    coordinator = make_coordinator(hass, {PPID: make_charger(tariff_windows=[night], timezone=UTC)})
+    entity = sensor.PodHomeElectricityRateSensor(coordinator, PPID)
+
+    with freeze_time("2026-01-06 02:00:00"):  # Tuesday: the after-midnight part of Monday's window
+        assert entity.native_value == 0.1
+    with freeze_time("2026-01-05 02:00:00"):  # Monday morning: before that window starts
+        assert entity.native_value is None
+
+
+async def test_electricity_rate_flat_window_covers_the_whole_day(hass: HomeAssistant) -> None:
+    flat = make_tariff_window(days=["MONDAY"], start="00:00:00", end="00:00:00", price=0.3)
+    coordinator = make_coordinator(hass, {PPID: make_charger(tariff_windows=[flat], timezone=UTC)})
+    entity = sensor.PodHomeElectricityRateSensor(coordinator, PPID)
+
+    with freeze_time("2026-01-05 15:30:00"):
+        assert entity.native_value == 0.3
+
+
+async def test_electricity_rate_window_without_times_never_matches() -> None:
+    import datetime as dt
+
+    assert sensor.PodHomeElectricityRateSensor._time_in_window(dt.time(1), None, "07:00:00") is False

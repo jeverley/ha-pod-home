@@ -5,6 +5,78 @@
     },
     "auth_failed": {
       "message": "Authentication failed: {error}"
+    },
+    "boost_duration_not_registered": {
+      "message": "The Boost duration entity isn't ready yet. Try again shortly."
+    },
+    "boost_duration_missing": {
+      "message": "Enter a Boost duration before pressing this."
+    },
+    "boost_duration_unparseable": {
+      "message": "Couldn't read the Boost duration value {value}."
+    },
+    "boost_duration_zero": {
+      "message": "Enter a Boost duration greater than zero before pressing this."
+    },
+    "no_charger_to_boost": {
+      "message": "There is no charger to boost."
+    },
+    "no_charger_to_cancel_boost": {
+      "message": "There is no charger to cancel a boost on."
+    },
+    "pod_point_unreachable": {
+      "message": "Couldn't reach Pod Point: {error}"
+    },
+    "pod_point_rejected": {
+      "message": "Pod Point rejected the request: {error}"
+    },
+    "pod_point_request_failed": {
+      "message": "Pod Point request failed: {error}"
+    },
+    "no_charger_to_lock": {
+      "message": "There is no charger to lock or unlock."
+    },
+    "remote_lock_unsupported": {
+      "message": "This charger doesn't support Remote lock. It's available on the Solo 3S only."
+    },
+    "no_vehicle_for_target_charge": {
+      "message": "There is no linked vehicle to set Target charge for."
+    },
+    "no_charger_for_charge_mode": {
+      "message": "There is no charger to set Charge mode for."
+    },
+    "unknown_basic_option": {
+      "message": "{option} isn't a Basic Charging mode."
+    },
+    "charge_mode_price_unknown": {
+      "message": "Couldn't set Charge mode to {option}: the option is unrecognized, or this charger's tariff isn't known yet."
+    },
+    "unknown_device": {
+      "message": "Unknown device: {device_id}."
+    },
+    "not_a_charger_device": {
+      "message": "{device} isn't a Pod Home charger. Pick the charger, not a linked vehicle or the Pod Point account device."
+    },
+    "always_on_unknown": {
+      "message": "{device}: can't tell yet whether Always on is active. Try again shortly."
+    },
+    "boost_blocked_by_always_on": {
+      "message": "{device}: can't boost while Always on is active."
+    },
+    "boost_duration_not_positive": {
+      "message": "{device}: the duration must be more than zero."
+    },
+    "boost_already_ended": {
+      "message": "{device}: that boost would already have ended."
+    },
+    "no_active_boost": {
+      "message": "{device}: there is no active boost to cancel."
+    },
+    "no_vehicle_for_ready_by": {
+      "message": "There is no linked vehicle to set Ready by for."
+    },
+    "charge_energy_unknown": {
+      "message": "Ready by can't be set until the vehicle's current charge energy is known."
     }
   },
   "services": {
@@ -35,6 +107,10 @@
         "data": {
           "email": "Email",
           "password": "Password"
+        },
+        "data_description": {
+          "email": "The email address you use to sign in to the Pod Home app.",
+          "password": "The password for that account."
         }
       },
       "reauth_confirm": {
@@ -42,6 +118,21 @@
         "description": "Your Pod Home sign-in needs to be renewed. Enter your current password.",
         "data": {
           "password": "Password"
+        },
+        "data_description": {
+          "password": "The current password for your Pod Home account."
+        }
+      },
+      "reconfigure": {
+        "title": "Update Pod Home sign-in",
+        "description": "Change the email or password for this Pod Home account.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        },
+        "data_description": {
+          "email": "The email address you use to sign in to the Pod Home app.",
+          "password": "The password for that account."
         }
       }
     },
@@ -51,7 +142,8 @@
     },
     "abort": {
       "already_configured": "This Pod Home account is already configured.",
-      "reauth_successful": "Re-authentication was successful."
+      "reauth_successful": "Re-authentication was successful.",
+      "reconfigure_successful": "Re-configuration was successful."
     }
   },
   "entity": {

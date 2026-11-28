@@ -183,3 +183,139 @@ async def test_reauth_flow_sign_in_error_shows_error(
     assert result["step_id"] == "reauth_confirm"
     assert result["errors"] == {"base": expected}
     assert entry.data[CONF_PASSWORD] == USER_INPUT[CONF_PASSWORD]  # unchanged
+
+
+async def test_reauth_flow_completes_when_clearing_saved_tokens_fails(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id=USER_INPUT[CONF_EMAIL].lower(), data=USER_INPUT
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
+            AsyncMock(return_value="id-token"),
+        ),
+        patch.object(Store, "async_remove", AsyncMock(side_effect=OSError("disk full"))),
+    ):
+        result = await entry.start_reauth_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_PASSWORD: "new-password"}
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_PASSWORD] == "new-password"
+
+
+async def test_reconfigure_flow_updates_password(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id=USER_INPUT[CONF_EMAIL].lower(), data=USER_INPUT
+    )
+    entry.add_to_hass(hass)
+    auth_store = Store(hass, AUTH_STORAGE_VERSION, auth_store_key(entry.entry_id))
+    await auth_store.async_save(
+        {"id_token": "stale", "refresh_token": "stale-refresh", "expires_at": None}
+    )
+
+    with patch(
+        "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
+        AsyncMock(return_value="id-token"),
+    ):
+        result = await entry.start_reconfigure_flow(hass)
+        assert result["type"] == data_entry_flow.FlowResultType.FORM
+        assert result["step_id"] == "reconfigure"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**USER_INPUT, CONF_PASSWORD: "new-password"}
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data == {**USER_INPUT, CONF_PASSWORD: "new-password"}
+    assert entry.unique_id == USER_INPUT[CONF_EMAIL].lower()
+    assert await auth_store.async_load() is None
+
+
+async def test_reconfigure_flow_changes_email(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=USER_INPUT[CONF_EMAIL].lower(),
+        title=USER_INPUT[CONF_EMAIL],
+        data=USER_INPUT,
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
+        AsyncMock(return_value="id-token"),
+    ):
+        result = await entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_EMAIL: "New.Driver@example.com", CONF_PASSWORD: "pw2"}
+        )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_EMAIL] == "New.Driver@example.com"
+    assert entry.unique_id == "new.driver@example.com"
+    assert entry.title == "New.Driver@example.com"
+
+
+async def test_reconfigure_flow_rejects_email_of_another_entry(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id=USER_INPUT[CONF_EMAIL].lower(), data=USER_INPUT
+    )
+    entry.add_to_hass(hass)
+    other = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="other@example.com",
+        data={CONF_EMAIL: "other@example.com", CONF_PASSWORD: "x"},
+    )
+    other.add_to_hass(hass)
+
+    with patch(
+        "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
+        AsyncMock(return_value="id-token"),
+    ):
+        result = await entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_EMAIL: "Other@example.com", CONF_PASSWORD: "pw"}
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert entry.data == USER_INPUT
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (PodHomeAuthError("bad credentials"), "invalid_auth"),
+        (PodHomeConnectionError("timed out"), "cannot_connect"),
+    ],
+)
+async def test_reconfigure_flow_sign_in_error_shows_error(
+    hass: HomeAssistant, error: Exception, expected: str
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id=USER_INPUT[CONF_EMAIL].lower(), data=USER_INPUT
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.pod_home.config_flow.PodHomeAuth.async_get_id_token",
+        AsyncMock(side_effect=error),
+    ):
+        result = await entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**USER_INPUT, CONF_PASSWORD: "wrong"}
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    assert result["errors"] == {"base": expected}
+    assert entry.data == USER_INPUT

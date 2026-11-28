@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.components.time import TimeEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
@@ -21,6 +20,7 @@ from .entity import (
     async_setup_dynamic_chargers,
     async_setup_dynamic_vehicles,
 )
+from .errors import translated_error
 from .helpers import parse_time_of_day
 from .podpoint_mobile_api import PodHomeError
 
@@ -75,7 +75,6 @@ class PodHomeVehicleReadyByTime(
     native_value's read-your-own-write race."""
 
     _attr_translation_key = "vehicle_ready_by"
-    _attr_name = "Ready by"
     _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:clock-time-four-outline"
 
@@ -100,11 +99,9 @@ class PodHomeVehicleReadyByTime(
         vehicle = self.vehicle
         ppid = self.ppid
         if not vehicle or not ppid:
-            raise HomeAssistantError("No linked vehicle to set Ready By for")
+            raise translated_error("no_vehicle_for_ready_by")
         if vehicle.intent_charge_kwh is None:
-            raise HomeAssistantError(
-                "Current chargeKWh isn't known yet - required for this write (see docstring)"
-            )
+            raise translated_error("charge_energy_unknown")
         intent_details = _build_intent_details(
             value.strftime("%H:%M:%S"), vehicle.intent_charge_kwh
         )
@@ -129,7 +126,6 @@ class PodHomeBoostDurationTime(PodHomeEntity, RestoreEntity, TimeEntity):
     directly."""
 
     _attr_translation_key = "boost_duration"
-    _attr_name = "Boost duration"
     _attr_icon = "mdi:timer-cog-outline"
 
     def __init__(self, coordinator: PodHomeDataUpdateCoordinator, ppid: str) -> None:

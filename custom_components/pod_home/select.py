@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
@@ -24,6 +23,7 @@ from .entity import (
     async_handle_write_error,
     async_setup_dynamic_chargers,
 )
+from .errors import translated_error
 from .helpers import (
     charge_priority_available,
     charge_priority_label_basic,
@@ -66,7 +66,6 @@ class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin[str], PodHomeEntity, S
     write."""
 
     _attr_translation_key = "charge_mode"
-    _attr_name = "Charge mode"
     _attr_icon = "mdi:sort-variant"
 
     @property
@@ -112,7 +111,7 @@ class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin[str], PodHomeEntity, S
     async def async_select_option(self, option: str) -> None:
         charger = self.charger
         if not charger:
-            raise HomeAssistantError("No charger to set Charge Mode for")
+            raise translated_error("no_charger_for_charge_mode")
         try:
             if self._is_basic_charging(charger):
                 await self._async_select_basic_option(charger, option)
@@ -133,15 +132,12 @@ class PodHomeChargeModeSelect(PodHomeOptimisticWriteMixin[str], PodHomeEntity, S
                 self._set_optimistic_value(option)
                 await self.coordinator.async_request_refresh()
         else:
-            raise HomeAssistantError(f"Unrecognized Basic Charging option {option!r}")
+            raise translated_error("unknown_basic_option", option=option)
 
     async def _async_select_smart_option(self, charger: PodHomeCharger, option: str) -> None:
         max_price = max_price_for_charging_priority(option, charger.tariff_windows)
         if max_price is None:
-            raise HomeAssistantError(
-                f"Couldn't determine a maxPrice to write for Charge Mode option {option!r} "
-                "- either it's unrecognized, or this charger's tariff data isn't known yet"
-            )
+            raise translated_error("charge_mode_price_unknown", option=option)
         await self.coordinator.api.async_set_charge_priority_max_price(self.ppid, max_price)
         self._set_optimistic_value(option)
         await self.coordinator.async_request_refresh()

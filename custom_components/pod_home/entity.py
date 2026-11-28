@@ -5,13 +5,13 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Generic, NoReturn, TypeVar
 
 from homeassistant.const import UnitOfLength
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import ATTRIBUTION, DOMAIN, MANUFACTURER
 from .coordinator import PodHomeCharge, PodHomeCharger, PodHomeDataUpdateCoordinator, PodHomeVehicle
+from .errors import translated_error
 from .helpers import (
     boostable,
     humanize_model_style,
@@ -205,11 +205,11 @@ async def async_handle_write_error(
     """Fail a write with HomeAssistantError. An auth error also requests a refresh, so a real
     rejection starts reauth."""
     if isinstance(exc, PodHomeConnectionError):
-        raise HomeAssistantError(f"Couldn't reach Pod Point: {exc}") from exc
+        raise translated_error("pod_point_unreachable", error=str(exc)) from exc
     if isinstance(exc, PodHomeAuthError):
         await coordinator.async_request_refresh()
-        raise HomeAssistantError(f"Pod Point rejected the request: {exc}") from exc
-    raise HomeAssistantError(f"Pod Point request failed: {exc}") from exc
+        raise translated_error("pod_point_rejected", error=str(exc)) from exc
+    raise translated_error("pod_point_request_failed", error=str(exc)) from exc
 
 
 def async_setup_dynamic_chargers(
@@ -229,6 +229,8 @@ def async_setup_dynamic_chargers(
     known_ppids: set[str] = set()
 
     def _async_add_new_chargers() -> None:
+        # A charger that leaves the account and returns gets its entities again.
+        known_ppids.intersection_update(coordinator.data)
         eligible_ppids = set(coordinator.data)
         if predicate is not None:
             eligible_ppids = {ppid for ppid in eligible_ppids if predicate(coordinator.data[ppid])}
@@ -258,6 +260,7 @@ def async_setup_dynamic_vehicles(
         current_ids = {
             charger.vehicle.id for charger in coordinator.data.values() if charger.vehicle
         }
+        known_vehicle_ids.intersection_update(current_ids)
         new_ids = current_ids - known_vehicle_ids
         if not new_ids:
             return
