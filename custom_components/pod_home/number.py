@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.components.number import NumberDeviceClass, NumberEntity
 from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -16,6 +15,7 @@ from .entity import (
     async_handle_write_error,
     async_setup_dynamic_vehicles,
 )
+from .errors import translated_error
 from .podpoint_mobile_api import PodHomeError
 
 if TYPE_CHECKING:
@@ -82,9 +82,7 @@ class PodHomeVehicleTargetChargeNumber(
         vehicle = self.vehicle
         ppid = self.ppid
         if not vehicle or not ppid:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN, translation_key="no_vehicle_for_target_charge"
-            )
+            raise translated_error("no_vehicle_for_target_charge")
         # native_step=1 is only a UI hint; a service call can still supply a fractional value.
         # chargeLimitPercent is a whole percentage, so round before sending.
         try:

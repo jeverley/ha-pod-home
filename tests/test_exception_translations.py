@@ -11,12 +11,21 @@ import re
 COMPONENT = pathlib.Path(__file__).parent.parent / "custom_components" / "pod_home"
 
 
+HELPERS = {"translated_error", "translated_validation_error"}
+
+
 def _translated_raises() -> list[tuple[str, str, set[str]]]:
-    """(file, translation key, placeholder names) for every call that sets a translation domain."""
+    """(file, translation key, placeholder names) for every translated error: a call to one of
+    the errors.py helpers, or an exception built with translation_domain and translation_key."""
     found = []
     for path in sorted(COMPONENT.glob("*.py")):
         for node in ast.walk(ast.parse(path.read_text())):
             if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Name) and node.func.id in HELPERS:
+                if node.args and isinstance(node.args[0], ast.Constant):
+                    names = {k.arg for k in node.keywords if k.arg}
+                    found.append((path.name, node.args[0].value, names))
                 continue
             keywords = {k.arg: k.value for k in node.keywords if k.arg}
             key = keywords.get("translation_key")
@@ -56,3 +65,18 @@ def test_placeholders_match_the_message() -> None:
 
 def test_there_are_translated_raises() -> None:
     assert len(_translated_raises()) >= 25
+
+
+def test_helpers_are_the_only_way_user_facing_errors_are_built() -> None:
+    """A HomeAssistantError or ServiceValidationError built with a plain message, or with the
+    long translation form, bypasses errors.py."""
+    for path in sorted(COMPONENT.glob("*.py")):
+        if path.name == "errors.py":
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in {"HomeAssistantError", "ServiceValidationError"}
+            ):
+                raise AssertionError(f"{path.name}:{node.lineno} builds {node.func.id} directly")

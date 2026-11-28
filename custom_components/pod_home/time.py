@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.components.time import TimeEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
@@ -21,6 +20,7 @@ from .entity import (
     async_setup_dynamic_chargers,
     async_setup_dynamic_vehicles,
 )
+from .errors import translated_error
 from .helpers import parse_time_of_day
 from .podpoint_mobile_api import PodHomeError
 
@@ -99,13 +99,9 @@ class PodHomeVehicleReadyByTime(
         vehicle = self.vehicle
         ppid = self.ppid
         if not vehicle or not ppid:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN, translation_key="no_vehicle_for_ready_by"
-            )
+            raise translated_error("no_vehicle_for_ready_by")
         if vehicle.intent_charge_kwh is None:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN, translation_key="charge_energy_unknown"
-            )
+            raise translated_error("charge_energy_unknown")
         intent_details = _build_intent_details(
             value.strftime("%H:%M:%S"), vehicle.intent_charge_kwh
         )
